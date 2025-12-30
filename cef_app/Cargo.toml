@@ -1,0 +1,10 @@
+[package]
+name = "cef_app"
+edition = "2024"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+cef = { workspace = true }
+winit = { workspace = true }

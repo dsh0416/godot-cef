@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["cef_app", "gdcef", "gdcef_helper"]
+
+[workspace.package]
+version = "0.1.0"
+
+[workspace.dependencies]
+godot = { version = "0.4.5", features = ["api-4-4", "experimental-threads"] }
+cef = { version = "=143.4.0+143.0.13", features = ["sandbox"] }
+cef-dll-sys = { version = "=143.4.0+143.0.13", features = ["sandbox"] }
+wgpu = { version = "27", features = ["vulkan", "dx12", "metal"] }
+process_path = "0.1.4"
+winit = "0.31.0-beta.2"
+plist = { version = "1" }
+serde = { version = "1", features = ["derive"] }
+libloading = { version = "0.9.0" }
