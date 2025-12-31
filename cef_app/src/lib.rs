@@ -60,6 +60,9 @@ wrap_app! {
             command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
             command_line.append_switch(Some(&"use-mock-keychain".into()));
             command_line.append_switch(Some(&"enable-logging=stderr".into()));
+            command_line.append_switch(Some(&"transparent-painting-enabled".into()));
+            command_line.append_switch(Some(&"enable-zero-copy".into()));
+            command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
             command_line
                 .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
         }
@@ -106,7 +109,6 @@ wrap_browser_process_handler! {
                 return;
             };
 
-            command_line.append_switch(Some(&"no-sandbox".into()));
             command_line.append_switch(Some(&"disable-web-security".into()));
             command_line.append_switch(Some(&"allow-running-insecure-content".into()));
             command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));

@@ -108,7 +108,7 @@ pub fn get_modifiers_from_pan_gesture_event(event: &Gd<InputEventPanGesture>) ->
         modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0;
     }
 
-    modifiers
+    modifiers as u32
 }
 
 /// Extracts modifier flags from a mouse button event
@@ -139,7 +139,7 @@ pub fn get_modifiers_from_button_event(event: &Gd<InputEventMouseButton>) -> u32
         modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0;
     }
 
-    modifiers
+    modifiers as u32
 }
 
 /// Extracts modifier flags from a mouse motion event
@@ -170,7 +170,7 @@ pub fn get_modifiers_from_motion_event(event: &Gd<InputEventMouseMotion>) -> u32
         modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0;
     }
 
-    modifiers
+    modifiers as u32
 }
 
 /// Extracts modifier flags from a keyboard event
@@ -195,7 +195,7 @@ pub fn get_modifiers_from_key_event(event: &Gd<InputEventKey>) -> u32 {
         modifiers |= cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0;
     }
 
-    modifiers
+    modifiers as u32
 }
 
 /// Handles keyboard events and sends them to CEF browser host

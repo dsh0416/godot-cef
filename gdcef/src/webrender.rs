@@ -222,10 +222,41 @@ wrap_display_handler! {
     }
 
     impl DisplayHandler {
+        #[cfg(target_os = "windows")]
+        fn on_cursor_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            _cursor: *mut cef::sys::HICON__,
+            type_: cef::CursorType,
+            _custom_cursor_info: Option<&CursorInfo>,
+        ) -> i32 {
+            let cursor = cef_cursor_to_cursor_type(type_.into());
+            if let Ok(mut ct) = self.cursor_type.lock() {
+                *ct = cursor;
+            }
+            false as i32
+        }
+
+        #[cfg(target_os = "macos")]
         fn on_cursor_change(
             &self,
             _browser: Option<&mut Browser>,
             _cursor: *mut u8,
+            type_: cef::CursorType,
+            _custom_cursor_info: Option<&CursorInfo>,
+        ) -> i32 {
+            let cursor = cef_cursor_to_cursor_type(type_.into());
+            if let Ok(mut ct) = self.cursor_type.lock() {
+                *ct = cursor;
+            }
+            false as i32
+        }
+
+        #[cfg(target_os = "linux")]
+        fn on_cursor_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            _cursor: u64,
             type_: cef::CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> i32 {

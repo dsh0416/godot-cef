@@ -1,10 +1,14 @@
-use cef::{api_hash, Settings};
+use cef::Settings;
 use godot::classes::Os;
 use godot::prelude::*;
 use std::path::PathBuf;
 use std::sync::Once;
 
-use crate::utils::{get_framework_path, get_subprocess_path};
+#[cfg(target_os = "macos")]
+use cef::api_hash;
+#[cfg(target_os = "macos")]
+use crate::utils::get_framework_path;
+use crate::utils::get_subprocess_path;
 
 /// Global initialization guard - CEF can only be initialized once
 pub static CEF_INITIALIZED: Once = Once::new();
