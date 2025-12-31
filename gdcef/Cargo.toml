@@ -27,3 +27,6 @@ libloading = { workspace = true }
 metal = { workspace = true }
 objc = { workspace = true }
 objc2-io-surface = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true }

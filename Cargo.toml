@@ -19,3 +19,10 @@ wide = "1.0"
 metal = "0.31"
 objc = "0.2"
 objc2-io-surface = "0.3"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+] }

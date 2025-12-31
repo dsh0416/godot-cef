@@ -773,6 +773,7 @@ dependencies = [
  "serde",
  "wgpu",
  "wide",
+ "windows",
  "winit",
 ]
 
