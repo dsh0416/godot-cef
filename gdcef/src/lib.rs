@@ -66,6 +66,9 @@ struct CefTexture {
 
     #[export]
     url: GString,
+
+    #[export]
+    enable_accelerated_osr: bool,
 }
 
 #[godot_api]
@@ -75,6 +78,7 @@ impl ITextureRect for CefTexture {
             base,
             app: App::default(),
             url: "https://google.com".into(),
+            enable_accelerated_osr: true,
         }
     }
 

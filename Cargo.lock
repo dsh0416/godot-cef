@@ -318,9 +318,18 @@ version = "143.4.0+143.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e364e493a3b8764462d7dc749044d897062d85766cd13690547d396be7b3a656"
 dependencies = [
+ "ash",
  "cef-dll-sys",
+ "libc",
  "libloading 0.9.0",
+ "metal",
+ "objc",
  "objc2",
+ "objc2-io-surface",
+ "thiserror 2.0.17",
+ "tracing",
+ "wgpu",
+ "windows",
  "windows-sys 0.61.2",
 ]
 
@@ -1547,6 +1556,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-io-surface"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
+dependencies = [
+ "bitflags",
+ "libc",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "objc2-ui-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2343,7 +2365,19 @@ checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
  "log",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2351,6 +2385,9 @@ name = "tracing-core"
 version = "0.1.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
+dependencies = [
+ "once_cell",
+]
 
 [[package]]
 name = "ttf-parser"

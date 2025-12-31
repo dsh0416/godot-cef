@@ -3,8 +3,6 @@ use std::sync::{Arc, Mutex};
 
 use cef::{self, BrowserProcessHandler, ImplBrowserProcessHandler, WrapBrowserProcessHandler, rc::Rc, *,};
 
-/// Shared frame buffer for passing pixel data from CEF's render callback to Godot.
-/// Uses Arc<Mutex<...>> for thread-safe access.
 #[derive(Default)]
 pub struct FrameBuffer {
     pub data: Vec<u8>,
