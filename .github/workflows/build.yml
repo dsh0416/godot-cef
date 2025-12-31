@@ -54,7 +54,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir -- --force $HOME/.local/share/cef
+        run: export-cef-dir --force $HOME/.local/share/cef
 
       - name: Build and bundle helper app
         run: cargo run --bin bundle_app --release --target ${{ matrix.target }}
