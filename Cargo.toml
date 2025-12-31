@@ -9,17 +9,15 @@ version = "0.1.0"
 godot = { version = "0.4.5", features = ["api-4-4", "experimental-threads"] }
 cef = { version = "=143.4.0+143.0.13", features = ["sandbox", "accelerated_osr"] }
 cef-dll-sys = { version = "=143.4.0+143.0.13", features = ["sandbox"] }
-wgpu = { version = "27", features = ["vulkan", "dx12", "metal"] }
 process_path = "0.1.4"
-winit = "0.31.0-beta.2"
+winit = "0.30.12"
 plist = { version = "1" }
 serde = { version = "1", features = ["derive"] }
 libloading = { version = "0.9.0" }
 wide = "1.0"
 metal = "0.31"
 objc = "0.2"
-objc2-io-surface = "0.3"
-windows = { version = "0.58", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D12",

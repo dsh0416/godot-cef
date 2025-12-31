@@ -14,7 +14,6 @@ path = "src/mac/bundle_framework.rs"
 godot = { workspace = true }
 cef = { workspace = true }
 cef-dll-sys = { workspace = true }
-wgpu = { workspace = true }
 process_path = { workspace = true }
 winit = { workspace = true }
 cef_app = { path = "../cef_app" }
@@ -26,7 +25,6 @@ serde = { workspace = true }
 libloading = { workspace = true }
 metal = { workspace = true }
 objc = { workspace = true }
-objc2-io-surface = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true }
