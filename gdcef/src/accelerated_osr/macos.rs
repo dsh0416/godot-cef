@@ -197,23 +197,10 @@ impl TextureImporterTrait for GodotTextureImporter {
         if !render_backend.supports_accelerated_osr() {
             godot_warn!(
                 "[AcceleratedOSR/macOS] Render backend {:?} does not support accelerated OSR. \
-                 Metal or Vulkan backend is required on macOS.",
+                 Metal backend is required on macOS.",
                 render_backend
             );
             return None;
-        }
-
-        match render_backend {
-            RenderBackend::Metal => {
-                godot_print!("[AcceleratedOSR/macOS] Using Metal backend for texture import");
-            }
-            RenderBackend::Vulkan => {
-                // Vulkan via MoltenVK - import IOSurface through Metal interop
-                godot_print!(
-                    "[AcceleratedOSR/macOS] Using Vulkan (MoltenVK) with Metal texture interop"
-                );
-            }
-            _ => {}
         }
 
         let mut rs = RenderingServer::singleton();
@@ -250,20 +237,24 @@ impl TextureImporterTrait for GodotTextureImporter {
         if let Some(old) = self.current_metal_texture.take() {
             release_metal_texture(old);
         }
-        self.current_metal_texture = Some(metal_texture);
-        let native_handle = metal_texture as u64;
 
-        let texture_rid = RenderingServer::singleton().texture_create_from_native_handle(
-            TextureType::TYPE_2D,
-            ImageFormat::RGBA8,
-            native_handle,
-            texture_info.width as i32,
-            texture_info.height as i32,
-            1,
-        );
+        self.current_metal_texture = Some(metal_texture);
+
+        let (native_handle, texture_rid) = {
+            let handle = metal_texture as u64;
+            let rid = RenderingServer::singleton().texture_create_from_native_handle(
+                TextureType::TYPE_2D,
+                ImageFormat::RGBA8,
+                handle,
+                texture_info.width as i32,
+                texture_info.height as i32,
+                1,
+            );
+            (handle, rid)
+        };
 
         if !texture_rid.is_valid() {
-            godot_error!("[AcceleratedOSR/macOS] Created texture RID is invalid");
+            godot_error!("[AcceleratedOSR/macOS] Created texture RID is invalid (handle: {})", native_handle);
             return None;
         }
 

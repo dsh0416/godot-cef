@@ -17,6 +17,7 @@ libloading = { version = "0.9.0" }
 wide = "1.0"
 metal = "0.31"
 objc = "0.2"
+ash = { version = "0.38", default-features = false, features = ["std", "debug", "loaded"] }
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",

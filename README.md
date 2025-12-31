@@ -16,11 +16,11 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 | Platform | DirectX 12 | Metal | Vulkan | Software Rendering |
 |----------|---------------|-----------------|-------------------|--------|
 | **Windows** | ✅ | n.a. | 🚧 WIP | ✅ |
-| **macOS** | n.a. | ✅ | ✅ (Note 1) | ✅ |
+| **macOS** | n.a. | ✅ | ❌ (Note 1) | ✅ |
 | **Linux** | n.a. | n.a. | 🚧 WIP | ✅ |
 
 ### Note
-1. for macOS Vulkan backend, CEF would keep using `--use-angle=metal` to launch the process, since `--use-angle=vulkan` on macOS would cause GPU acceleration disabled in CEF, which causes performance and compatibility issues. MoltenVK should somehow make it work.
+1. Vulkan on macOS (via MoltenVK) requires `VK_EXT_metal_objects` to import CEF's Metal textures into Vulkan. This needs access to MoltenVK's internal Metal device, which isn't easily accessible. Falls back to software rendering.
 2. On platforms where accelerated rendering is not yet implemented, the extension automatically falls back to software rendering using CPU-based frame buffers.
 
 ## 🛠️ Prerequisites
