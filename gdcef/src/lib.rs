@@ -22,7 +22,10 @@ use godot::prelude::*;
 use std::sync::{Arc, Mutex};
 use winit::dpi::PhysicalSize;
 
-use crate::accelerated_osr::{AcceleratedRenderHandler, SharedTextureInfo};
+use crate::accelerated_osr::{
+    GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler,
+    PlatformSharedTextureInfo, TextureImporterTrait,
+};
 use crate::cef_init::CEF_INITIALIZED;
 
 struct GodotCef;
@@ -35,10 +38,10 @@ enum RenderMode {
         frame_buffer: Arc<Mutex<FrameBuffer>>,
         texture: Gd<ImageTexture>,
     },
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     Accelerated {
-        texture_info: Arc<Mutex<SharedTextureInfo>>,
-        importer: accelerated_osr::GodotTextureImporter,
+        texture_info: Arc<Mutex<PlatformSharedTextureInfo>>,
+        importer: GodotTextureImporter,
         current_rid: Option<Rid>,
     },
 }
@@ -145,7 +148,7 @@ impl CefTexture {
     }
 
     fn shutdown(&mut self) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         if let Some(RenderMode::Accelerated { current_rid, .. }) = &self.app.render_mode {
             if let Some(rid) = current_rid {
                 let mut rs = RenderingServer::singleton();
@@ -219,14 +222,7 @@ impl CefTexture {
     }
 
     fn should_use_accelerated_osr(&self) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            self.enable_accelerated_osr && accelerated_osr::is_accelerated_osr_supported()
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            false
-        }
+        self.enable_accelerated_osr && accelerated_osr::is_accelerated_osr_supported()
     }
 
     fn create_software_browser(
@@ -284,7 +280,7 @@ impl CefTexture {
         )
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     fn create_accelerated_browser(
         &mut self,
         window_info: &WindowInfo,
@@ -294,7 +290,7 @@ impl CefTexture {
         pixel_width: i32,
         pixel_height: i32,
     ) -> Option<cef::Browser> {
-        let importer = match accelerated_osr::GodotTextureImporter::new() {
+        let importer = match GodotTextureImporter::new() {
             Some(imp) => imp,
             None => {
                 godot::global::godot_warn!(
@@ -311,7 +307,7 @@ impl CefTexture {
             }
         };
 
-        let render_handler = AcceleratedRenderHandler::new(
+        let render_handler = PlatformAcceleratedRenderHandler::new(
             dpi,
             PhysicalSize::new(pixel_width as f32, pixel_height as f32),
         );
@@ -343,7 +339,7 @@ impl CefTexture {
         )
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     fn create_accelerated_browser(
         &mut self,
         window_info: &WindowInfo,
@@ -463,7 +459,7 @@ impl CefTexture {
             return;
         }
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             let canvas_item = self.base().get_canvas_item();
             let size = self.base().get_size();
@@ -479,7 +475,7 @@ impl CefTexture {
                 };
 
                 if !tex_info.dirty
-                    || tex_info.io_surface().is_null()
+                    || !tex_info.native_handle().is_valid()
                     || tex_info.width == 0
                     || tex_info.height == 0
                 {

@@ -3,7 +3,7 @@ use cef_app::CursorType;
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 
-use crate::accelerated_osr::AcceleratedRenderHandler;
+use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 
 /// Swizzle indices for BGRA -> RGBA conversion.
 /// [B,G,R,A] at indices [0,1,2,3] -> [R,G,B,A] means pick [2,1,0,3] for each pixel.
@@ -120,7 +120,7 @@ impl SoftwareOsrHandler {
 
 wrap_render_handler! {
     pub struct AcceleratedOsrHandler {
-        handler: AcceleratedRenderHandler,
+        handler: PlatformAcceleratedRenderHandler,
     }
 
     impl RenderHandler {
@@ -184,7 +184,7 @@ wrap_render_handler! {
 }
 
 impl AcceleratedOsrHandler {
-    pub fn build(handler: AcceleratedRenderHandler) -> cef::RenderHandler {
+    pub fn build(handler: PlatformAcceleratedRenderHandler) -> cef::RenderHandler {
         Self::new(handler)
     }
 }
@@ -325,7 +325,7 @@ wrap_client! {
 
 impl AcceleratedClientImpl {
     pub(crate) fn build(
-        render_handler: AcceleratedRenderHandler,
+        render_handler: PlatformAcceleratedRenderHandler,
         cursor_type: Arc<Mutex<CursorType>>,
     ) -> cef::Client {
         Self::new(
