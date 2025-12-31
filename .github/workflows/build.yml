@@ -57,22 +57,22 @@ jobs:
         run: export-cef-dir --force $HOME/.local/share/cef
 
       - name: Build and bundle helper app
-        run: cargo run --bin bundle_app --release --target ${{ matrix.target }}
+        run: cargo run --bin bundle_app --release
 
       - name: Build and bundle GDExtension framework
-        run: cargo run --bin bundle_framework --release --target ${{ matrix.target }}
+        run: cargo run --bin bundle_framework --release
 
       - name: Prepare artifacts
         run: |
-          mkdir -p artifacts/macos-${{ matrix.arch }}
-          cp -R "target/${{ matrix.target }}/release/Godot CEF.app" "artifacts/macos-${{ matrix.arch }}/"
-          cp -R "target/${{ matrix.target }}/release/Godot CEF.framework" "artifacts/macos-${{ matrix.arch }}/"
+          mkdir -p artifacts/${{ matrix.target }}
+          cp -R "target/release/Godot CEF.app" "artifacts/${{ matrix.target }}/"
+          cp -R "target/release/Godot CEF.framework" "artifacts/${{ matrix.target }}/"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gdcef-macos-${{ matrix.arch }}
-          path: artifacts/macos-${{ matrix.arch }}
+          name: gdcef-${{ matrix.target }}
+          path: artifacts/${{ matrix.target }}
           retention-days: 30
 
   build-windows:
@@ -114,15 +114,15 @@ jobs:
       - name: Prepare artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts/windows-x86_64
-          Copy-Item target/x86_64-pc-windows-msvc/release/gdcef.dll artifacts/windows-x86_64/
-          Copy-Item target/x86_64-pc-windows-msvc/release/gdcef_helper.exe artifacts/windows-x86_64/
+          New-Item -ItemType Directory -Force -Path artifacts/x86_64-pc-windows-msvc
+          Copy-Item target/x86_64-pc-windows-msvc/release/gdcef.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/x86_64-pc-windows-msvc/release/gdcef_helper.exe artifacts/x86_64-pc-windows-msvc/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gdcef-windows-x86_64
-          path: artifacts/windows-x86_64
+          name: gdcef-x86_64-pc-windows-msvc
+          path: artifacts/x86_64-pc-windows-msvc
           retention-days: 30
 
   build-linux:
@@ -183,15 +183,15 @@ jobs:
 
       - name: Prepare artifacts
         run: |
-          mkdir -p artifacts/linux-x86_64
-          cp target/x86_64-unknown-linux-gnu/release/libgdcef.so artifacts/linux-x86_64/
-          cp target/x86_64-unknown-linux-gnu/release/gdcef_helper artifacts/linux-x86_64/
+          mkdir -p artifacts/x86_64-unknown-linux-gnu
+          cp target/x86_64-unknown-linux-gnu/release/libgdcef.so artifacts/x86_64-unknown-linux-gnu/
+          cp target/x86_64-unknown-linux-gnu/release/gdcef_helper artifacts/x86_64-unknown-linux-gnu/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gdcef-linux-x86_64
-          path: artifacts/linux-x86_64
+          name: gdcef-86_64-unknown-linux-gnu
+          path: artifacts/x86_64-unknown-linux-gnu
           retention-days: 30
 
   release:
