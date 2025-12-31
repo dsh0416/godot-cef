@@ -1,8 +1,9 @@
-use cef::{self, rc::Rc, *, sys::cef_cursor_type_t};
+use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::CursorType;
-use godot::global::godot_print;
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
+
+use crate::accelerated_osr::AcceleratedRenderHandler;
 
 /// Swizzle indices for BGRA -> RGBA conversion.
 /// [B,G,R,A] at indices [0,1,2,3] -> [R,G,B,A] means pick [2,1,0,3] for each pixel.
@@ -44,8 +45,82 @@ fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
 }
 
 wrap_render_handler! {
-    pub struct RenderHandlerBuilder {
+    pub struct SoftwareOsrHandler {
         handler: cef_app::OsrRenderHandler,
+    }
+
+    impl RenderHandler {
+        fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
+            if let Some(rect) = rect {
+                if let Ok(size) = self.handler.size.lock() {
+                    if size.width > 0.0 && size.height > 0.0 {
+                        rect.width = size.width as _;
+                        rect.height = size.height as _;
+                    }
+                }
+            }
+        }
+
+        fn screen_info(
+            &self,
+            _browser: Option<&mut Browser>,
+            screen_info: Option<&mut ScreenInfo>,
+        ) -> ::std::os::raw::c_int {
+            if let Some(screen_info) = screen_info {
+                if let Ok(scale) = self.handler.device_scale_factor.lock() {
+                    screen_info.device_scale_factor = *scale;
+                    return true as _;
+                }
+            }
+            false as _
+        }
+
+        fn screen_point(
+            &self,
+            _browser: Option<&mut Browser>,
+            _view_x: ::std::os::raw::c_int,
+            _view_y: ::std::os::raw::c_int,
+            _screen_x: Option<&mut ::std::os::raw::c_int>,
+            _screen_y: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            false as _
+        }
+
+        fn on_paint(
+            &self,
+            _browser: Option<&mut Browser>,
+            _type_: PaintElementType,
+            _dirty_rects: Option<&[Rect]>,
+            buffer: *const u8,
+            width: ::std::os::raw::c_int,
+            height: ::std::os::raw::c_int,
+        ) {
+            if buffer.is_null() || width <= 0 || height <= 0 {
+                return;
+            }
+
+            let width = width as u32;
+            let height = height as u32;
+            let buffer_size = (width * height * 4) as usize;
+            let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
+            let rgba_data = bgra_to_rgba(bgra_data);
+
+            if let Ok(mut frame_buffer) = self.handler.frame_buffer.lock() {
+                frame_buffer.update(rgba_data, width, height);
+            }
+        }
+    }
+}
+
+impl SoftwareOsrHandler {
+    pub fn build(handler: cef_app::OsrRenderHandler) -> cef::RenderHandler {
+        Self::new(handler)
+    }
+}
+
+wrap_render_handler! {
+    pub struct AcceleratedOsrHandler {
+        handler: AcceleratedRenderHandler,
     }
 
     impl RenderHandler {
@@ -90,9 +165,9 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             type_: PaintElementType,
             _dirty_rects: Option<&[Rect]>,
-            _info: Option<&AcceleratedPaintInfo>,
+            info: Option<&AcceleratedPaintInfo>,
         ) {
-            godot_print!("on_accelerated_paint, type: {:?}", type_);
+            self.handler.on_accelerated_paint(type_, info);
         }
 
         fn on_paint(
@@ -100,29 +175,16 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             _type_: PaintElementType,
             _dirty_rects: Option<&[Rect]>,
-            buffer: *const u8,
-            width: ::std::os::raw::c_int,
-            height: ::std::os::raw::c_int,
+            _buffer: *const u8,
+            _width: ::std::os::raw::c_int,
+            _height: ::std::os::raw::c_int,
         ) {
-            if buffer.is_null() || width <= 0 || height <= 0 {
-                return;
-            }
-
-            let width = width as u32;
-            let height = height as u32;
-            let buffer_size = (width * height * 4) as usize;
-            let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
-            let rgba_data = bgra_to_rgba(bgra_data);
-
-            if let Ok(mut frame_buffer) = self.handler.frame_buffer.lock() {
-                frame_buffer.update(rgba_data, width, height);
-            }
         }
     }
 }
 
-impl RenderHandlerBuilder {
-    pub fn build(handler: cef_app::OsrRenderHandler) -> RenderHandler {
+impl AcceleratedOsrHandler {
+    pub fn build(handler: AcceleratedRenderHandler) -> cef::RenderHandler {
         Self::new(handler)
     }
 }
@@ -155,7 +217,7 @@ fn cef_cursor_to_cursor_type(cef_type: cef::sys::cef_cursor_type_t) -> CursorTyp
 }
 
 wrap_display_handler! {
-    pub(crate) struct DisplayHandlerBuilder {
+    pub(crate) struct DisplayHandlerImpl {
         cursor_type: Arc<Mutex<CursorType>>,
     }
 
@@ -176,14 +238,14 @@ wrap_display_handler! {
     }
 }
 
-impl DisplayHandlerBuilder {
-    pub fn build(cursor_type: Arc<Mutex<CursorType>>) -> DisplayHandler {
+impl DisplayHandlerImpl {
+    pub fn build(cursor_type: Arc<Mutex<CursorType>>) -> cef::DisplayHandler {
         Self::new(cursor_type)
     }
 }
 
 wrap_context_menu_handler! {
-    pub(crate) struct ContextMenuHandlerBuilder {}
+    pub(crate) struct ContextMenuHandlerImpl {}
 
     impl ContextMenuHandler {
         fn on_before_context_menu(
@@ -200,17 +262,17 @@ wrap_context_menu_handler! {
     }
 }
 
-impl ContextMenuHandlerBuilder {
-    pub fn build() -> ContextMenuHandler {
+impl ContextMenuHandlerImpl {
+    pub fn build() -> cef::ContextMenuHandler {
         Self::new()
     }
 }
 
 wrap_client! {
-    pub(crate) struct ClientBuilder {
-        render_handler: RenderHandler,
-        display_handler: DisplayHandler,
-        context_menu_handler: ContextMenuHandler,
+    pub(crate) struct SoftwareClientImpl {
+        render_handler: cef::RenderHandler,
+        display_handler: cef::DisplayHandler,
+        context_menu_handler: cef::ContextMenuHandler,
     }
 
     impl Client {
@@ -228,13 +290,48 @@ wrap_client! {
     }
 }
 
-impl ClientBuilder {
-    pub(crate) fn build(render_handler: cef_app::OsrRenderHandler) -> Client {
+impl SoftwareClientImpl {
+    pub(crate) fn build(render_handler: cef_app::OsrRenderHandler) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
         Self::new(
-            RenderHandlerBuilder::build(render_handler),
-            DisplayHandlerBuilder::build(cursor_type),
-            ContextMenuHandlerBuilder::build(),
+            SoftwareOsrHandler::build(render_handler),
+            DisplayHandlerImpl::build(cursor_type),
+            ContextMenuHandlerImpl::build(),
+        )
+    }
+}
+
+wrap_client! {
+    pub(crate) struct AcceleratedClientImpl {
+        render_handler: cef::RenderHandler,
+        display_handler: cef::DisplayHandler,
+        context_menu_handler: cef::ContextMenuHandler,
+    }
+
+    impl Client {
+        fn render_handler(&self) -> Option<cef::RenderHandler> {
+            Some(self.render_handler.clone())
+        }
+
+        fn display_handler(&self) -> Option<cef::DisplayHandler> {
+            Some(self.display_handler.clone())
+        }
+
+        fn context_menu_handler(&self) -> Option<cef::ContextMenuHandler> {
+            Some(self.context_menu_handler.clone())
+        }
+    }
+}
+
+impl AcceleratedClientImpl {
+    pub(crate) fn build(
+        render_handler: AcceleratedRenderHandler,
+        cursor_type: Arc<Mutex<CursorType>>,
+    ) -> cef::Client {
+        Self::new(
+            AcceleratedOsrHandler::build(render_handler),
+            DisplayHandlerImpl::build(cursor_type),
+            ContextMenuHandlerImpl::build(),
         )
     }
 }
@@ -243,15 +340,15 @@ impl ClientBuilder {
 pub struct OsrRequestContextHandler {}
 
 wrap_request_context_handler! {
-    pub(crate) struct RequestContextHandlerBuilder {
+    pub(crate) struct RequestContextHandlerImpl {
         handler: OsrRequestContextHandler,
     }
 
     impl RequestContextHandler {}
 }
 
-impl RequestContextHandlerBuilder {
-    pub(crate) fn build(handler: OsrRequestContextHandler) -> RequestContextHandler {
+impl RequestContextHandlerImpl {
+    pub(crate) fn build(handler: OsrRequestContextHandler) -> cef::RequestContextHandler {
         Self::new(handler)
     }
 }

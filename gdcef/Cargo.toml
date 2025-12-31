@@ -24,3 +24,6 @@ wide = { workspace = true }
 plist = { workspace = true }
 serde = { workspace = true }
 libloading = { workspace = true }
+metal = { workspace = true }
+objc = { workspace = true }
+objc2-io-surface = { workspace = true }

@@ -1,3 +1,4 @@
+mod accelerated_osr;
 mod cef_init;
 mod cursor;
 mod input;
@@ -14,13 +15,14 @@ use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
     ITextureRect, Image, ImageTexture, InputEvent, InputEventKey, InputEventMouseButton,
-    InputEventMouseMotion, TextureRect,
+    InputEventMouseMotion, RenderingServer, TextureRect,
 };
 use godot::init::*;
 use godot::prelude::*;
 use std::sync::{Arc, Mutex};
 use winit::dpi::PhysicalSize;
 
+use crate::accelerated_osr::{AcceleratedRenderHandler, SharedTextureInfo};
 use crate::cef_init::CEF_INITIALIZED;
 
 struct GodotCef;
@@ -28,11 +30,22 @@ struct GodotCef;
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotCef {}
 
-/// Internal application state for CEF browser
+enum RenderMode {
+    Software {
+        frame_buffer: Arc<Mutex<FrameBuffer>>,
+        texture: Gd<ImageTexture>,
+    },
+    #[cfg(target_os = "macos")]
+    Accelerated {
+        texture_info: Arc<Mutex<SharedTextureInfo>>,
+        importer: accelerated_osr::GodotTextureImporter,
+        current_rid: Option<Rid>,
+    },
+}
+
 struct App {
     browser: Option<cef::Browser>,
-    frame_buffer: Option<Arc<Mutex<FrameBuffer>>>,
-    texture: Option<Gd<ImageTexture>>,
+    render_mode: Option<RenderMode>,
     render_size: Option<Arc<Mutex<PhysicalSize<f32>>>>,
     device_scale_factor: Option<Arc<Mutex<f32>>>,
     cursor_type: Option<Arc<Mutex<CursorType>>>,
@@ -45,8 +58,7 @@ impl Default for App {
     fn default() -> Self {
         Self {
             browser: None,
-            frame_buffer: None,
-            texture: None,
+            render_mode: None,
             render_size: None,
             device_scale_factor: None,
             cursor_type: None,
@@ -57,7 +69,6 @@ impl Default for App {
     }
 }
 
-/// A Godot TextureRect that renders a CEF browser
 #[derive(GodotClass)]
 #[class(base=TextureRect)]
 struct CefTexture {
@@ -103,8 +114,6 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
-    // ========== Lifecycle ==========
-
     fn on_ready(&mut self) {
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
 
@@ -130,15 +139,22 @@ impl CefTexture {
         run_message_loop();
         quit_message_loop();
 
-        self.update_texture_from_buffer();
+        self.update_texture();
         self.update_cursor();
         self.request_external_begin_frame();
     }
 
     fn shutdown(&mut self) {
+        #[cfg(target_os = "macos")]
+        if let Some(RenderMode::Accelerated { current_rid, .. }) = &self.app.render_mode {
+            if let Some(rid) = current_rid {
+                let mut rs = RenderingServer::singleton();
+                rs.free_rid(*rid);
+            }
+        }
+
         self.app.browser = None;
-        self.app.frame_buffer = None;
-        self.app.texture = None;
+        self.app.render_mode = None;
         self.app.render_size = None;
         self.app.device_scale_factor = None;
         self.app.cursor_type = None;
@@ -146,13 +162,13 @@ impl CefTexture {
         cef_init::shutdown_cef();
     }
 
-    // ========== Browser Creation ==========
-
     fn create_browser(&mut self) {
         let logical_size = self.base().get_rect().size;
         let dpi = self.get_content_scale_factor();
         let pixel_width = (logical_size.x * dpi) as i32;
         let pixel_height = (logical_size.y * dpi) as i32;
+
+        let use_accelerated = self.should_use_accelerated_osr();
 
         let window_info = WindowInfo {
             bounds: cef::Rect {
@@ -162,7 +178,7 @@ impl CefTexture {
                 height: pixel_height,
             },
             windowless_rendering_enabled: true as _,
-            shared_texture_enabled: false as _,
+            shared_texture_enabled: use_accelerated as _,
             external_begin_frame_enabled: true as _,
             ..Default::default()
         };
@@ -171,37 +187,62 @@ impl CefTexture {
 
         let mut context = cef::request_context_create_context(
             Some(&RequestContextSettings::default()),
-            Some(&mut webrender::RequestContextHandlerBuilder::build(
+            Some(&mut webrender::RequestContextHandlerImpl::build(
                 webrender::OsrRequestContextHandler {},
             )),
         );
 
+        let browser = if use_accelerated {
+            self.create_accelerated_browser(
+                &window_info,
+                &browser_settings,
+                context.as_mut(),
+                dpi,
+                pixel_width,
+                pixel_height,
+            )
+        } else {
+            self.create_software_browser(
+                &window_info,
+                &browser_settings,
+                context.as_mut(),
+                dpi,
+                pixel_width,
+                pixel_height,
+            )
+        };
+
+        assert!(browser.is_some(), "failed to create browser");
+        self.app.browser = browser;
+        self.app.last_size = logical_size;
+        self.app.last_dpi = dpi;
+    }
+
+    fn should_use_accelerated_osr(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.enable_accelerated_osr && accelerated_osr::is_accelerated_osr_supported()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    fn create_software_browser(
+        &mut self,
+        window_info: &WindowInfo,
+        browser_settings: &BrowserSettings,
+        context: Option<&mut cef::RequestContext>,
+        dpi: f32,
+        pixel_width: i32,
+        pixel_height: i32,
+    ) -> Option<cef::Browser> {
         let render_handler = cef_app::OsrRenderHandler::new(
             dpi,
             PhysicalSize::new(pixel_width as f32, pixel_height as f32),
         );
-        self.create_texture_and_buffer(&render_handler, dpi);
 
-        let mut client = webrender::ClientBuilder::build(render_handler);
-
-        let browser = cef::browser_host_create_browser_sync(
-            Some(&window_info),
-            Some(&mut client),
-            Some(&self.url.to_string().as_str().into()),
-            Some(&browser_settings),
-            None,
-            context.as_mut(),
-        );
-
-        assert!(browser.is_some(), "failed to create browser");
-        self.app.browser = browser;
-    }
-
-    fn create_texture_and_buffer(
-        &mut self,
-        render_handler: &cef_app::OsrRenderHandler,
-        initial_dpi: f32,
-    ) {
         let frame_buffer = render_handler.get_frame_buffer();
         let render_size = render_handler.get_size();
         let device_scale_factor = render_handler.get_device_scale_factor();
@@ -210,16 +251,106 @@ impl CefTexture {
         let texture = ImageTexture::new_gd();
         self.base_mut().set_texture(&texture);
 
-        self.app.frame_buffer = Some(frame_buffer);
-        self.app.texture = Some(texture);
+        self.app.render_mode = Some(RenderMode::Software {
+            frame_buffer,
+            texture,
+        });
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
-        self.app.last_size = self.base().get_rect().size;
-        self.app.last_dpi = initial_dpi;
+
+        let mut client = webrender::SoftwareClientImpl::build(render_handler);
+
+        cef::browser_host_create_browser_sync(
+            Some(window_info),
+            Some(&mut client),
+            Some(&self.url.to_string().as_str().into()),
+            Some(browser_settings),
+            None,
+            context,
+        )
     }
 
-    // ========== Display Handling ==========
+    #[cfg(target_os = "macos")]
+    fn create_accelerated_browser(
+        &mut self,
+        window_info: &WindowInfo,
+        browser_settings: &BrowserSettings,
+        context: Option<&mut cef::RequestContext>,
+        dpi: f32,
+        pixel_width: i32,
+        pixel_height: i32,
+    ) -> Option<cef::Browser> {
+        // Try to create the GPU texture importer
+        let importer = match accelerated_osr::GodotTextureImporter::new() {
+            Some(imp) => imp,
+            None => {
+                godot::global::godot_warn!(
+                    "Failed to create GPU texture importer, falling back to software rendering"
+                );
+                return self.create_software_browser(
+                    window_info,
+                    browser_settings,
+                    context,
+                    dpi,
+                    pixel_width,
+                    pixel_height,
+                );
+            }
+        };
+
+        let render_handler = AcceleratedRenderHandler::new(
+            dpi,
+            PhysicalSize::new(pixel_width as f32, pixel_height as f32),
+        );
+
+        let texture_info = render_handler.get_texture_info();
+        let render_size = render_handler.get_size();
+        let device_scale_factor = render_handler.get_device_scale_factor();
+        let cursor_type = render_handler.get_cursor_type();
+
+        self.app.render_mode = Some(RenderMode::Accelerated {
+            texture_info,
+            importer,
+            current_rid: None,
+        });
+        self.app.render_size = Some(render_size);
+        self.app.device_scale_factor = Some(device_scale_factor);
+        self.app.cursor_type = Some(cursor_type);
+
+        let mut client =
+            webrender::AcceleratedClientImpl::build(render_handler, self.app.cursor_type.clone().unwrap());
+
+        cef::browser_host_create_browser_sync(
+            Some(window_info),
+            Some(&mut client),
+            Some(&self.url.to_string().as_str().into()),
+            Some(browser_settings),
+            None,
+            context,
+        )
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn create_accelerated_browser(
+        &mut self,
+        window_info: &WindowInfo,
+        browser_settings: &BrowserSettings,
+        context: Option<&mut cef::RequestContext>,
+        dpi: f32,
+        pixel_width: i32,
+        pixel_height: i32,
+    ) -> Option<cef::Browser> {
+        // On non-macOS platforms, fall back to software rendering
+        self.create_software_browser(
+            window_info,
+            browser_settings,
+            context,
+            dpi,
+            pixel_width,
+            pixel_height,
+        )
+    }
 
     fn get_content_scale_factor(&self) -> f32 {
         if let Some(tree) = self.base().get_tree() {
@@ -242,7 +373,6 @@ impl CefTexture {
             }
         }
 
-        // DPI change means physical pixel count changed, update render size
         let logical_size = self.base().get_rect().size;
         let pixel_width = logical_size.x * current_dpi;
         let pixel_height = logical_size.y * current_dpi;
@@ -270,7 +400,6 @@ impl CefTexture {
             return;
         }
 
-        // 1px tolerance to avoid resize loops
         let size_diff = (logical_size - self.app.last_size).abs();
         if size_diff.x < 1.0 && size_diff.y < 1.0 {
             return;
@@ -296,32 +425,81 @@ impl CefTexture {
         self.app.last_size = logical_size;
     }
 
-    // ========== Rendering ==========
+    fn update_texture(&mut self) {
+        // Handle software rendering
+        if let Some(RenderMode::Software {
+            frame_buffer,
+            texture,
+        }) = &mut self.app.render_mode
+        {
+            let Ok(mut fb) = frame_buffer.lock() else {
+                return;
+            };
+            if !fb.dirty || fb.data.is_empty() {
+                return;
+            }
 
-    fn update_texture_from_buffer(&mut self) {
-        let Some(frame_buffer_arc) = &self.app.frame_buffer else {
-            return;
-        };
-        let Some(texture) = &mut self.app.texture else {
-            return;
-        };
-        let Ok(mut frame_buffer) = frame_buffer_arc.lock() else {
-            return;
-        };
-        if !frame_buffer.dirty || frame_buffer.data.is_empty() {
+            let width = fb.width as i32;
+            let height = fb.height as i32;
+            let byte_array = PackedByteArray::from(fb.data.as_slice());
+
+            let image =
+                Image::create_from_data(width, height, false, ImageFormat::RGBA8, &byte_array);
+            if let Some(image) = image {
+                texture.set_image(&image);
+            }
+
+            fb.mark_clean();
             return;
         }
 
-        let width = frame_buffer.width as i32;
-        let height = frame_buffer.height as i32;
-        let byte_array = PackedByteArray::from(frame_buffer.data.as_slice());
+        // Handle accelerated rendering (macOS only)
+        #[cfg(target_os = "macos")]
+        {
+            let canvas_item = self.base().get_canvas_item();
+            let size = self.base().get_size();
 
-        let image = Image::create_from_data(width, height, false, ImageFormat::RGBA8, &byte_array);
-        if let Some(image) = image {
-            texture.set_image(&image);
+            if let Some(RenderMode::Accelerated {
+                texture_info,
+                importer,
+                current_rid,
+            }) = &mut self.app.render_mode
+            {
+                let Ok(mut tex_info) = texture_info.lock() else {
+                    return;
+                };
+
+                if !tex_info.dirty
+                    || tex_info.io_surface().is_null()
+                    || tex_info.width == 0
+                    || tex_info.height == 0
+                {
+                    tex_info.dirty = false;
+                    return;
+                }
+
+                let color_swap_material = importer.get_color_swap_material();
+
+                if let Some(new_rid) = importer.import_texture(&tex_info) {
+                    *current_rid = Some(new_rid);
+
+                    let mut rs = RenderingServer::singleton();
+                    rs.canvas_item_clear(canvas_item);
+
+                    if let Some(material_rid) = color_swap_material {
+                        rs.canvas_item_set_material(canvas_item, material_rid);
+                    }
+
+                    rs.canvas_item_add_texture_rect(
+                        canvas_item,
+                        Rect2::new(Vector2::ZERO, size),
+                        new_rid,
+                    );
+                }
+
+                tex_info.dirty = false;
+            }
         }
-
-        frame_buffer.mark_clean();
     }
 
     fn request_external_begin_frame(&mut self) {
@@ -331,8 +509,6 @@ impl CefTexture {
             }
         }
     }
-
-    // ========== Cursor ==========
 
     fn update_cursor(&mut self) {
         let cursor_type_arc = match &self.app.cursor_type {
@@ -354,8 +530,6 @@ impl CefTexture {
         self.base_mut().set_default_cursor_shape(shape);
     }
 
-    // ========== Input ==========
-
     fn handle_input_event(&mut self, event: Gd<InputEvent>) {
         let Some(browser) = self.app.browser.as_mut() else {
             return;
@@ -375,9 +549,6 @@ impl CefTexture {
         }
     }
 
-    // ========== IME Support ==========
-
-    /// Commits IME text to the browser (call when IME composition is finalized)
     #[func]
     pub fn ime_commit_text(&mut self, text: GString) {
         let Some(browser) = self.app.browser.as_mut() else {
@@ -389,7 +560,6 @@ impl CefTexture {
         input::ime_commit_text(&host, &text.to_string());
     }
 
-    /// Sets the current IME composition text (call during IME composition)
     #[func]
     pub fn ime_set_composition(&mut self, text: GString) {
         let Some(browser) = self.app.browser.as_mut() else {
@@ -401,7 +571,6 @@ impl CefTexture {
         input::ime_set_composition(&host, &text.to_string());
     }
 
-    /// Cancels the current IME composition
     #[func]
     pub fn ime_cancel_composition(&mut self) {
         let Some(browser) = self.app.browser.as_mut() else {
@@ -413,7 +582,6 @@ impl CefTexture {
         input::ime_cancel_composition(&host);
     }
 
-    /// Finishes the current IME composition
     #[func]
     pub fn ime_finish_composing_text(&mut self, keep_selection: bool) {
         let Some(browser) = self.app.browser.as_mut() else {
