@@ -27,6 +27,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: macOS ${{ matrix.arch }}
 
+    env:
+      CEF_DIR: $HOME/.local/share/cef
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -51,7 +54,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir
+        run: export-cef-dir -- --force $HOME/.local/share/cef
 
       - name: Build and bundle helper app
         run: cargo run --bin bundle_app --release --target ${{ matrix.target }}
