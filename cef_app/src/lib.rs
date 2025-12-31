@@ -30,36 +30,41 @@ impl FrameBuffer {
     }
 }
 
-/// Configuration for the render backend to use in CEF.
-/// This affects which GPU backend CEF uses for rendering.
+/// Represents the Godot render backend that is currently in use.
+/// This is used to determine how to import textures from CEF into Godot.
+/// Note: CEF always uses its native backend (Metal on macOS, D3D on Windows, Vulkan on Linux).
+/// This enum tells us which Godot backend we need to import textures into.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CefRenderBackend {
-    /// Use CEF's default rendering (Metal on macOS, D3D on Windows, etc.)
+pub enum GodotRenderBackend {
+    /// Unknown or unsupported backend
     #[default]
-    Default,
+    Unknown,
+    /// Godot is using Direct3D12 (Windows)
     Direct3D12,
+    /// Godot is using Metal (macOS)
     Metal,
+    /// Godot is using Vulkan (cross-platform, MoltenVK on macOS)
     Vulkan,
 }
 
 #[derive(Clone)]
 pub struct OsrApp {
-    render_backend: CefRenderBackend,
+    godot_backend: GodotRenderBackend,
 }
 
 impl OsrApp {
     pub fn new() -> Self {
         Self {
-            render_backend: CefRenderBackend::Default,
+            godot_backend: GodotRenderBackend::Unknown,
         }
     }
 
-    pub fn with_render_backend(render_backend: CefRenderBackend) -> Self {
-        Self { render_backend }
+    pub fn with_godot_backend(godot_backend: GodotRenderBackend) -> Self {
+        Self { godot_backend }
     }
 
-    pub fn render_backend(&self) -> CefRenderBackend {
-        self.render_backend
+    pub fn godot_backend(&self) -> GodotRenderBackend {
+        self.godot_backend
     }
 }
 
@@ -90,23 +95,30 @@ wrap_app! {
             command_line
                 .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
 
-            match self.app.render_backend() {
-                CefRenderBackend::Vulkan => {
-                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
-                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"vulkan".into()));
-                },
-                CefRenderBackend::Metal => {
-                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
-                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"metal".into()));
-                },
-                CefRenderBackend::Direct3D12 => {
+            match self.app.godot_backend() {
+                GodotRenderBackend::Direct3D12 => {
                     command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
                     command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"d3d11on12".into()));
-                },
-                _ => {
-                    // Do nothing, use default backend
-                },
-            } 
+                }
+                GodotRenderBackend::Metal => {
+                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
+                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"metal".into()));
+                }
+                #[cfg(target_os = "macos")]
+                // using --use=angle=vulkan would disables GPU acceleration on macOS.
+                // thus we keep using metal backend for Vulkan on macOS.
+                // We use MoltenVK on macOS to translate Vulkan to Metal.
+                GodotRenderBackend::Vulkan => {
+                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
+                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"metal".into()));
+                }
+                #[cfg(not(target_os = "macos"))]
+                GodotRenderBackend::Vulkan => {
+                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
+                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"vulkan".into()));
+                }
+                _ => {}
+            }
         }
 
         fn browser_process_handler(&self) -> Option<cef::BrowserProcessHandler> {

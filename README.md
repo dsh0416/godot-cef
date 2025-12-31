@@ -16,10 +16,12 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 | Platform | DirectX 12 | Metal | Vulkan | Software Rendering |
 |----------|---------------|-----------------|-------------------|--------|
 | **Windows** | ✅ | n.a. | 🚧 WIP | ✅ |
-| **macOS** | n.a. | ✅ | ❌ | ✅ |
+| **macOS** | n.a. | ✅ | ✅ (Note 1) | ✅ |
 | **Linux** | n.a. | n.a. | 🚧 WIP | ✅ |
 
-> Note: On platforms where accelerated rendering is not yet implemented, the extension automatically falls back to software rendering using CPU-based frame buffers.
+### Note
+1. for macOS Vulkan backend, CEF would keep using `--use-angle=metal` to launch the process, since `--use-angle=vulkan` on macOS would cause GPU acceleration disabled in CEF, which causes performance and compatibility issues.
+2. On platforms where accelerated rendering is not yet implemented, the extension automatically falls back to software rendering using CPU-based frame buffers.
 
 ## 🛠️ Prerequisites
 

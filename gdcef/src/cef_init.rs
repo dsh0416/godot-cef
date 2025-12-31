@@ -72,55 +72,24 @@ pub fn load_sandbox(args: &cef::MainArgs) {
     }
 }
 
-/// Determines the appropriate CEF render backend based on Godot's current renderer
-fn determine_cef_render_backend() -> cef_app::CefRenderBackend {
+/// Determines the Godot render backend for texture import configuration.
+/// This tells us which Godot backend we need to import CEF textures into.
+fn detect_godot_render_backend() -> cef_app::GodotRenderBackend {
     let godot_backend = RenderBackend::detect();
 
-    #[cfg(target_os = "macos")]
-    {
-        match godot_backend {
-            RenderBackend::Metal => {
-                return cef_app::CefRenderBackend::Metal;
-            },
-            RenderBackend::Vulkan => {
-                return cef_app::CefRenderBackend::Vulkan;
-            },
-            _ => {
-                return cef_app::CefRenderBackend::Default;
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        match godot_backend {
-            RenderBackend::D3D12 => {
-                return cef_app::CefRenderBackend::Direct3D12;
-            },
-            _ => {
-                return cef_app::CefRenderBackend::Default;
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        match godot_backend {
-            RenderBackend::Vulkan => {
-                return cef_app::CefRenderBackend::Vulkan;
-            },
-            _ => {
-                return cef_app::CefRenderBackend::Default;
-            }
-        }
+    match godot_backend {
+        RenderBackend::Metal => cef_app::GodotRenderBackend::Metal,
+        RenderBackend::Vulkan => cef_app::GodotRenderBackend::Vulkan,
+        RenderBackend::D3D12 => cef_app::GodotRenderBackend::Direct3D12,
+        _ => cef_app::GodotRenderBackend::Unknown,
     }
 }
 
 /// Initializes CEF with the given settings
 pub fn initialize_cef() {
     let args = cef::args::Args::new();
-    let cef_backend = determine_cef_render_backend();
-    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_render_backend(cef_backend));
+    let godot_backend = detect_godot_render_backend();
+    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_godot_backend(godot_backend));
 
     #[cfg(target_os = "macos")]
     load_sandbox(args.as_main_args());
