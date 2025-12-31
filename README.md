@@ -15,7 +15,7 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 
 | Platform | DirectX 12 | Metal | Vulkan | Software Rendering |
 |----------|---------------|-----------------|-------------------|--------|
-| **Windows** | 🚧 WIP | n.a. | 🚧 WIP | ✅ |
+| **Windows** | ✅ | n.a. | 🚧 WIP | ✅ |
 | **macOS** | n.a. | ✅ | ❌ | ✅ |
 | **Linux** | n.a. | n.a. | 🚧 WIP | ✅ |
 
