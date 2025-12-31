@@ -72,8 +72,6 @@ pub fn load_sandbox(args: &cef::MainArgs) {
     }
 }
 
-/// Determines the Godot render backend for texture import configuration.
-/// This tells us which Godot backend we need to import CEF textures into.
 fn detect_godot_render_backend() -> cef_app::GodotRenderBackend {
     let godot_backend = RenderBackend::detect();
 

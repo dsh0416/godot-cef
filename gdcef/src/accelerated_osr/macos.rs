@@ -208,16 +208,9 @@ impl TextureImporterTrait for GodotTextureImporter {
                 godot_print!("[AcceleratedOSR/macOS] Using Metal backend for texture import");
             }
             RenderBackend::Vulkan => {
-                // On macOS, Vulkan is provided via MoltenVK which translates Vulkan to Metal.
-                // CEF uses its native Metal backend and outputs IOSurface textures.
-                // We import the IOSurface via Metal, then pass the Metal texture handle to Godot.
-                // This works because MoltenVK can interop with Metal textures.
-                //
-                // TODO: For better Vulkan integration, consider using VK_EXT_metal_objects
-                // extension to import the Metal texture directly into Vulkan.
+                // Vulkan via MoltenVK - import IOSurface through Metal interop
                 godot_print!(
-                    "[AcceleratedOSR/macOS] Godot using Vulkan (MoltenVK). \
-                     CEF uses native Metal, importing IOSurface via Metal texture interop."
+                    "[AcceleratedOSR/macOS] Using Vulkan (MoltenVK) with Metal texture interop"
                 );
             }
             _ => {}

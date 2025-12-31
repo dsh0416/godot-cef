@@ -30,20 +30,12 @@ impl FrameBuffer {
     }
 }
 
-/// Represents the Godot render backend that is currently in use.
-/// This is used to determine how to import textures from CEF into Godot.
-/// Note: CEF always uses its native backend (Metal on macOS, D3D on Windows, Vulkan on Linux).
-/// This enum tells us which Godot backend we need to import textures into.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum GodotRenderBackend {
-    /// Unknown or unsupported backend
     #[default]
     Unknown,
-    /// Godot is using Direct3D12 (Windows)
     Direct3D12,
-    /// Godot is using Metal (macOS)
     Metal,
-    /// Godot is using Vulkan (cross-platform, MoltenVK on macOS)
     Vulkan,
 }
 
