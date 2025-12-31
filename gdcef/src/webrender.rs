@@ -1,6 +1,18 @@
 use cef::{self, rc::Rc, *,};
 use godot::global::godot_print;
 
+/// Convert BGRA pixel data to RGBA by swapping B and R channels
+fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(bgra.len());
+    for chunk in bgra.chunks_exact(4) {
+        rgba.push(chunk[2]); // R (from B)
+        rgba.push(chunk[1]); // G
+        rgba.push(chunk[0]); // B (from R)
+        rgba.push(chunk[3]); // A
+    }
+    rgba
+}
+
 wrap_render_handler! {
     pub struct RenderHandlerBuilder {
         handler: cef_app::OsrRenderHandler,
@@ -9,11 +21,12 @@ wrap_render_handler! {
     impl RenderHandler {
         fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
             if let Some(rect) = rect {
-                let size = self.handler.size.borrow();
-                // size must be non-zero
-                if size.width > 0.0 && size.height > 0.0 {
-                    rect.width = size.width as _;
-                    rect.height = size.height as _;
+                if let Ok(size) = self.handler.size.lock() {
+                    // size must be non-zero
+                    if size.width > 0.0 && size.height > 0.0 {
+                        rect.width = size.width as _;
+                        rect.height = size.height as _;
+                    }
                 }
             }
         }
@@ -41,16 +54,12 @@ wrap_render_handler! {
             false as _
         }
 
-        // #[cfg(all(
-        //     any(target_os = "macos", target_os = "windows", target_os = "linux"),
-        //     feature = "accelerated_osr"
-        // ))]
         fn on_accelerated_paint(
             &self,
             _browser: Option<&mut Browser>,
             type_: PaintElementType,
             _dirty_rects: Option<&[Rect]>,
-            info: Option<&AcceleratedPaintInfo>,
+            _info: Option<&AcceleratedPaintInfo>,
         ) {
             godot_print!("on_accelerated_paint, type: {:?}", type_);
         }
@@ -64,7 +73,24 @@ wrap_render_handler! {
             width: ::std::os::raw::c_int,
             height: ::std::os::raw::c_int,
         ) {
-            godot_print!("on_paint, width: {}, height: {}", width, height);
+            if buffer.is_null() || width <= 0 || height <= 0 {
+                return;
+            }
+
+            let width = width as u32;
+            let height = height as u32;
+            let buffer_size = (width * height * 4) as usize;
+
+            // Safety: CEF guarantees the buffer is valid for width * height * 4 bytes
+            let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
+
+            // Convert BGRA to RGBA
+            let rgba_data = bgra_to_rgba(bgra_data);
+
+            // Store in the shared frame buffer
+            if let Ok(mut frame_buffer) = self.handler.frame_buffer.lock() {
+                frame_buffer.update(rgba_data, width, height);
+            }
         }
     }
 }

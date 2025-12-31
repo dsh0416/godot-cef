@@ -2,11 +2,15 @@ mod webrender;
 mod utils;
 
 use cef::{BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, Settings, WindowInfo, api_hash, quit_message_loop, run_message_loop};
-use godot::classes::{ITextureRect, Os, TextureRect};
+use cef_app::FrameBuffer;
+use godot::classes::notify::ControlNotification;
+use godot::classes::{ITextureRect, Image, ImageTexture, Os, TextureRect};
+use godot::classes::image::Format as ImageFormat;
 use godot::init::*;
 use godot::prelude::*;
 use winit::dpi::LogicalSize;
-use std::sync::Once;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, Once};
 
 use crate::utils::get_subprocess_path;
 
@@ -14,20 +18,20 @@ struct GodotCef;
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotCef {}
 
-struct State {
-    // window: Arc<Window>,
-    // device: wgpu::Device,
-    // pipeline: wgpu::RenderPipeline,
-    // queue: wgpu::Queue,
-    // size: winit::dpi::PhysicalSize<u32>,
-    // surface: wgpu::Surface<'static>,
-    // surface_format: wgpu::TextureFormat,
-    // quad: Geometry,
+struct App {
+    browser: Option<cef::Browser>,
+    frame_buffer: Option<Arc<Mutex<FrameBuffer>>>,
+    texture: Option<Gd<ImageTexture>>,
 }
 
-struct App {
-    state: Option<State>,
-    browser: Option<cef::Browser>,
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            browser: None,
+            frame_buffer: None,
+            texture: None,
+        }
+    }
 }
 
 #[derive(GodotClass)]
@@ -47,20 +51,26 @@ impl ITextureRect for CefTexture {
     fn init(base: Base<TextureRect>) -> Self {
         Self {
             base,
-            app: App {
-                state: None,
-                browser: None,
-            },
+            app: App::default(),
             url: "https://google.com".into(),
         }
     }
 
     fn ready(&mut self) {
-        self.create_cef_texture();
+        self.on_ready();
     }
 
     fn process(&mut self, _delta: f64) {
-        self.update_cef_texture();
+        self.on_process();
+    }
+
+    fn on_notification(&mut self, what: ControlNotification) {
+        match what {
+            ControlNotification::WM_CLOSE_REQUEST => {
+                self.shutdown_cef();
+            }
+            _ => {}
+        }
     }
 }
 
@@ -128,15 +138,16 @@ impl CefTexture {
 
         godot_print!("subprocess_path: {}", subprocess_path.to_str().unwrap());
 
-        let user_data_dir = Os::singleton().get_user_data_dir();
+        let user_data_dir = PathBuf::from(Os::singleton().get_user_data_dir().to_string());
+        let root_cache_path = user_data_dir.join("Godot CEF/Cache");
 
         let settings = Settings {
             browser_subprocess_path: subprocess_path.to_str().unwrap().into(),
             windowless_rendering_enabled: true as _,
             external_message_pump: true as _,
             log_severity: cef::LogSeverity::VERBOSE as _,
-            log_file: "/tmp/cef.log".into(),
-            root_cache_path: user_data_dir.to_string().as_str().into(),
+            // log_file: "/tmp/cef.log".into(),
+            root_cache_path: root_cache_path.to_str().unwrap().into(),
             ..Default::default()
         };
 
@@ -155,6 +166,16 @@ impl CefTexture {
         );
 
         assert_eq!(ret, 1, "failed to initialize CEF");
+    }
+
+    fn shutdown_cef(&mut self) {
+        self.app.browser = None;
+        self.app.frame_buffer = None;
+        self.app.texture = None;
+
+        if CEF_INITIALIZED.is_completed() {
+            cef::shutdown();
+        }
     }
 
     fn create_browser(&mut self) {
@@ -177,16 +198,19 @@ impl CefTexture {
             ..Default::default()
         };
 
-        
         let mut context = cef::request_context_create_context(
             Some(&RequestContextSettings::default()),
             Some(&mut webrender::RequestContextHandlerBuilder::build(webrender::OsrRequestContextHandler {})),
         );
-        
-        let mut client = webrender::ClientBuilder::build(cef_app::OsrRenderHandler::new(
+
+        // Create the render handler and get a reference to its frame buffer
+        let render_handler = cef_app::OsrRenderHandler::new(
             1.0,
             LogicalSize::new(size.x as f32, size.y as f32)
-        ));
+        );
+        let frame_buffer = render_handler.get_frame_buffer();
+        
+        let mut client = webrender::ClientBuilder::build(render_handler);
 
         let browser = cef::browser_host_create_browser_sync(
             Some(&window_info),
@@ -199,10 +223,16 @@ impl CefTexture {
 
         assert!(browser.is_some(), "failed to create browser");
 
+        // Create the ImageTexture that will display CEF frames
+        let texture = ImageTexture::new_gd();
+        self.base_mut().set_texture(&texture);
+
         self.app.browser = browser;
+        self.app.frame_buffer = Some(frame_buffer);
+        self.app.texture = Some(texture);
     }
 
-    fn create_cef_texture(&mut self) {
+    fn on_ready(&mut self) {
         CEF_INITIALIZED.call_once(|| {
             Self::load_cef_framework();
             Self::initialize_cef();
@@ -211,17 +241,63 @@ impl CefTexture {
         self.create_browser();
     }
 
-    fn update_cef_texture(&mut self) {
+    fn on_process(&mut self) {
         run_message_loop();
         quit_message_loop();
+
         if let Some(browser) = self.app.browser.as_mut() {
             // TODO: resize handling
 
             if let Some(host) = browser.host() {
                 host.send_external_begin_frame();
-                godot_print!("send_external_begin_frame");
             }
         }
+
+        // Update texture from frame buffer if dirty
+        self.update_texture_from_buffer();
+    }
+
+    fn update_texture_from_buffer(&mut self) {
+        let Some(frame_buffer_arc) = &self.app.frame_buffer else {
+            return;
+        };
+
+        let Some(texture) = &mut self.app.texture else {
+            return;
+        };
+
+        // Try to lock the frame buffer
+        let Ok(mut frame_buffer) = frame_buffer_arc.lock() else {
+            return;
+        };
+
+        // Only update if the buffer has new data
+        if !frame_buffer.dirty || frame_buffer.data.is_empty() {
+            return;
+        }
+
+        let width = frame_buffer.width as i32;
+        let height = frame_buffer.height as i32;
+
+        // Create a PackedByteArray from the RGBA data
+        let byte_array = PackedByteArray::from(frame_buffer.data.as_slice());
+
+        // Create a Godot Image from the raw RGBA data
+        let image = Image::create_from_data(
+            width,
+            height,
+            false, // no mipmaps
+            ImageFormat::RGBA8,
+            &byte_array,
+        );
+
+        if let Some(image) = image {
+            // Update the ImageTexture with the new image
+            texture.set_image(&image);
+        }
+
+        // Mark the buffer as consumed
+        frame_buffer.mark_clean();
     }
 }
 

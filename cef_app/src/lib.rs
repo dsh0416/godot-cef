@@ -1,6 +1,36 @@
 use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 use cef::{self, BrowserProcessHandler, ImplBrowserProcessHandler, WrapBrowserProcessHandler, rc::Rc, *,};
+
+/// Shared frame buffer for passing pixel data from CEF's render callback to Godot.
+/// Uses Arc<Mutex<...>> for thread-safe access.
+#[derive(Default)]
+pub struct FrameBuffer {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub dirty: bool,
+}
+
+impl FrameBuffer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update the buffer with new RGBA pixel data
+    pub fn update(&mut self, data: Vec<u8>, width: u32, height: u32) {
+        self.data = data;
+        self.width = width;
+        self.height = height;
+        self.dirty = true;
+    }
+
+    /// Mark the buffer as consumed (not dirty)
+    pub fn mark_clean(&mut self) {
+        self.dirty = false;
+    }
+}
 
 #[derive(Clone)]
 pub struct OsrApp {}
@@ -98,24 +128,24 @@ impl BrowserProcessHandlerBuilder {
 #[derive(Clone)]
 pub struct OsrRenderHandler {
     pub device_scale_factor: f32,
-    pub size: std::rc::Rc<RefCell<winit::dpi::LogicalSize<f32>>>,
-    // _device: wgpu::Device,
-    // _queue: wgpu::Queue,
+    pub size: Arc<Mutex<winit::dpi::LogicalSize<f32>>>,
+    pub frame_buffer: Arc<Mutex<FrameBuffer>>,
 }
 
 impl OsrRenderHandler {
     pub fn new(
-        // _device: wgpu::Device,
-        // _queue: wgpu::Queue,
         device_scale_factor: f32,
         size: winit::dpi::LogicalSize<f32>,
     ) -> Self {
-        let size = std::rc::Rc::new(RefCell::new(size));
         Self {
-            size: size.clone(),
+            size: Arc::new(Mutex::new(size)),
             device_scale_factor,
-            // _device,
-            // _queue,
+            frame_buffer: Arc::new(Mutex::new(FrameBuffer::new())),
         }
+    }
+
+    /// Get a clone of the frame buffer Arc for sharing with Godot
+    pub fn get_frame_buffer(&self) -> Arc<Mutex<FrameBuffer>> {
+        self.frame_buffer.clone()
     }
 }
