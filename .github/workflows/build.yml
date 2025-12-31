@@ -65,8 +65,8 @@ jobs:
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts/${{ matrix.target }}
-          cp -R "target/release/Godot CEF.app" "artifacts/${{ matrix.target }}/"
-          cp -R "target/release/Godot CEF.framework" "artifacts/${{ matrix.target }}/"
+          cp -R "target/debug/Godot CEF.app" "artifacts/${{ matrix.target }}/"
+          cp -R "target/debug/Godot CEF.framework" "artifacts/${{ matrix.target }}/"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
