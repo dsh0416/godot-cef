@@ -58,6 +58,8 @@ impl RenderBackend {
         match self {
             #[cfg(target_os = "macos")]
             RenderBackend::Metal => true,
+            #[cfg(target_os = "macos")]
+            RenderBackend::Vulkan => true,
             #[cfg(target_os = "windows")]
             RenderBackend::D3D12 => true,
             #[cfg(target_os = "linux")]

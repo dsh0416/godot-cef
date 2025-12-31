@@ -10,6 +10,8 @@ use cef::api_hash;
 use crate::utils::get_framework_path;
 use crate::utils::get_subprocess_path;
 
+use crate::accelerated_osr::RenderBackend;
+
 /// Global initialization guard - CEF can only be initialized once
 pub static CEF_INITIALIZED: Once = Once::new();
 
@@ -70,10 +72,55 @@ pub fn load_sandbox(args: &cef::MainArgs) {
     }
 }
 
+/// Determines the appropriate CEF render backend based on Godot's current renderer
+fn determine_cef_render_backend() -> cef_app::CefRenderBackend {
+    let godot_backend = RenderBackend::detect();
+
+    #[cfg(target_os = "macos")]
+    {
+        match godot_backend {
+            RenderBackend::Metal => {
+                return cef_app::CefRenderBackend::Metal;
+            },
+            RenderBackend::Vulkan => {
+                return cef_app::CefRenderBackend::Vulkan;
+            },
+            _ => {
+                return cef_app::CefRenderBackend::Default;
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        match godot_backend {
+            RenderBackend::D3D12 => {
+                return cef_app::CefRenderBackend::Direct3D12;
+            },
+            _ => {
+                return cef_app::CefRenderBackend::Default;
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        match godot_backend {
+            RenderBackend::Vulkan => {
+                return cef_app::CefRenderBackend::Vulkan;
+            },
+            _ => {
+                return cef_app::CefRenderBackend::Default;
+            }
+        }
+    }
+}
+
 /// Initializes CEF with the given settings
 pub fn initialize_cef() {
     let args = cef::args::Args::new();
-    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::new());
+    let cef_backend = determine_cef_render_backend();
+    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_render_backend(cef_backend));
 
     #[cfg(target_os = "macos")]
     load_sandbox(args.as_main_args());

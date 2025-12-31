@@ -30,12 +30,36 @@ impl FrameBuffer {
     }
 }
 
+/// Configuration for the render backend to use in CEF.
+/// This affects which GPU backend CEF uses for rendering.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CefRenderBackend {
+    /// Use CEF's default rendering (Metal on macOS, D3D on Windows, etc.)
+    #[default]
+    Default,
+    Direct3D12,
+    Metal,
+    Vulkan,
+}
+
 #[derive(Clone)]
-pub struct OsrApp {}
+pub struct OsrApp {
+    render_backend: CefRenderBackend,
+}
 
 impl OsrApp {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            render_backend: CefRenderBackend::Default,
+        }
+    }
+
+    pub fn with_render_backend(render_backend: CefRenderBackend) -> Self {
+        Self { render_backend }
+    }
+
+    pub fn render_backend(&self) -> CefRenderBackend {
+        self.render_backend
     }
 }
 
@@ -65,6 +89,24 @@ wrap_app! {
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
             command_line
                 .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
+
+            match self.app.render_backend() {
+                CefRenderBackend::Vulkan => {
+                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
+                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"vulkan".into()));
+                },
+                CefRenderBackend::Metal => {
+                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
+                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"metal".into()));
+                },
+                CefRenderBackend::Direct3D12 => {
+                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
+                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"d3d11on12".into()));
+                },
+                _ => {
+                    // Do nothing, use default backend
+                },
+            } 
         }
 
         fn browser_process_handler(&self) -> Option<cef::BrowserProcessHandler> {

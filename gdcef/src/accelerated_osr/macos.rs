@@ -197,13 +197,27 @@ impl TextureImporterTrait for GodotTextureImporter {
         if !render_backend.supports_accelerated_osr() {
             godot_warn!(
                 "[AcceleratedOSR/macOS] Render backend {:?} does not support accelerated OSR. \
-                 Metal backend is required on macOS.",
+                 Metal or Vulkan backend is required on macOS.",
                 render_backend
             );
             return None;
         }
 
-        godot_print!("[AcceleratedOSR/macOS] Using Metal backend for texture import");
+        match render_backend {
+            RenderBackend::Metal => {
+                godot_print!("[AcceleratedOSR/macOS] Using Metal backend for texture import");
+            }
+            RenderBackend::Vulkan => {
+                // On macOS, Vulkan is provided via MoltenVK which translates to Metal.
+                // With CEF configured to use ANGLE+Vulkan, we get IOSurface textures
+                // that we import via Metal, which works with MoltenVK.
+                godot_print!(
+                    "[AcceleratedOSR/macOS] Using Vulkan (MoltenVK) backend with Metal texture import. \
+                     CEF configured to use ANGLE+Vulkan for IOSurface output."
+                );
+            }
+            _ => {}
+        }
 
         let mut rs = RenderingServer::singleton();
         let shader_rid = rs.shader_create();
