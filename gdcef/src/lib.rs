@@ -7,14 +7,14 @@ mod webrender;
 
 use cef::{
     BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, WindowInfo,
-    quit_message_loop, run_message_loop,
+    do_message_loop_work,
 };
 use cef_app::{CursorType, FrameBuffer};
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
-    DisplayServer, ITextureRect, Image, ImageTexture, InputEvent, InputEventKey,
+    DisplayServer, Engine, ITextureRect, Image, ImageTexture, InputEvent, InputEventKey,
     InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, RenderingServer,
     TextureRect,
 };
@@ -56,6 +56,7 @@ struct App {
     last_size: Vector2,
     last_dpi: f32,
     last_cursor: CursorType,
+    last_max_fps: i32,
 }
 
 impl Default for App {
@@ -69,6 +70,7 @@ impl Default for App {
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
             last_cursor: CursorType::Arrow,
+            last_max_fps: 0,
         }
     }
 }
@@ -127,25 +129,18 @@ impl CefTexture {
         });
 
         self.create_browser();
-        self.request_external_begin_frame();
+        // self.request_external_begin_frame();
     }
 
     fn on_process(&mut self) {
-        self.handle_size_change();
-        self.handle_dpi_change();
-
-        if let Some(browser) = self.app.browser.as_mut() {
-            if let Some(host) = browser.host() {
-                host.send_external_begin_frame();
-            }
-        }
-
-        run_message_loop();
-        quit_message_loop();
-
+        self.handle_max_fps_change();
+        _ = self.handle_size_change();
         self.update_texture();
-        self.update_cursor();
+
+        do_message_loop_work();
+
         self.request_external_begin_frame();
+        self.update_cursor();
     }
 
     fn shutdown(&mut self) {
@@ -162,6 +157,7 @@ impl CefTexture {
         self.app.render_size = None;
         self.app.device_scale_factor = None;
         self.app.cursor_type = None;
+        self.app.last_max_fps = self.get_max_fps();
 
         cef_init::shutdown_cef();
     }
@@ -187,7 +183,10 @@ impl CefTexture {
             ..Default::default()
         };
 
-        let browser_settings = BrowserSettings::default();
+        let browser_settings = BrowserSettings {
+            windowless_frame_rate: self.get_max_fps(),
+            ..Default::default()
+        };
 
         let mut context = cef::request_context_create_context(
             Some(&RequestContextSettings::default()),
@@ -375,19 +374,47 @@ impl CefTexture {
         DisplayServer::singleton().screen_get_scale()
     }
 
-    fn handle_dpi_change(&mut self) {
-        let current_dpi = self.get_pixel_scale_factor();
-        if (current_dpi - self.app.last_dpi).abs() < 0.01 {
+    fn get_max_fps(&self) -> i32 {
+        let engine_cap_fps = Engine::singleton().get_max_fps();
+        let screen_cap_fps = DisplayServer::singleton().screen_get_refresh_rate().round() as i32;
+        if engine_cap_fps > 0 {
+            engine_cap_fps
+        } else {
+            if screen_cap_fps > 0 {
+                screen_cap_fps
+            } else {
+                60
+            }
+        }
+    }
+
+    fn handle_max_fps_change(&mut self) {
+        let max_fps = self.get_max_fps();
+        if max_fps == self.app.last_max_fps {
             return;
         }
 
-        if let Some(device_scale_factor) = &self.app.device_scale_factor {
-            if let Ok(mut dpi) = device_scale_factor.lock() {
-                *dpi = current_dpi;
+        self.app.last_max_fps = max_fps;
+        if let Some(browser) = self.app.browser.as_mut() {
+            if let Some(host) = browser.host() {
+                host.set_windowless_frame_rate(max_fps);
             }
         }
+    }
 
+    fn handle_size_change(&mut self) -> bool {
+        let current_dpi = self.get_pixel_scale_factor();
         let logical_size = self.base().get_size();
+        if logical_size.x <= 0.0 || logical_size.y <= 0.0 {
+            return false;
+        }
+
+        let size_diff = (logical_size - self.app.last_size).abs();
+        let dpi_diff = (current_dpi - self.app.last_dpi).abs();
+        if size_diff.x < 1e-6 && size_diff.y < 1e-6 && dpi_diff < 1e-6 {
+            return false;
+        }
+
         let pixel_width = logical_size.x * current_dpi;
         let pixel_height = logical_size.y * current_dpi;
 
@@ -398,6 +425,12 @@ impl CefTexture {
             }
         }
 
+        if let Some(device_scale_factor) = &self.app.device_scale_factor {
+            if let Ok(mut dpi) = device_scale_factor.lock() {
+                *dpi = current_dpi;
+            }
+        }
+
         if let Some(browser) = self.app.browser.as_mut() {
             if let Some(host) = browser.host() {
                 host.notify_screen_info_changed();
@@ -405,38 +438,9 @@ impl CefTexture {
             }
         }
 
-        self.app.last_dpi = current_dpi;
-    }
-
-    fn handle_size_change(&mut self) {
-        let logical_size = self.base().get_size();
-        if logical_size.x <= 0.0 || logical_size.y <= 0.0 {
-            return;
-        }
-
-        let size_diff = (logical_size - self.app.last_size).abs();
-        if size_diff.x < 1.0 && size_diff.y < 1.0 {
-            return;
-        }
-
-        let dpi = self.get_pixel_scale_factor();
-        let pixel_width = logical_size.x * dpi;
-        let pixel_height = logical_size.y * dpi;
-
-        if let Some(render_size) = &self.app.render_size {
-            if let Ok(mut size) = render_size.lock() {
-                size.width = pixel_width;
-                size.height = pixel_height;
-            }
-        }
-
-        if let Some(browser) = self.app.browser.as_mut() {
-            if let Some(host) = browser.host() {
-                host.was_resized();
-            }
-        }
-
         self.app.last_size = logical_size;
+        self.app.last_dpi = current_dpi;
+        return true;
     }
 
     fn update_texture(&mut self) {
@@ -456,7 +460,7 @@ impl CefTexture {
             let height = fb.height as i32;
             let byte_array = PackedByteArray::from(fb.data.as_slice());
 
-            let image =
+            let image: Option<Gd<Image>> =
                 Image::create_from_data(width, height, false, ImageFormat::RGBA8, &byte_array);
             if let Some(image) = image {
                 texture.set_image(&image);
@@ -466,7 +470,6 @@ impl CefTexture {
             return;
         }
 
-        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             let canvas_item = self.base().get_canvas_item();
             let size = self.base().get_size();

@@ -1,0 +1,52 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.4
+reloadable = true
+
+[libraries]
+linux.x86_64     = "bin/x86_64-unknown-linux-gnu/libgdcef.so"
+macos.arm64      = "bin/aarch64-apple-darwin/Godot CEF.framework"
+windows.x86_64   = "bin/x86_64-pc-windows-msvc/gdcef.dll"
+
+[icons]
+WebView = "icons/webview.svg"
+
+[dependencies]
+
+macos.arm64 = {
+  "bin/aarch64-apple-darwin/Godot CEF.framework" : "Contents/Frameworks",
+  "bin/aarch64-apple-darwin/Godot CEF.app" : "Contents/Frameworks"
+}
+
+windows.x86_64 = {
+  "bin/x86_64-pc-windows-msvc/gdcef.dll" : "",
+  "bin/x86_64-pc-windows-msvc/gdcef_helper.exe" : "",
+
+  "bin/x86_64-pc-windows-msvc/bootstrap.exe" : "",
+  "bin/x86_64-pc-windows-msvc/bootstrapc.exe" : "",
+  "bin/x86_64-pc-windows-msvc/chrome_elf.dll" : "",
+  "bin/x86_64-pc-windows-msvc/d3dcompiler_47.dll" : "",
+  "bin/x86_64-pc-windows-msvc/dxcompiler.dll" : "",
+  "bin/x86_64-pc-windows-msvc/dxil.dll" : "",
+  "bin/x86_64-pc-windows-msvc/libcef.dll" : "",
+  "bin/x86_64-pc-windows-msvc/libEGL.dll" : "",
+  "bin/x86_64-pc-windows-msvc/libGLESv2.dll" : "",
+  "bin/x86_64-pc-windows-msvc/v8_context_snapshot.bin" : "",
+  "bin/x86_64-pc-windows-msvc/vk_swiftshader_icd.json" : "",
+  "bin/x86_64-pc-windows-msvc/vk_swiftshader.dll" : "",
+  "bin/x86_64-pc-windows-msvc/vulkan-1.dll" : ""
+}
+
+linux.x86_64 = {
+  "bin/x86_64-unknown-linux-gnu/libgdcef.so" : "",
+  "bin/x86_64-unknown-linux-gnu/gdcef_helper" : "",.
+
+  "bin/x86_64-unknown-linux-gnu/chrome-sandbox" : "",
+  "bin/x86_64-unknown-linux-gnu/libcef.so" : "",
+  "bin/x86_64-unknown-linux-gnu/libEGL.so" : "",
+  "bin/x86_64-unknown-linux-gnu/libGLESv2.so" : "",
+  "bin/x86_64-unknown-linux-gnu/libvk_swiftshader.so" : "",
+  "bin/x86_64-unknown-linux-gnu/libvulkan.so.1" : "",
+  "bin/x86_64-unknown-linux-gnu/v8_context_snapshot.bin" : "",
+  "bin/x86_64-unknown-linux-gnu/vk_swiftshader_icd.json" : ""  
+}

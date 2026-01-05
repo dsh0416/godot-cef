@@ -55,8 +55,8 @@ wrap_render_handler! {
             if let Some(rect) = rect {
                 if let Ok(size) = self.handler.size.lock() {
                     if size.width > 0.0 && size.height > 0.0 {
-                        rect.width = size.width as _;
-                        rect.height = size.height as _;
+                        rect.width = (size.width / DisplayServer::singleton().screen_get_scale()) as i32;
+                        rect.height = (size.height / DisplayServer::singleton().screen_get_scale()) as i32;
                     }
                 }
             }
@@ -127,8 +127,8 @@ wrap_render_handler! {
             if let Some(rect) = rect {
                 if let Ok(size) = self.handler.size.lock() {
                     if size.width > 0.0 && size.height > 0.0 {
-                        rect.width = (size.width / DisplayServer::singleton().screen_get_scale()) as _;
-                        rect.height = (size.height / DisplayServer::singleton().screen_get_scale()) as _;
+                        rect.width = (size.width / DisplayServer::singleton().screen_get_scale()) as i32;
+                        rect.height = (size.height / DisplayServer::singleton().screen_get_scale()) as i32;
                     }
                 }
             }
