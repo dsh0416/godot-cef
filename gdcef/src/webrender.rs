@@ -3,6 +3,7 @@ use cef_app::CursorType;
 use godot::{classes::DisplayServer, obj::Singleton};
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
+use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 
@@ -45,6 +46,28 @@ fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
     rgba
 }
 
+/// Common helper for view_rect implementation.
+fn compute_view_rect(size: &Arc<Mutex<PhysicalSize<f32>>>, rect: Option<&mut Rect>) {
+    if let Some(rect) = rect {
+        if let Ok(size) = size.lock() {
+            if size.width > 0.0 && size.height > 0.0 {
+                let scale = DisplayServer::singleton().screen_get_scale();
+                rect.width = (size.width / scale) as i32;
+                rect.height = (size.height / scale) as i32;
+            }
+        }
+    }
+}
+
+/// Common helper for screen_info implementation.
+fn compute_screen_info(screen_info: Option<&mut ScreenInfo>) -> ::std::os::raw::c_int {
+    if let Some(screen_info) = screen_info {
+        screen_info.device_scale_factor = DisplayServer::singleton().screen_get_scale();
+        return true as _;
+    }
+    false as _
+}
+
 wrap_render_handler! {
     pub struct SoftwareOsrHandler {
         handler: cef_app::OsrRenderHandler,
@@ -52,14 +75,7 @@ wrap_render_handler! {
 
     impl RenderHandler {
         fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
-            if let Some(rect) = rect {
-                if let Ok(size) = self.handler.size.lock() {
-                    if size.width > 0.0 && size.height > 0.0 {
-                        rect.width = (size.width / DisplayServer::singleton().screen_get_scale()) as i32;
-                        rect.height = (size.height / DisplayServer::singleton().screen_get_scale()) as i32;
-                    }
-                }
-            }
+            compute_view_rect(&self.handler.size, rect);
         }
 
         fn screen_info(
@@ -67,11 +83,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             screen_info: Option<&mut ScreenInfo>,
         ) -> ::std::os::raw::c_int {
-            if let Some(screen_info) = screen_info {
-                screen_info.device_scale_factor = DisplayServer::singleton().screen_get_scale();
-                return true as _;
-            }
-            false as _
+            compute_screen_info(screen_info)
         }
 
         fn screen_point(
@@ -124,14 +136,7 @@ wrap_render_handler! {
 
     impl RenderHandler {
         fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
-            if let Some(rect) = rect {
-                if let Ok(size) = self.handler.size.lock() {
-                    if size.width > 0.0 && size.height > 0.0 {
-                        rect.width = (size.width / DisplayServer::singleton().screen_get_scale()) as i32;
-                        rect.height = (size.height / DisplayServer::singleton().screen_get_scale()) as i32;
-                    }
-                }
-            }
+            compute_view_rect(&self.handler.size, rect);
         }
 
         fn screen_info(
@@ -139,11 +144,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             screen_info: Option<&mut ScreenInfo>,
         ) -> ::std::os::raw::c_int {
-            if let Some(screen_info) = screen_info {
-                screen_info.device_scale_factor = DisplayServer::singleton().screen_get_scale();
-                return true as _;
-            }
-            false as _
+            compute_screen_info(screen_info)
         }
 
         fn screen_point(

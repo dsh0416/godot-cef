@@ -6,7 +6,7 @@ mod utils;
 mod webrender;
 
 use cef::{
-    BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, WindowInfo,
+    BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, WindowInfo, api_hash,
     do_message_loop_work,
 };
 use cef_app::{CursorType, FrameBuffer};
@@ -125,6 +125,7 @@ impl CefTexture {
 
         CEF_INITIALIZED.call_once(|| {
             cef_init::load_cef_framework();
+            api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
             cef_init::initialize_cef();
         });
 

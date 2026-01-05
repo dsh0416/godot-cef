@@ -28,9 +28,11 @@ windows.x86_64 = {
   "bin/x86_64-pc-windows-msvc/d3dcompiler_47.dll" : "",
   "bin/x86_64-pc-windows-msvc/dxcompiler.dll" : "",
   "bin/x86_64-pc-windows-msvc/dxil.dll" : "",
+  "bin/x86_64-pc-windows-msvc/icudtl.dat" : "",
   "bin/x86_64-pc-windows-msvc/libcef.dll" : "",
   "bin/x86_64-pc-windows-msvc/libEGL.dll" : "",
   "bin/x86_64-pc-windows-msvc/libGLESv2.dll" : "",
+  "bin/x86_64-pc-windows-msvc/resources.pak" : "",
   "bin/x86_64-pc-windows-msvc/v8_context_snapshot.bin" : "",
   "bin/x86_64-pc-windows-msvc/vk_swiftshader_icd.json" : "",
   "bin/x86_64-pc-windows-msvc/vk_swiftshader.dll" : "",
@@ -39,7 +41,7 @@ windows.x86_64 = {
 
 linux.x86_64 = {
   "bin/x86_64-unknown-linux-gnu/libgdcef.so" : "",
-  "bin/x86_64-unknown-linux-gnu/gdcef_helper" : "",.
+  "bin/x86_64-unknown-linux-gnu/gdcef_helper" : "",
 
   "bin/x86_64-unknown-linux-gnu/chrome-sandbox" : "",
   "bin/x86_64-unknown-linux-gnu/libcef.so" : "",

@@ -7,8 +7,6 @@ use std::sync::Once;
 #[cfg(target_os = "macos")]
 use crate::utils::get_framework_path;
 use crate::utils::get_subprocess_path;
-#[cfg(target_os = "macos")]
-use cef::api_hash;
 
 use crate::accelerated_osr::RenderBackend;
 
@@ -38,9 +36,6 @@ pub fn load_cef_framework() {
     };
 
     assert!(result, "Failed to load macOS CEF framework");
-
-    // set the API hash
-    let _ = api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -93,8 +88,6 @@ pub fn initialize_cef() {
     load_sandbox(args.as_main_args());
 
     let subprocess_path = get_subprocess_path().unwrap();
-
-    godot_print!("subprocess_path: {}", subprocess_path.to_str().unwrap());
 
     let user_data_dir = PathBuf::from(Os::singleton().get_user_data_dir().to_string());
     let root_cache_path = user_data_dir.join("Godot CEF/Cache");

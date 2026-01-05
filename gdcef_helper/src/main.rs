@@ -1,11 +1,11 @@
-use cef::{CefString, ImplCommandLine, MainArgs, args::Args, execute_process};
+use cef::{CefString, ImplCommandLine, MainArgs, api_hash, args::Args, execute_process};
 
 mod utils;
 
 fn load_cef_framework() {
     #[cfg(target_os = "macos")]
     {
-        use cef::{api_hash, sys::cef_load_library};
+        use cef::sys::cef_load_library;
 
         let framework_path = utils::get_framework_path();
         let path = framework_path
@@ -25,9 +25,6 @@ fn load_cef_framework() {
         };
 
         assert!(result, "Failed to load macOS CEF framework");
-
-        // set the API hash
-        let _ = api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
     };
 }
 
@@ -56,6 +53,7 @@ fn load_sandbox(args: &MainArgs) {
 
 fn main() -> std::process::ExitCode {
     load_cef_framework();
+    api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
 
     let args = Args::new();
     let cmd = args.as_cmd_line().unwrap();
