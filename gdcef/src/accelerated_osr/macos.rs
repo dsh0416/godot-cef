@@ -1,10 +1,12 @@
 use super::{NativeHandleTrait, RenderBackend, SharedTextureInfo, TextureImporterTrait};
 use cef::AcceleratedPaintInfo;
+use godot::classes::rendering_device::DriverResource;
 use godot::classes::RenderingServer;
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::rendering_server::TextureType;
-use godot::global::{godot_error, godot_print, godot_warn};
+use godot::global::{godot_error, godot_warn};
 use godot::prelude::*;
+use metal::foreign_types::ForeignType;
 use std::ffi::c_void;
 
 const COLOR_SWAP_SHADER: &str = r#"
@@ -109,11 +111,13 @@ pub struct NativeTextureImporter {
 
 impl NativeTextureImporter {
     pub fn new() -> Option<Self> {
-        let device = metal::Device::system_default()?;
-        godot_print!(
-            "[AcceleratedOSR/macOS] Created Metal device: {}",
-            device.name()
-        );
+        let mut rs = RenderingServer::singleton().get_rendering_device().unwrap();
+        
+        let device = unsafe {
+            let mtl_device_ptr = rs.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
+            metal::Device::from_ptr(mtl_device_ptr as *mut _)
+        };
+
         Some(Self { device })
     }
 

@@ -26,7 +26,7 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 ## 🛠️ Prerequisites
 
 - **Rust** (2024 Edition) — Install via [rustup](https://rustup.rs/)
-- **Godot 4.4** — Download from [godotengine.org](https://godotengine.org/)
+- **Godot 4.5** — Download from [godotengine.org](https://godotengine.org/)
 - **CEF Binaries** — Automatically downloaded during build
 
 ## 📦 Building
