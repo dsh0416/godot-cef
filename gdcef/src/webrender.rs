@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
 
-use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
+use crate::{accelerated_osr::PlatformAcceleratedRenderHandler};
 
 /// Swizzle indices for BGRA -> RGBA conversion.
 /// [B,G,R,A] at indices [0,1,2,3] -> [R,G,B,A] means pick [2,1,0,3] for each pixel.

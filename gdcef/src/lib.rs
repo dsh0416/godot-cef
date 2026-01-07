@@ -6,8 +6,7 @@ mod utils;
 mod webrender;
 
 use cef::{
-    BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, WindowInfo, api_hash,
-    do_message_loop_work,
+    BrowserSettings, ImplBrowser, ImplBrowserHost, ImplFrame, RequestContextSettings, WindowInfo, api_hash, do_message_loop_work
 };
 use cef_app::{CursorType, FrameBuffer};
 use godot::classes::image::Format as ImageFormat;
@@ -233,6 +232,7 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
+    #[func]
     fn on_ready(&mut self) {
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
 
@@ -243,9 +243,9 @@ impl CefTexture {
         });
 
         self.create_browser();
-        // self.request_external_begin_frame();
     }
 
+    #[func]
     fn on_process(&mut self) {
         self.handle_max_fps_change();
         _ = self.handle_size_change();
@@ -837,5 +837,20 @@ impl CefTexture {
             return;
         };
         input::ime_finish_composing_text(&host, keep_selection);
+    }
+
+    #[func]
+    pub fn eval(&mut self, code: GString) {
+        let Some(browser) = self.app.browser.as_ref() else {
+            godot::global::godot_warn!("[CefTexture] Cannot execute JS: no browser");
+            return;
+        };
+        let Some(frame) = browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture] Cannot execute JS: no main frame");
+            return;
+        };
+
+        let code_str: cef::CefStringUtf16 = code.to_string().as_str().into();
+        frame.execute_java_script(Some(&code_str), None, 0);
     }
 }
