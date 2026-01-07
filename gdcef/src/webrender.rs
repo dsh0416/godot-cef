@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
 
+use crate::MessageQueue;
+
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 
 /// Swizzle indices for BGRA -> RGBA conversion.
@@ -328,12 +330,43 @@ impl LifeSpanHandlerImpl {
     }
 }
 
+fn on_process_message_received(
+    _browser: Option<&mut cef::Browser>,
+    _frame: Option<&mut cef::Frame>,
+    _source_process: ProcessId,
+    message: Option<&mut ProcessMessage>,
+    message_queue: &MessageQueue,
+) -> i32 {
+    if let Some(message) = message {
+        let route = CefStringUtf16::from(&message.name()).to_string();
+
+        match route.as_str() {
+            "ipcRendererToGodot" => {
+                let args = message.argument_list();
+                if let Some(args) = args {
+                    let arg = args.string(0);
+                    let msg_str = CefStringUtf16::from(&arg).to_string();
+
+                    if let Ok(mut queue) = message_queue.lock() {
+                        queue.push_back(msg_str);
+                        return 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    0
+}
+
 wrap_client! {
     pub(crate) struct SoftwareClientImpl {
         render_handler: cef::RenderHandler,
         display_handler: cef::DisplayHandler,
         context_menu_handler: cef::ContextMenuHandler,
         life_span_handler: cef::LifeSpanHandler,
+        message_queue: MessageQueue,
     }
 
     impl Client {
@@ -352,17 +385,25 @@ wrap_client! {
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
             Some(self.life_span_handler.clone())
         }
+
+        fn on_process_message_received(&self, _browser: Option<&mut cef::Browser>, _frame: Option<&mut cef::Frame>, _source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {
+            on_process_message_received(_browser, _frame, _source_process, message, &self.message_queue)
+        }
     }
 }
 
 impl SoftwareClientImpl {
-    pub(crate) fn build(render_handler: cef_app::OsrRenderHandler) -> cef::Client {
+    pub(crate) fn build(
+        render_handler: cef_app::OsrRenderHandler,
+        message_queue: MessageQueue,
+    ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
         Self::new(
             SoftwareOsrHandler::build(render_handler),
             DisplayHandlerImpl::build(cursor_type),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
+            message_queue,
         )
     }
 }
@@ -373,6 +414,7 @@ wrap_client! {
         display_handler: cef::DisplayHandler,
         context_menu_handler: cef::ContextMenuHandler,
         life_span_handler: cef::LifeSpanHandler,
+        message_queue: MessageQueue,
     }
 
     impl Client {
@@ -391,6 +433,10 @@ wrap_client! {
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
             Some(self.life_span_handler.clone())
         }
+
+        fn on_process_message_received(&self, _browser: Option<&mut cef::Browser>, _frame: Option<&mut cef::Frame>, _source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {
+            on_process_message_received(_browser, _frame, _source_process, message, &self.message_queue)
+        }
     }
 }
 
@@ -398,12 +444,14 @@ impl AcceleratedClientImpl {
     pub(crate) fn build(
         render_handler: PlatformAcceleratedRenderHandler,
         cursor_type: Arc<Mutex<CursorType>>,
+        message_queue: MessageQueue,
     ) -> cef::Client {
         Self::new(
             AcceleratedOsrHandler::build(render_handler),
             DisplayHandlerImpl::build(cursor_type),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
+            message_queue,
         )
     }
 }

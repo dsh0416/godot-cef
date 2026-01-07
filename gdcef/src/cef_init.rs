@@ -83,7 +83,6 @@ pub fn initialize_cef() {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
     let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_godot_backend(godot_backend));
-
     #[cfg(target_os = "macos")]
     load_sandbox(args.as_main_args());
 
@@ -96,7 +95,7 @@ pub fn initialize_cef() {
         browser_subprocess_path: subprocess_path.to_str().unwrap().into(),
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
-        log_severity: cef::LogSeverity::VERBOSE as _,
+        log_severity: cef::LogSeverity::DEFAULT as _,
         root_cache_path: root_cache_path.to_str().unwrap().into(),
         ..Default::default()
     };

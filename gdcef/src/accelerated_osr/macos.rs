@@ -1,10 +1,8 @@
 use super::{NativeHandleTrait, RenderBackend, SharedTextureInfo, TextureImporterTrait};
 use cef::AcceleratedPaintInfo;
 use godot::classes::RenderingServer;
-use godot::classes::image::Format as ImageFormat;
 use godot::classes::rendering_device::DriverResource;
-use godot::classes::rendering_server::TextureType;
-use godot::global::{godot_error, godot_warn};
+use godot::global::godot_warn;
 use godot::prelude::*;
 use metal::foreign_types::ForeignType;
 use std::ffi::c_void;
