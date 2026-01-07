@@ -25,7 +25,8 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, DXGI_ADAPTER_FLAG, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_CREATE_FACTORY_FLAGS,
     IDXGIAdapter1, IDXGIFactory4,
 };
-use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
+use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS};
+use windows::Win32::System::Threading::{CreateEventW, GetCurrentProcess, WaitForSingleObject, INFINITE};
 use windows::core::Interface;
 
 const COLOR_SWAP_SHADER: &str = r#"
@@ -39,8 +40,11 @@ void fragment() {
 
 /// Native handle wrapping a Windows HANDLE for D3D12 shared textures.
 /// CEF provides this handle for cross-process texture sharing.
+/// We duplicate the handle to keep it valid after CEF's on_accelerated_paint returns.
 pub struct NativeHandle {
     handle: HANDLE,
+    /// Whether this handle was duplicated and needs to be closed on drop
+    owned: bool,
 }
 
 impl NativeHandle {
@@ -52,9 +56,46 @@ impl NativeHandle {
         self.handle.0
     }
 
+    /// Creates a NativeHandle by duplicating the given handle.
+    /// This ensures the handle remains valid even after CEF closes its copy.
     pub fn from_handle(handle: *mut c_void) -> Self {
-        Self {
-            handle: HANDLE(handle),
+        let source_handle = HANDLE(handle);
+        if source_handle.is_invalid() {
+            return Self {
+                handle: HANDLE::default(),
+                owned: false,
+            };
+        }
+
+        // Duplicate the handle to keep it valid after CEF's callback returns
+        let mut duplicated_handle = HANDLE::default();
+        let current_process = unsafe { GetCurrentProcess() };
+        
+        let result = unsafe {
+            DuplicateHandle(
+                current_process,
+                source_handle,
+                current_process,
+                &mut duplicated_handle,
+                0,
+                false,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+
+        if result.is_ok() && !duplicated_handle.is_invalid() {
+            Self {
+                handle: duplicated_handle,
+                owned: true,
+            }
+        } else {
+            godot_warn!(
+                "[AcceleratedOSR/Windows] Failed to duplicate handle, using original (may become invalid)"
+            );
+            Self {
+                handle: source_handle,
+                owned: false,
+            }
         }
     }
 }
@@ -63,15 +104,53 @@ impl Default for NativeHandle {
     fn default() -> Self {
         Self {
             handle: HANDLE::default(),
+            owned: false,
         }
     }
 }
 
 impl Clone for NativeHandle {
     fn clone(&self) -> Self {
-        // Shared handles are reference-counted by the OS and don't need explicit retain
-        Self {
-            handle: self.handle,
+        if self.handle.is_invalid() {
+            return Self::default();
+        }
+
+        // Duplicate the handle for the clone
+        let mut duplicated_handle = HANDLE::default();
+        let current_process = unsafe { GetCurrentProcess() };
+        
+        let result = unsafe {
+            DuplicateHandle(
+                current_process,
+                self.handle,
+                current_process,
+                &mut duplicated_handle,
+                0,
+                false,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+
+        if result.is_ok() && !duplicated_handle.is_invalid() {
+            Self {
+                handle: duplicated_handle,
+                owned: true,
+            }
+        } else {
+            // Fallback: share the handle without owning it
+            Self {
+                handle: self.handle,
+                owned: false,
+            }
+        }
+    }
+}
+
+impl Drop for NativeHandle {
+    fn drop(&mut self) {
+        if self.owned && !self.handle.is_invalid() {
+            let _ = unsafe { CloseHandle(self.handle) };
+            self.handle = HANDLE::default();
         }
     }
 }
