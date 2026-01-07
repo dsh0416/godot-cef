@@ -132,8 +132,16 @@ impl NativeTextureImporter {
             Retained::retain(device_ptr)?
         };
 
-        let command_queue: Retained<AnyObject> = unsafe { msg_send![&*device, newCommandQueue] };
+        let command_queue: Option<Retained<AnyObject>> =
+            unsafe { msg_send![&*device, newCommandQueue] };
 
+        let command_queue = match command_queue {
+            Some(cq) => cq,
+            None => {
+                godot_warn!("Failed to create Metal command queue via newCommandQueue (returned nil)");
+                return None;
+            }
+        };
         Some(Self {
             device,
             command_queue,
@@ -157,9 +165,18 @@ impl NativeTextureImporter {
         let dst_origin = MTLOrigin { x: 0, y: 0, z: 0 };
 
         unsafe {
-            let command_buffer: Retained<AnyObject> =
+            let command_buffer_opt: Option<Retained<AnyObject>> =
                 msg_send![&*self.command_queue, commandBuffer];
-            let blit_encoder: Retained<AnyObject> = msg_send![&*command_buffer, blitCommandEncoder];
+            let command_buffer = match command_buffer_opt {
+                Some(cb) => cb,
+                None => return Err("Failed to create Metal command buffer".to_string()),
+            };
+            let blit_encoder_opt: Option<Retained<AnyObject>> =
+                msg_send![&*command_buffer, blitCommandEncoder];
+            let blit_encoder = match blit_encoder_opt {
+                Some(be) => be,
+                None => return Err("Failed to create Metal blit command encoder".to_string()),
+            };
 
             let _: () = msg_send![
                 &*blit_encoder,
@@ -224,7 +241,7 @@ impl NativeTextureImporter {
             desc.setTextureType(MTLTextureType::Type2D);
             desc.setPixelFormat(mtl_pixel_format);
             desc.setUsage(MTLTextureUsage::ShaderRead);
-            desc.setStorageMode(MTLStorageMode::Managed);
+            desc.setStorageMode(MTLStorageMode::Shared);
 
             let io_surface_ref = IOSurfaceRef(io_surface);
             let texture: Option<Retained<AnyObject>> = msg_send![
@@ -310,8 +327,22 @@ impl TextureImporterTrait for GodotTextureImporter {
             texture_ptr as *mut AnyObject
         };
 
-        let dst_texture_ref = unsafe { &*dst_texture_ptr };
+        // Ensure the destination pointer is suitably aligned for AnyObject before dereferencing.
+        let required_align = std::mem::align_of::<AnyObject>();
+        if (dst_texture_ptr as usize) % required_align != 0 {
+            return Err("Destination Metal texture handle is misaligned for AnyObject".into());
+        }
 
+        let dst_texture_ref = unsafe {
+            // SAFETY:
+            // - `dst_texture_ptr` originates from Godot's RenderingDevice via
+            //   `get_driver_resource(DriverResource::TEXTURE, ...)`, which on the Metal backend
+            //   is expected to return a valid pointer to a Metal texture object when non-zero.
+            // - We have checked that the raw handle is non-zero and suitably aligned for
+            //   `AnyObject` above.
+            // - Therefore, dereferencing `dst_texture_ptr` as `&AnyObject` is assumed to be valid.
+            &*dst_texture_ptr
+        };
         self.metal_importer.copy_texture(
             &*src_metal_texture,
             dst_texture_ref,
