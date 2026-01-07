@@ -18,8 +18,8 @@ use godot::classes::rendering_device::{
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
     DisplayServer, Engine, ITextureRect, Image, ImageTexture, InputEvent, InputEventKey,
-    InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, RenderingServer, Shader,
-    ShaderMaterial, Texture2Drd, TextureRect,
+    InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, RenderingServer,
+    Texture2Drd, TextureRect,
 };
 use godot::init::*;
 use godot::prelude::*;
@@ -141,16 +141,6 @@ impl TextureRectRd {
     }
 }
 
-/// Shader code to swap BGRA to RGBA for CEF textures
-const COLOR_SWAP_SHADER_CODE: &str = r#"
-shader_type canvas_item;
-
-void fragment() {
-    vec4 tex_color = texture(TEXTURE, UV);
-    COLOR = vec4(tex_color.b, tex_color.g, tex_color.r, tex_color.a);
-}
-"#;
-
 enum RenderMode {
     Software {
         frame_buffer: Arc<Mutex<FrameBuffer>>,
@@ -167,10 +157,6 @@ enum RenderMode {
         /// Current texture dimensions
         texture_width: u32,
         texture_height: u32,
-        /// Color swap shader (BGRA -> RGBA)
-        color_swap_shader: Gd<Shader>,
-        /// Color swap material
-        color_swap_material: Gd<ShaderMaterial>,
     },
 }
 
@@ -442,15 +428,8 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
 
-        let mut color_swap_shader = Shader::new_gd();
-        color_swap_shader.set_code(COLOR_SWAP_SHADER_CODE);
-
-        let mut color_swap_material = ShaderMaterial::new_gd();
-        color_swap_material.set_shader(&color_swap_shader);
-
         let (rd_texture_rid, texture_2d_rd) = Self::create_rd_texture(pixel_width, pixel_height);
         self.base_mut().set_texture(&texture_2d_rd);
-        self.base_mut().set_material(&color_swap_material);
 
         self.app.render_mode = Some(RenderMode::Accelerated {
             texture_info,
@@ -459,8 +438,6 @@ impl CefTexture {
             texture_2d_rd,
             texture_width: pixel_width as u32,
             texture_height: pixel_height as u32,
-            color_swap_shader,
-            color_swap_material,
         });
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
