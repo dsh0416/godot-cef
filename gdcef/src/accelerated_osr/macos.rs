@@ -138,7 +138,9 @@ impl NativeTextureImporter {
         let command_queue = match command_queue {
             Some(cq) => cq,
             None => {
-                godot_warn!("Failed to create Metal command queue via newCommandQueue (returned nil)");
+                godot_warn!(
+                    "Failed to create Metal command queue via newCommandQueue (returned nil)"
+                );
                 return None;
             }
         };
