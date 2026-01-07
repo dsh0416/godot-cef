@@ -392,7 +392,10 @@ wrap_client! {
 }
 
 impl SoftwareClientImpl {
-    pub(crate) fn build(render_handler: cef_app::OsrRenderHandler, message_queue: MessageQueue) -> cef::Client {
+    pub(crate) fn build(
+        render_handler: cef_app::OsrRenderHandler,
+        message_queue: MessageQueue,
+    ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
         Self::new(
             SoftwareOsrHandler::build(render_handler),

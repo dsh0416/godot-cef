@@ -226,7 +226,7 @@ wrap_v8_handler! {
                         let msg_str = CefStringUtf16::from(&arg.string_value());
                         if let Some(frame) = self.handler.frame.as_ref() {
                             let frame = frame.lock().unwrap();
-                            
+
                             let process_message = process_message_create(Some(&route));
                             if let Some(mut process_message) = process_message {
                                 if let Some(argument_list) = process_message.argument_list() {
