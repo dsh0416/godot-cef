@@ -1,8 +1,8 @@
 use super::{NativeHandleTrait, RenderBackend, SharedTextureInfo, TextureImporterTrait};
 use cef::AcceleratedPaintInfo;
-use godot::classes::rendering_device::DriverResource;
 use godot::classes::RenderingServer;
 use godot::classes::image::Format as ImageFormat;
+use godot::classes::rendering_device::DriverResource;
 use godot::classes::rendering_server::TextureType;
 use godot::global::{godot_error, godot_warn};
 use godot::prelude::*;
@@ -113,15 +113,19 @@ pub struct NativeTextureImporter {
 impl NativeTextureImporter {
     pub fn new() -> Option<Self> {
         let mut rs = RenderingServer::singleton().get_rendering_device().unwrap();
-        
+
         let device = unsafe {
-            let mtl_device_ptr = rs.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
+            let mtl_device_ptr =
+                rs.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
             metal::Device::from_ptr(mtl_device_ptr as *mut _)
         };
 
         let command_queue = device.new_command_queue();
 
-        Some(Self { device, command_queue })
+        Some(Self {
+            device,
+            command_queue,
+        })
     }
 
     /// Copies from a source Metal texture to a destination Metal texture using blit encoder.
@@ -133,9 +137,9 @@ impl NativeTextureImporter {
         width: u32,
         height: u32,
     ) -> Result<(), String> {
-        use metal::foreign_types::ForeignTypeRef;
         use metal::MTLOrigin;
         use metal::MTLSize;
+        use metal::foreign_types::ForeignTypeRef;
         use objc::{sel, sel_impl};
 
         if src_texture.is_null() {
@@ -364,27 +368,26 @@ impl TextureImporterTrait for GodotTextureImporter {
         }
 
         // Create Metal texture from IOSurface (source)
-        let src_metal_texture = self
-            .metal_importer
-            .import_io_surface(io_surface, src_info.width, src_info.height, src_info.format)?;
+        let src_metal_texture = self.metal_importer.import_io_surface(
+            io_surface,
+            src_info.width,
+            src_info.height,
+            src_info.format,
+        )?;
 
         // Get destination Metal texture from Godot's RenderingDevice
         let dst_metal_texture = {
             let mut rd = RenderingServer::singleton()
                 .get_rendering_device()
                 .ok_or("Failed to get RenderingDevice")?;
-            
-            let texture_ptr = rd.get_driver_resource(
-                DriverResource::TEXTURE,
-                dst_rd_rid,
-                0,
-            );
-            
+
+            let texture_ptr = rd.get_driver_resource(DriverResource::TEXTURE, dst_rd_rid, 0);
+
             if texture_ptr == 0 {
                 release_metal_texture(src_metal_texture);
                 return Err("Failed to get destination Metal texture handle".into());
             }
-            
+
             texture_ptr as *mut objc::runtime::Object
         };
 

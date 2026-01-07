@@ -133,12 +133,12 @@ pub trait TextureImporterTrait {
     fn import_texture(&mut self, texture_info: &SharedTextureInfo<Self::Handle>) -> Option<Rid>;
 
     /// Copies the CEF shared texture to a Godot-owned texture via GPU-to-GPU copy.
-    /// 
+    ///
     /// # Arguments
     /// * `src_info` - The source texture info from CEF
     /// * `dst_rd_rid` - The RenderingDevice RID of the destination Godot texture
     ///                  (obtained via RenderingServer::texture_get_rd_texture)
-    /// 
+    ///
     /// # Returns
     /// * `Ok(())` on successful copy
     /// * `Err(String)` with error description on failure

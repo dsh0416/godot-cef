@@ -1,27 +1,29 @@
 use super::{NativeHandleTrait, RenderBackend, SharedTextureInfo, TextureImporterTrait};
 use cef::AcceleratedPaintInfo;
-use godot::classes::rendering_device::DriverResource;
 use godot::classes::RenderingServer;
 use godot::classes::image::Format as ImageFormat;
+use godot::classes::rendering_device::DriverResource;
 use godot::classes::rendering_server::TextureType;
 use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
 use std::ffi::c_void;
 use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_BARRIER,
     D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-    D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-    D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_STATE_COMMON,
+    D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_DESC,
+    D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE,
-    D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator,
-    ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
+    D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator, ID3D12CommandQueue, ID3D12Device,
+    ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM,
 };
-use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS};
-use windows::Win32::System::Threading::{CreateEventW, GetCurrentProcess, WaitForSingleObject, INFINITE};
+use windows::Win32::System::Threading::{
+    CreateEventW, GetCurrentProcess, INFINITE, WaitForSingleObject,
+};
 use windows::core::Interface;
 
 const COLOR_SWAP_SHADER: &str = r#"
@@ -65,7 +67,7 @@ impl NativeHandle {
         // Duplicate the handle to keep it valid after CEF's callback returns
         let mut duplicated_handle = HANDLE::default();
         let current_process = unsafe { GetCurrentProcess() };
-        
+
         let result = unsafe {
             DuplicateHandle(
                 current_process,
@@ -113,7 +115,7 @@ impl Clone for NativeHandle {
         // Duplicate the handle for the clone
         let mut duplicated_handle = HANDLE::default();
         let current_process = unsafe { GetCurrentProcess() };
-        
+
         let result = unsafe {
             DuplicateHandle(
                 current_process,
@@ -188,33 +190,26 @@ impl NativeTextureImporter {
             })
             .ok()?;
 
-        let device_ptr = rd.get_driver_resource(
-            DriverResource::LOGICAL_DEVICE,
-            Rid::Invalid,
-            0,
-        );
+        let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
 
         if device_ptr == 0 {
             godot_error!("[AcceleratedOSR/Windows] Failed to get D3D12 device from Godot");
             return None;
         }
 
-        let device: ID3D12Device = unsafe {
-            ID3D12Device::from_raw(device_ptr as *mut c_void)
-        };
+        let device: ID3D12Device = unsafe { ID3D12Device::from_raw(device_ptr as *mut c_void) };
 
         // Get the command queue from Godot
-        let command_queue_ptr = rd.get_driver_resource(
-            DriverResource::COMMAND_QUEUE,
-            Rid::Invalid,
-            0,
-        );
+        let command_queue_ptr =
+            rd.get_driver_resource(DriverResource::COMMAND_QUEUE, Rid::Invalid, 0);
 
         let command_queue: ID3D12CommandQueue = if command_queue_ptr != 0 {
             unsafe { ID3D12CommandQueue::from_raw(command_queue_ptr as *mut c_void) }
         } else {
             // Fallback: create our own command queue using Godot's device
-            godot_warn!("[AcceleratedOSR/Windows] Could not get command queue from Godot, creating one");
+            godot_warn!(
+                "[AcceleratedOSR/Windows] Could not get command queue from Godot, creating one"
+            );
             let queue_desc = D3D12_COMMAND_QUEUE_DESC {
                 Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
                 ..Default::default()
@@ -241,14 +236,14 @@ impl NativeTextureImporter {
                 .ok()?;
 
         // Create fence for synchronization
-        let fence: ID3D12Fence = unsafe { device.CreateFence(0, windows::Win32::Graphics::Direct3D12::D3D12_FENCE_FLAG_NONE) }
-            .map_err(|e| {
-                godot_error!(
-                    "[AcceleratedOSR/Windows] Failed to create fence: {:?}",
-                    e
-                )
-            })
-            .ok()?;
+        let fence: ID3D12Fence = unsafe {
+            device.CreateFence(
+                0,
+                windows::Win32::Graphics::Direct3D12::D3D12_FENCE_FLAG_NONE,
+            )
+        }
+        .map_err(|e| godot_error!("[AcceleratedOSR/Windows] Failed to create fence: {:?}", e))
+        .ok()?;
 
         let fence_event = unsafe { CreateEventW(None, false, false, None) }
             .map_err(|e| {
@@ -259,9 +254,7 @@ impl NativeTextureImporter {
             })
             .ok()?;
 
-        godot_print!(
-            "[AcceleratedOSR/Windows] Using Godot's D3D12 device for accelerated OSR"
-        );
+        godot_print!("[AcceleratedOSR/Windows] Using Godot's D3D12 device for accelerated OSR");
 
         Some(Self {
             device: std::mem::ManuallyDrop::new(device),
@@ -272,8 +265,6 @@ impl NativeTextureImporter {
             fence_event,
         })
     }
-
-
 
     /// Import a shared texture handle from CEF into a D3D12 resource.
     ///
@@ -409,7 +400,11 @@ impl NativeTextureImporter {
         unsafe { command_list.Close() }
             .map_err(|e| format!("Failed to close command list: {:?}", e))?;
 
-        let command_lists = [Some(command_list.cast::<windows::Win32::Graphics::Direct3D12::ID3D12CommandList>().unwrap())];
+        let command_lists = [Some(
+            command_list
+                .cast::<windows::Win32::Graphics::Direct3D12::ID3D12CommandList>()
+                .unwrap(),
+        )];
         unsafe { self.command_queue.ExecuteCommandLists(&command_lists) };
 
         // Signal and wait for completion
@@ -418,8 +413,11 @@ impl NativeTextureImporter {
             .map_err(|e| format!("Failed to signal fence: {:?}", e))?;
 
         if unsafe { self.fence.GetCompletedValue() } < self.fence_value {
-            unsafe { self.fence.SetEventOnCompletion(self.fence_value, self.fence_event) }
-                .map_err(|e| format!("Failed to set event on completion: {:?}", e))?;
+            unsafe {
+                self.fence
+                    .SetEventOnCompletion(self.fence_value, self.fence_event)
+            }
+            .map_err(|e| format!("Failed to set event on completion: {:?}", e))?;
             unsafe { WaitForSingleObject(self.fence_event, INFINITE) };
         }
 
@@ -452,9 +450,7 @@ impl TextureImporterTrait for GodotTextureImporter {
             return None;
         }
 
-        godot_print!(
-            "[AcceleratedOSR/Windows] Using Godot's D3D12 backend for texture import"
-        );
+        godot_print!("[AcceleratedOSR/Windows] Using Godot's D3D12 backend for texture import");
 
         // Create color swap shader for BGRA -> RGBA conversion if needed
         let mut rs = RenderingServer::singleton();
@@ -560,11 +556,7 @@ impl TextureImporterTrait for GodotTextureImporter {
                 .get_rendering_device()
                 .ok_or("Failed to get RenderingDevice")?;
 
-            let resource_ptr = rd.get_driver_resource(
-                DriverResource::TEXTURE,
-                dst_rd_rid,
-                0,
-            );
+            let resource_ptr = rd.get_driver_resource(DriverResource::TEXTURE, dst_rd_rid, 0);
 
             if resource_ptr == 0 {
                 return Err("Failed to get destination D3D12 resource handle".into());
@@ -573,7 +565,8 @@ impl TextureImporterTrait for GodotTextureImporter {
             unsafe { ID3D12Resource::from_raw(resource_ptr as *mut c_void) }
         };
 
-        self.d3d12_importer.copy_texture(&src_resource, &dst_resource)?;
+        self.d3d12_importer
+            .copy_texture(&src_resource, &dst_resource)?;
         std::mem::forget(dst_resource);
 
         Ok(())
