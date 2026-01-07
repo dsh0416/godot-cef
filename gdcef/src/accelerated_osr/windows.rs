@@ -468,61 +468,6 @@ impl TextureImporterTrait for GodotTextureImporter {
         })
     }
 
-    fn import_texture(&mut self, texture_info: &SharedTextureInfo<Self::Handle>) -> Option<Rid> {
-        let handle = texture_info.native_handle().as_handle();
-        if handle.is_invalid() || texture_info.width == 0 || texture_info.height == 0 {
-            return None;
-        }
-
-        // Import the shared handle into a D3D12 resource
-        let d3d12_resource = self
-            .d3d12_importer
-            .import_shared_handle(
-                handle,
-                texture_info.width,
-                texture_info.height,
-                texture_info.format,
-            )
-            .map_err(|e| godot_error!("[AcceleratedOSR/Windows] D3D12 import failed: {}", e))
-            .ok()?;
-
-        // Free the previous Godot texture RID
-        if let Some(old_rid) = self.current_texture_rid.take() {
-            RenderingServer::singleton().free_rid(old_rid);
-        }
-
-        // Store the new D3D12 resource (previous one will be dropped automatically)
-        self.current_d3d12_resource = Some(d3d12_resource.clone());
-
-        // Get the native handle as a u64 pointer for Godot
-        // For D3D12, we pass the ID3D12Resource pointer
-        let native_handle = d3d12_resource.as_raw() as u64;
-
-        // Determine the image format based on CEF's color type
-        let image_format = match texture_info.format {
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => ImageFormat::RGBA8,
-            _ => ImageFormat::RGBA8, // Godot expects RGBA8, shader will swap if BGRA
-        };
-
-        // Create Godot texture from native D3D12 resource handle
-        let texture_rid = RenderingServer::singleton().texture_create_from_native_handle(
-            TextureType::TYPE_2D,
-            image_format,
-            native_handle,
-            texture_info.width as i32,
-            texture_info.height as i32,
-            1, // layers
-        );
-
-        if !texture_rid.is_valid() {
-            godot_error!("[AcceleratedOSR/Windows] Created texture RID is invalid");
-            return None;
-        }
-
-        self.current_texture_rid = Some(texture_rid);
-        Some(texture_rid)
-    }
-
     fn copy_texture(
         &mut self,
         src_info: &SharedTextureInfo<Self::Handle>,
@@ -570,10 +515,6 @@ impl TextureImporterTrait for GodotTextureImporter {
         std::mem::forget(dst_resource);
 
         Ok(())
-    }
-
-    fn get_color_swap_material(&self) -> Option<Rid> {
-        self.color_swap_material
     }
 }
 

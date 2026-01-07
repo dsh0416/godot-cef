@@ -296,58 +296,6 @@ impl TextureImporterTrait for GodotTextureImporter {
         })
     }
 
-    fn import_texture(&mut self, texture_info: &SharedTextureInfo<Self::Handle>) -> Option<Rid> {
-        let io_surface = texture_info.native_handle().as_ptr();
-        if io_surface.is_null() || texture_info.width == 0 || texture_info.height == 0 {
-            return None;
-        }
-
-        let metal_texture = self
-            .metal_importer
-            .import_io_surface(
-                io_surface,
-                texture_info.width,
-                texture_info.height,
-                texture_info.format,
-            )
-            .map_err(|e| godot_error!("[AcceleratedOSR/macOS] Metal import failed: {}", e))
-            .ok()?;
-
-        if let Some(old_rid) = self.current_texture_rid.take() {
-            RenderingServer::singleton().free_rid(old_rid);
-        }
-
-        if let Some(old) = self.current_metal_texture.take() {
-            release_metal_texture(old);
-        }
-
-        self.current_metal_texture = Some(metal_texture);
-
-        let (native_handle, texture_rid) = {
-            let handle = metal_texture as u64;
-            let rid = RenderingServer::singleton().texture_create_from_native_handle(
-                TextureType::TYPE_2D,
-                ImageFormat::RGBA8,
-                handle,
-                texture_info.width as i32,
-                texture_info.height as i32,
-                1,
-            );
-            (handle, rid)
-        };
-
-        if !texture_rid.is_valid() {
-            godot_error!(
-                "[AcceleratedOSR/macOS] Created texture RID is invalid (handle: {})",
-                native_handle
-            );
-            return None;
-        }
-
-        self.current_texture_rid = Some(texture_rid);
-        Some(texture_rid)
-    }
-
     fn copy_texture(
         &mut self,
         src_info: &SharedTextureInfo<Self::Handle>,
@@ -403,10 +351,6 @@ impl TextureImporterTrait for GodotTextureImporter {
         release_metal_texture(src_metal_texture);
 
         result
-    }
-
-    fn get_color_swap_material(&self) -> Option<Rid> {
-        self.color_swap_material
     }
 }
 

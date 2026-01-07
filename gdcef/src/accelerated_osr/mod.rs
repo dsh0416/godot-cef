@@ -127,11 +127,6 @@ pub trait TextureImporterTrait {
     where
         Self: Sized;
 
-    /// Legacy method: Creates a Godot texture from the CEF shared texture handle.
-    /// This has compatibility issues with USAGE_FLAGS across D3D12/Vulkan.
-    /// Prefer using `copy_texture` instead.
-    fn import_texture(&mut self, texture_info: &SharedTextureInfo<Self::Handle>) -> Option<Rid>;
-
     /// Copies the CEF shared texture to a Godot-owned texture via GPU-to-GPU copy.
     ///
     /// # Arguments
@@ -147,10 +142,6 @@ pub trait TextureImporterTrait {
         src_info: &SharedTextureInfo<Self::Handle>,
         dst_rd_rid: Rid,
     ) -> Result<(), String>;
-
-    fn get_color_swap_material(&self) -> Option<Rid> {
-        None
-    }
 }
 
 pub struct AcceleratedRenderHandler<H: NativeHandleTrait + Default + Send + Sync + 'static> {
@@ -276,10 +267,6 @@ impl TextureImporterTrait for GodotTextureImporter {
     type Handle = ();
 
     fn new() -> Option<Self> {
-        None
-    }
-
-    fn import_texture(&mut self, _texture_info: &SharedTextureInfo<Self::Handle>) -> Option<Rid> {
         None
     }
 
