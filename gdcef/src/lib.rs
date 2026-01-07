@@ -6,7 +6,8 @@ mod utils;
 mod webrender;
 
 use cef::{
-    BrowserSettings, ImplBrowser, ImplBrowserHost, ImplFrame, RequestContextSettings, WindowInfo, api_hash, do_message_loop_work
+    BrowserSettings, ImplBrowser, ImplBrowserHost, ImplFrame, RequestContextSettings, WindowInfo,
+    api_hash, do_message_loop_work,
 };
 use cef_app::{CursorType, FrameBuffer};
 use godot::classes::image::Format as ImageFormat;

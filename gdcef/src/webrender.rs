@@ -1,11 +1,11 @@
 use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::CursorType;
-use godot::{classes::DisplayServer, obj::Singleton};
-use std::sync::{Arc, Mutex};
+use godot::{classes::DisplayServer, global::godot_print, obj::Singleton};
+use std::{sync::{Arc, Mutex}};
 use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
 
-use crate::{accelerated_osr::PlatformAcceleratedRenderHandler};
+use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 
 /// Swizzle indices for BGRA -> RGBA conversion.
 /// [B,G,R,A] at indices [0,1,2,3] -> [R,G,B,A] means pick [2,1,0,3] for each pixel.
@@ -328,6 +328,25 @@ impl LifeSpanHandlerImpl {
     }
 }
 
+fn on_process_message_received(_browser: Option<&mut cef::Browser>, _frame: Option<&mut cef::Frame>, _source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {
+    if let Some(message) = message {
+        let route = CefStringUtf16::from(&message.name()).to_string();
+
+        match route.as_str() {
+            "ipcRendererToBrowser" => {
+                let args = message.argument_list();
+                if let Some(args) = args {
+                    let arg = args.string(0);
+                    godot_print!("Received message: {}", CefStringUtf16::from(&arg).to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    0
+}
+
 wrap_client! {
     pub(crate) struct SoftwareClientImpl {
         render_handler: cef::RenderHandler,
@@ -351,6 +370,10 @@ wrap_client! {
 
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
             Some(self.life_span_handler.clone())
+        }
+
+        fn on_process_message_received(&self, _browser: Option<&mut cef::Browser>, _frame: Option<&mut cef::Frame>, _source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {
+            on_process_message_received(_browser, _frame, _source_process, message)
         }
     }
 }
@@ -390,6 +413,10 @@ wrap_client! {
 
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
             Some(self.life_span_handler.clone())
+        }
+
+        fn on_process_message_received(&self, _browser: Option<&mut cef::Browser>, _frame: Option<&mut cef::Frame>, _source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {
+            on_process_message_received(_browser, _frame, _source_process, message)
         }
     }
 }

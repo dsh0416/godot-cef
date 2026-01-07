@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
+use cef::sys::cef_v8_propertyattribute_t;
 use cef::{
     self, BrowserProcessHandler, ImplBrowserProcessHandler, WrapBrowserProcessHandler, rc::Rc, *,
 };
@@ -120,6 +121,12 @@ wrap_app! {
                 OsrBrowserProcessHandler::new(),
             ))
         }
+
+        fn render_process_handler(&self) -> Option<cef::RenderProcessHandler> {
+            Some(RenderProcessHandlerBuilder::build(
+                OsrRenderProcessHandler::new(),
+            ))
+        }
     }
 }
 
@@ -169,6 +176,118 @@ wrap_browser_process_handler! {
 
 impl BrowserProcessHandlerBuilder {
     pub(crate) fn build(handler: OsrBrowserProcessHandler) -> BrowserProcessHandler {
+        Self::new(handler)
+    }
+}
+
+#[derive(Clone)]
+struct OsrIpcHandler {
+    frame: Option<Arc<Mutex<Frame>>>,
+}
+
+impl OsrIpcHandler {
+    pub fn new(frame: Option<Arc<Mutex<Frame>>>) -> Self {
+        Self { frame }
+    }
+}
+
+impl OsrIpcHandlerBuilder {
+    pub(crate) fn build(handler: OsrIpcHandler) -> V8Handler {
+        Self::new(handler)
+    }
+}
+
+wrap_v8_handler! {
+    pub(crate) struct OsrIpcHandlerBuilder {
+        handler: OsrIpcHandler,
+    }
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            _name: Option<&CefStringUtf16>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<cef::V8Value>>,
+            _exception: Option<&mut CefStringUtf16>
+        ) -> i32 {
+            if let Some(arguments) = arguments {
+                if let Some(arg) = arguments.get(0) {
+                    if let Some(arg) = arg {
+                        if arg.is_string() != 1 {
+                            if let Some(retval) = retval {
+                                *retval = v8_value_create_bool(false as _);
+                            }
+
+                            return 0;
+                        }
+
+                        let route = CefStringUtf16::from("ipcRendererToBrowser");
+                        let msg_str = CefStringUtf16::from(&arg.string_value());
+                        if let Some(frame) = self.handler.frame.as_ref() {
+                            let frame = frame.lock().unwrap();
+                            
+                            let process_message = process_message_create(Some(&route));
+                            if let Some(mut process_message) = process_message {
+                                if let Some(argument_list) = process_message.argument_list() {
+                                    argument_list.set_string(0, Some(&msg_str));
+                                }
+
+                                frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+
+                                if let Some(retval) = retval {
+                                    *retval = v8_value_create_bool(true as _);
+                                }
+
+                                return 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(retval) = retval {
+                *retval = v8_value_create_bool(false as _);
+            }
+
+            return 0;
+        }
+    }
+}
+
+#[derive(Clone)]
+struct OsrRenderProcessHandler {}
+
+impl OsrRenderProcessHandler {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+wrap_render_process_handler! {
+    pub(crate) struct RenderProcessHandlerBuilder {
+        handler: OsrRenderProcessHandler,
+    }
+
+    impl RenderProcessHandler {
+        fn on_context_created(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, context: Option<&mut V8Context>) {
+            if let Some(context) = context {
+                let global = context.global();
+                if let Some(global) = global {
+                    if let Some(frame) = frame {
+                        let key: CefStringUtf16 = "ipcSend".to_string().as_str().into();
+                        let mut handler = OsrIpcHandlerBuilder::build(OsrIpcHandler::new(Some(Arc::new(Mutex::new(frame.clone())))));
+                        let mut func = v8_value_create_function(Some(&"ipcSend".into()), Some(&mut handler)).unwrap();
+                        global.set_value_bykey(Some(&key), Some(&mut func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl RenderProcessHandlerBuilder {
+    pub(crate) fn build(handler: OsrRenderProcessHandler) -> RenderProcessHandler {
         Self::new(handler)
     }
 }
