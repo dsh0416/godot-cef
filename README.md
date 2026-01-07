@@ -124,7 +124,7 @@ cef_texture.ime_finish_composing_text(false) # Finish composing
 - [ ] Automatic Building Support
 - [ ] CI/CD Configuration
 - [ ] Custom Scheme Support
-- [ ] IPC Support
+- [x] IPC Support
 - [ ] Better IME Support
 - [ ] Gamepad Support
 - [ ] Access to Godot Filesystem

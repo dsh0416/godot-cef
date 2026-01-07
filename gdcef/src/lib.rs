@@ -161,7 +161,6 @@ enum RenderMode {
     },
 }
 
-/// A queue for messages received from CEF's renderer process.
 pub type MessageQueue = Arc<Mutex<VecDeque<String>>>;
 
 struct App {
@@ -239,8 +238,6 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
-    /// Signal emitted when a message is received from the CEF renderer process via IPC.
-    /// The message parameter contains the message content as a string.
     #[signal]
     fn ipc_message(message: GString);
 

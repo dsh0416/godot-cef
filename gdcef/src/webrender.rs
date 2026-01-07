@@ -1,6 +1,6 @@
 use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::CursorType;
-use godot::{classes::DisplayServer, global::godot_print, obj::Singleton};
+use godot::{classes::DisplayServer, obj::Singleton};
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
@@ -347,7 +347,6 @@ fn on_process_message_received(
                     let arg = args.string(0);
                     let msg_str = CefStringUtf16::from(&arg).to_string();
 
-                    // Push message to queue for Godot signal emission
                     if let Ok(mut queue) = message_queue.lock() {
                         queue.push_back(msg_str);
                     }
