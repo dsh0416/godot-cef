@@ -107,6 +107,7 @@ impl NativeHandleTrait for NativeHandle {
 
 pub struct NativeTextureImporter {
     device: metal::Device,
+    command_queue: metal::CommandQueue,
 }
 
 impl NativeTextureImporter {
@@ -118,7 +119,67 @@ impl NativeTextureImporter {
             metal::Device::from_ptr(mtl_device_ptr as *mut _)
         };
 
-        Some(Self { device })
+        let command_queue = device.new_command_queue();
+
+        Some(Self { device, command_queue })
+    }
+
+    /// Copies from a source Metal texture to a destination Metal texture using blit encoder.
+    #[allow(unexpected_cfgs)]
+    pub fn copy_texture(
+        &self,
+        src_texture: *mut objc::runtime::Object,
+        dst_texture: *mut objc::runtime::Object,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        use metal::foreign_types::ForeignTypeRef;
+        use metal::MTLOrigin;
+        use metal::MTLSize;
+        use objc::{sel, sel_impl};
+
+        if src_texture.is_null() {
+            return Err("Source texture is null".into());
+        }
+        if dst_texture.is_null() {
+            return Err("Destination texture is null".into());
+        }
+
+        let command_buffer = self.command_queue.new_command_buffer();
+        let blit_encoder = command_buffer.new_blit_command_encoder();
+
+        let src_origin = MTLOrigin { x: 0, y: 0, z: 0 };
+        let src_size = MTLSize {
+            width: width as u64,
+            height: height as u64,
+            depth: 1,
+        };
+        let dst_origin = MTLOrigin { x: 0, y: 0, z: 0 };
+
+        // Get the raw pointer from the blit encoder reference using ForeignTypeRef trait
+        let blit_encoder_ptr = blit_encoder.as_ptr() as *mut objc::runtime::Object;
+
+        // Use objc messaging to call copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:
+        unsafe {
+            let _: () = objc::msg_send![
+                blit_encoder_ptr,
+                copyFromTexture:src_texture
+                sourceSlice:0usize
+                sourceLevel:0usize
+                sourceOrigin:src_origin
+                sourceSize:src_size
+                toTexture:dst_texture
+                destinationSlice:0usize
+                destinationLevel:0usize
+                destinationOrigin:dst_origin
+            ];
+        }
+
+        blit_encoder.end_encoding();
+        command_buffer.commit();
+        command_buffer.wait_until_completed();
+
+        Ok(())
     }
 
     #[allow(unexpected_cfgs)]
@@ -284,6 +345,64 @@ impl TextureImporterTrait for GodotTextureImporter {
 
         self.current_texture_rid = Some(texture_rid);
         Some(texture_rid)
+    }
+
+    fn copy_texture(
+        &mut self,
+        src_info: &SharedTextureInfo<Self::Handle>,
+        dst_rd_rid: Rid,
+    ) -> Result<(), String> {
+        let io_surface = src_info.native_handle().as_ptr();
+        if io_surface.is_null() {
+            return Err("Source IOSurface is null".into());
+        }
+        if src_info.width == 0 || src_info.height == 0 {
+            return Err(format!(
+                "Invalid source dimensions: {}x{}",
+                src_info.width, src_info.height
+            ));
+        }
+        if !dst_rd_rid.is_valid() {
+            return Err("Destination RID is invalid".into());
+        }
+
+        // Create Metal texture from IOSurface (source)
+        let src_metal_texture = self
+            .metal_importer
+            .import_io_surface(io_surface, src_info.width, src_info.height, src_info.format)?;
+
+        // Get destination Metal texture from Godot's RenderingDevice
+        let dst_metal_texture = {
+            let mut rd = RenderingServer::singleton()
+                .get_rendering_device()
+                .ok_or("Failed to get RenderingDevice")?;
+            
+            let texture_ptr = rd.get_driver_resource(
+                DriverResource::TEXTURE,
+                dst_rd_rid,
+                0,
+            );
+            
+            if texture_ptr == 0 {
+                release_metal_texture(src_metal_texture);
+                return Err("Failed to get destination Metal texture handle".into());
+            }
+            
+            texture_ptr as *mut objc::runtime::Object
+        };
+
+        // Perform the GPU copy
+        let result = self.metal_importer.copy_texture(
+            src_metal_texture,
+            dst_metal_texture,
+            src_info.width,
+            src_info.height,
+        );
+
+        // Clean up source texture (it was created just for this copy)
+        release_metal_texture(src_metal_texture);
+
+        result
     }
 
     fn get_color_swap_material(&self) -> Option<Rid> {

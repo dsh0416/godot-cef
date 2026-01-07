@@ -34,6 +34,109 @@ struct GodotCef;
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotCef {}
 
+/// A TextureRect that creates and manages a Godot-owned texture suitable for
+/// GPU-to-GPU copying from external sources (like CEF shared textures).
+/// 
+/// This node creates an ImageTexture with a placeholder Image that has the correct
+/// usage flags for Godot's rendering pipeline. The native handle of this texture
+/// can be obtained via RenderingDevice::get_driver_resource() for direct GPU copying.
+#[derive(GodotClass)]
+#[class(base=TextureRect)]
+pub struct TextureRectRd {
+    base: Base<TextureRect>,
+    texture: Option<Gd<ImageTexture>>,
+    width: u32,
+    height: u32,
+}
+
+#[godot_api]
+impl ITextureRect for TextureRectRd {
+    fn init(base: Base<TextureRect>) -> Self {
+        Self {
+            base,
+            texture: None,
+            width: 0,
+            height: 0,
+        }
+    }
+
+    fn ready(&mut self) {
+        self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
+    }
+}
+
+#[godot_api]
+impl TextureRectRd {
+    /// Creates or resizes the internal texture to the specified dimensions.
+    /// Returns the RID of the texture for use with RenderingServer operations.
+    #[func]
+    pub fn ensure_texture_size(&mut self, width: i32, height: i32) -> Rid {
+        let width = width.max(1) as u32;
+        let height = height.max(1) as u32;
+
+        // Only recreate if dimensions changed
+        if self.width == width && self.height == height {
+            if let Some(ref texture) = self.texture {
+                return texture.get_rid();
+            }
+        }
+
+        self.width = width;
+        self.height = height;
+
+        // Create a placeholder image with the specified dimensions
+        let image = Image::create(width as i32, height as i32, false, ImageFormat::RGBA8);
+        
+        if let Some(image) = image {
+            let mut texture = ImageTexture::new_gd();
+            texture.set_image(&image);
+            
+            // Get the RID before storing
+            let rid = texture.get_rid();
+            
+            // Set this texture on the TextureRect
+            self.base_mut().set_texture(&texture);
+            self.texture = Some(texture);
+            
+            rid
+        } else {
+            godot::global::godot_error!("[TextureRectRd] Failed to create placeholder image {}x{}", width, height);
+            Rid::Invalid
+        }
+    }
+
+    /// Returns the RID of the internal texture, or Invalid if no texture exists.
+    #[func]
+    pub fn get_texture_rid(&self) -> Rid {
+        self.texture.as_ref().map(|t| t.get_rid()).unwrap_or(Rid::Invalid)
+    }
+
+    /// Returns the RenderingDevice RID for the texture, which can be used with
+    /// get_driver_resource() to obtain the native handle.
+    #[func]
+    pub fn get_rd_texture_rid(&self) -> Rid {
+        let texture_rid = self.get_texture_rid();
+        if !texture_rid.is_valid() {
+            return Rid::Invalid;
+        }
+        
+        let rs = RenderingServer::singleton();
+        rs.texture_get_rd_texture(texture_rid)
+    }
+
+    /// Returns the current texture width.
+    #[func]
+    pub fn get_texture_width(&self) -> i32 {
+        self.width as i32
+    }
+
+    /// Returns the current texture height.
+    #[func]
+    pub fn get_texture_height(&self) -> i32 {
+        self.height as i32
+    }
+}
+
 enum RenderMode {
     Software {
         frame_buffer: Arc<Mutex<FrameBuffer>>,
@@ -43,7 +146,11 @@ enum RenderMode {
     Accelerated {
         texture_info: Arc<Mutex<PlatformSharedTextureInfo>>,
         importer: GodotTextureImporter,
-        current_rid: Option<Rid>,
+        /// The Godot-owned texture that we copy CEF's texture into
+        godot_texture: Gd<ImageTexture>,
+        /// Current texture dimensions
+        texture_width: u32,
+        texture_height: u32,
     },
 }
 
@@ -145,13 +252,8 @@ impl CefTexture {
     }
 
     fn shutdown(&mut self) {
-        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        if let Some(RenderMode::Accelerated { current_rid, .. }) = &self.app.render_mode {
-            if let Some(rid) = current_rid {
-                let mut rs = RenderingServer::singleton();
-                rs.free_rid(*rid);
-            }
-        }
+        // Note: The Godot-owned texture in Accelerated mode will be cleaned up
+        // automatically when render_mode is set to None (Gd<ImageTexture> is dropped)
 
         self.app.browser = None;
         self.app.render_mode = None;
@@ -318,10 +420,16 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
 
+        // Create a Godot-owned texture for GPU copy destination
+        let godot_texture = Self::create_godot_texture(pixel_width, pixel_height);
+        self.base_mut().set_texture(&godot_texture);
+
         self.app.render_mode = Some(RenderMode::Accelerated {
             texture_info,
             importer,
-            current_rid: None,
+            godot_texture,
+            texture_width: pixel_width as u32,
+            texture_height: pixel_height as u32,
         });
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
@@ -340,6 +448,19 @@ impl CefTexture {
             None,
             context,
         )
+    }
+
+    /// Creates a Godot-owned ImageTexture with proper usage flags for GPU copying.
+    fn create_godot_texture(width: i32, height: i32) -> Gd<ImageTexture> {
+        let width = width.max(1);
+        let height = height.max(1);
+
+        let image = Image::create(width, height, false, ImageFormat::RGBA8)
+            .expect("Failed to create placeholder image");
+        
+        let mut texture = ImageTexture::new_gd();
+        texture.set_image(&image);
+        texture
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -471,14 +592,66 @@ impl CefTexture {
             return;
         }
 
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
-            let canvas_item = self.base().get_canvas_item();
-            let size = self.base().get_size();
+            // First, check if we need to resize and handle it separately to avoid borrow issues
+            let needs_resize = if let Some(RenderMode::Accelerated {
+                texture_info,
+                texture_width,
+                texture_height,
+                ..
+            }) = &self.app.render_mode
+            {
+                if let Ok(tex_info) = texture_info.lock() {
+                    tex_info.width != *texture_width || tex_info.height != *texture_height
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
 
+            // Handle resize outside of the render_mode borrow
+            if needs_resize {
+                let new_texture_clone = if let Some(RenderMode::Accelerated {
+                    texture_info,
+                    texture_width,
+                    texture_height,
+                    godot_texture,
+                    ..
+                }) = &mut self.app.render_mode
+                {
+                    if let Ok(tex_info) = texture_info.lock() {
+                        let new_w = tex_info.width;
+                        let new_h = tex_info.height;
+                        drop(tex_info); // Release the lock before creating texture
+                        
+                        // Recreate the Godot texture with new dimensions
+                        let new_texture = Self::create_godot_texture(new_w as i32, new_h as i32);
+                        let texture_clone = new_texture.clone();
+                        *godot_texture = new_texture;
+                        *texture_width = new_w;
+                        *texture_height = new_h;
+                        Some(texture_clone)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                // Now set the texture on base (outside of render_mode borrow)
+                if let Some(texture) = new_texture_clone {
+                    self.base_mut().set_texture(&texture);
+                }
+            }
+
+            // Now perform the actual texture copy
             if let Some(RenderMode::Accelerated {
                 texture_info,
                 importer,
-                current_rid,
+                godot_texture,
+                ..
             }) = &mut self.app.render_mode
             {
                 let Ok(mut tex_info) = texture_info.lock() else {
@@ -494,23 +667,30 @@ impl CefTexture {
                     return;
                 }
 
-                let color_swap_material = importer.get_color_swap_material();
+                // Get the RenderingDevice RID for the destination texture
+                let texture_rid = godot_texture.get_rid();
+                let rs = RenderingServer::singleton();
+                let rd_texture_rid = rs.texture_get_rd_texture(texture_rid);
 
-                if let Some(new_rid) = importer.import_texture(&tex_info) {
-                    *current_rid = Some(new_rid);
-
-                    let mut rs = RenderingServer::singleton();
-                    rs.canvas_item_clear(canvas_item);
-
-                    if let Some(material_rid) = color_swap_material {
-                        rs.canvas_item_set_material(canvas_item, material_rid);
-                    }
-
-                    rs.canvas_item_add_texture_rect(
-                        canvas_item,
-                        Rect2::new(Vector2::ZERO, size),
-                        new_rid,
+                if !rd_texture_rid.is_valid() {
+                    godot::global::godot_warn!(
+                        "[CefTexture] Failed to get RD texture RID for copy"
                     );
+                    tex_info.dirty = false;
+                    return;
+                }
+
+                // Perform GPU copy from CEF texture to Godot texture
+                match importer.copy_texture(&tex_info, rd_texture_rid) {
+                    Ok(()) => {
+                        // Copy successful - texture is now updated
+                    }
+                    Err(e) => {
+                        godot::global::godot_error!(
+                            "[CefTexture] GPU texture copy failed: {}",
+                            e
+                        );
+                    }
                 }
 
                 tex_info.dirty = false;

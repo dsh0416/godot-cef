@@ -93,6 +93,15 @@ impl TextureImporterTrait for GodotTextureImporter {
         None
     }
 
+    fn copy_texture(
+        &mut self,
+        _src_info: &SharedTextureInfo<Self::Handle>,
+        _dst_rd_rid: Rid,
+    ) -> Result<(), String> {
+        // TODO: Implement Vulkan texture copy
+        Err("Accelerated OSR not yet implemented on Linux".to_string())
+    }
+
     fn get_color_swap_material(&self) -> Option<Rid> {
         None
     }
