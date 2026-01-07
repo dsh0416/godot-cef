@@ -4,17 +4,25 @@ use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
 use godot::global::godot_warn;
 use godot::prelude::*;
-use metal::foreign_types::ForeignType;
+use objc2::encode::{Encode, Encoding};
+use objc2::msg_send;
+use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
+use objc2_metal::{
+    MTLOrigin, MTLPixelFormat, MTLSize, MTLStorageMode, MTLTextureDescriptor, MTLTextureType,
+    MTLTextureUsage,
+};
 use std::ffi::c_void;
 
-const COLOR_SWAP_SHADER: &str = r#"
-shader_type canvas_item;
+/// Wrapper type for IOSurfaceRef with correct Objective-C type encoding.
+/// Metal's `newTextureWithDescriptor:iosurface:plane:` expects `^{__IOSurface=}` encoding.
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+struct IOSurfaceRef(*mut c_void);
 
-void fragment() {
-    vec4 tex_color = texture(TEXTURE, UV);
-    COLOR = vec4(tex_color.b, tex_color.g, tex_color.r, tex_color.a);
+unsafe impl Encode for IOSurfaceRef {
+    const ENCODING: Encoding = Encoding::Pointer(&Encoding::Struct("__IOSurface", &[]));
 }
-"#;
 
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
@@ -104,22 +112,38 @@ impl NativeHandleTrait for NativeHandle {
 }
 
 pub struct NativeTextureImporter {
-    device: metal::Device,
-    command_queue: metal::CommandQueue,
+    device: Retained<AnyObject>,
+    command_queue: Retained<AnyObject>,
 }
 
 impl NativeTextureImporter {
     pub fn new() -> Option<Self> {
         let mut rs = RenderingServer::singleton().get_rendering_device().unwrap();
 
-        let device = unsafe {
-            let mtl_device_ptr =
-                rs.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
-            metal::Device::from_ptr(mtl_device_ptr as *mut _)
+        let mtl_device_ptr =
+            rs.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
+
+        if mtl_device_ptr == 0 {
+            return None;
+        }
+
+        let device: Retained<AnyObject> = unsafe {
+            let device_ptr = mtl_device_ptr as *mut AnyObject;
+            Retained::retain(device_ptr)?
         };
 
-        let command_queue = device.new_command_queue();
+        let command_queue: Option<Retained<AnyObject>> =
+            unsafe { msg_send![&*device, newCommandQueue] };
 
+        let command_queue = match command_queue {
+            Some(cq) => cq,
+            None => {
+                godot_warn!(
+                    "Failed to create Metal command queue via newCommandQueue (returned nil)"
+                );
+                return None;
+            }
+        };
         Some(Self {
             device,
             command_queue,
@@ -127,71 +151,63 @@ impl NativeTextureImporter {
     }
 
     /// Copies from a source Metal texture to a destination Metal texture using blit encoder.
-    #[allow(unexpected_cfgs)]
     pub fn copy_texture(
         &self,
-        src_texture: *mut objc::runtime::Object,
-        dst_texture: *mut objc::runtime::Object,
+        src_texture: &AnyObject,
+        dst_texture: &AnyObject,
         width: u32,
         height: u32,
     ) -> Result<(), String> {
-        use metal::MTLOrigin;
-        use metal::MTLSize;
-        use metal::foreign_types::ForeignTypeRef;
-        use objc::{sel, sel_impl};
-
-        if src_texture.is_null() {
-            return Err("Source texture is null".into());
-        }
-        if dst_texture.is_null() {
-            return Err("Destination texture is null".into());
-        }
-
-        let command_buffer = self.command_queue.new_command_buffer();
-        let blit_encoder = command_buffer.new_blit_command_encoder();
-
         let src_origin = MTLOrigin { x: 0, y: 0, z: 0 };
         let src_size = MTLSize {
-            width: width as u64,
-            height: height as u64,
+            width: width as usize,
+            height: height as usize,
             depth: 1,
         };
         let dst_origin = MTLOrigin { x: 0, y: 0, z: 0 };
-        let blit_encoder_ptr = blit_encoder.as_ptr() as *mut objc::runtime::Object;
 
         unsafe {
-            let _: () = objc::msg_send![
-                blit_encoder_ptr,
-                copyFromTexture:src_texture
-                sourceSlice:0usize
-                sourceLevel:0usize
-                sourceOrigin:src_origin
-                sourceSize:src_size
-                toTexture:dst_texture
-                destinationSlice:0usize
-                destinationLevel:0usize
-                destinationOrigin:dst_origin
-            ];
-        }
+            let command_buffer_opt: Option<Retained<AnyObject>> =
+                msg_send![&*self.command_queue, commandBuffer];
+            let command_buffer = match command_buffer_opt {
+                Some(cb) => cb,
+                None => return Err("Failed to create Metal command buffer".to_string()),
+            };
+            let blit_encoder_opt: Option<Retained<AnyObject>> =
+                msg_send![&*command_buffer, blitCommandEncoder];
+            let blit_encoder = match blit_encoder_opt {
+                Some(be) => be,
+                None => return Err("Failed to create Metal blit command encoder".to_string()),
+            };
 
-        blit_encoder.end_encoding();
-        command_buffer.commit();
-        command_buffer.wait_until_completed();
+            let _: () = msg_send![
+                &*blit_encoder,
+                copyFromTexture: src_texture,
+                sourceSlice: 0usize,
+                sourceLevel: 0usize,
+                sourceOrigin: src_origin,
+                sourceSize: src_size,
+                toTexture: dst_texture,
+                destinationSlice: 0usize,
+                destinationLevel: 0usize,
+                destinationOrigin: dst_origin
+            ];
+
+            let _: () = msg_send![&*blit_encoder, endEncoding];
+            let _: () = msg_send![&*command_buffer, commit];
+            let _: () = msg_send![&*command_buffer, waitUntilCompleted];
+        }
 
         Ok(())
     }
 
-    #[allow(unexpected_cfgs)]
     pub fn import_io_surface(
         &self,
         io_surface: *mut c_void,
         width: u32,
         height: u32,
         format: cef::sys::cef_color_type_t,
-    ) -> Result<*mut objc::runtime::Object, String> {
-        use metal::{MTLPixelFormat, MTLStorageMode, MTLTextureType, MTLTextureUsage};
-        use objc::{sel, sel_impl};
-
+    ) -> Result<Retained<AnyObject>, String> {
         if io_surface.is_null() {
             return Err("IOSurface is null".into());
         }
@@ -220,47 +236,32 @@ impl NativeTextureImporter {
             _ => MTLPixelFormat::BGRA8Unorm,
         };
 
-        let desc = metal::TextureDescriptor::new();
-        desc.set_width(width as u64);
-        desc.set_height(height as u64);
-        desc.set_texture_type(MTLTextureType::D2);
-        desc.set_pixel_format(mtl_pixel_format);
-        desc.set_usage(MTLTextureUsage::ShaderRead);
-        desc.set_storage_mode(MTLStorageMode::Managed);
-
-        let texture: *mut objc::runtime::Object = unsafe {
-            objc::msg_send![
-                self.device.as_ref(),
-                newTextureWithDescriptor:desc.as_ref()
-                iosurface:io_surface
-                plane:0usize
-            ]
-        };
-
-        if texture.is_null() {
-            return Err("Metal texture creation failed".into());
-        }
-
-        Ok(texture)
-    }
-}
-
-#[allow(unexpected_cfgs)]
-fn release_metal_texture(texture: *mut objc::runtime::Object) {
-    use objc::{sel, sel_impl};
-    if !texture.is_null() {
         unsafe {
-            let _: () = objc::msg_send![texture, release];
+            let desc = MTLTextureDescriptor::new();
+            desc.setWidth(width as usize);
+            desc.setHeight(height as usize);
+            desc.setTextureType(MTLTextureType::Type2D);
+            desc.setPixelFormat(mtl_pixel_format);
+            desc.setUsage(MTLTextureUsage::ShaderRead);
+            desc.setStorageMode(MTLStorageMode::Shared);
+
+            let io_surface_ref = IOSurfaceRef(io_surface);
+            let texture: Option<Retained<AnyObject>> = msg_send![
+                &*self.device,
+                newTextureWithDescriptor: &*desc,
+                iosurface: io_surface_ref,
+                plane: 0usize
+            ];
+
+            texture.ok_or_else(|| "Metal texture creation failed".to_string())
         }
     }
 }
 
 pub struct GodotTextureImporter {
     metal_importer: NativeTextureImporter,
-    current_metal_texture: Option<*mut objc::runtime::Object>,
+    current_metal_texture: Option<Retained<AnyObject>>,
     current_texture_rid: Option<Rid>,
-    color_swap_shader: Option<Rid>,
-    color_swap_material: Option<Rid>,
 }
 
 impl TextureImporterTrait for GodotTextureImporter {
@@ -279,18 +280,10 @@ impl TextureImporterTrait for GodotTextureImporter {
             return None;
         }
 
-        let mut rs = RenderingServer::singleton();
-        let shader_rid = rs.shader_create();
-        rs.shader_set_code(shader_rid, COLOR_SWAP_SHADER);
-        let material_rid = rs.material_create();
-        rs.material_set_shader(material_rid, shader_rid);
-
         Some(Self {
             metal_importer,
             current_metal_texture: None,
             current_texture_rid: None,
-            color_swap_shader: Some(shader_rid),
-            color_swap_material: Some(material_rid),
         })
     }
 
@@ -322,7 +315,7 @@ impl TextureImporterTrait for GodotTextureImporter {
         )?;
 
         // Get destination Metal texture from Godot's RenderingDevice
-        let dst_metal_texture = {
+        let dst_texture_ptr = {
             let mut rd = RenderingServer::singleton()
                 .get_rendering_device()
                 .ok_or("Failed to get RenderingDevice")?;
@@ -330,25 +323,34 @@ impl TextureImporterTrait for GodotTextureImporter {
             let texture_ptr = rd.get_driver_resource(DriverResource::TEXTURE, dst_rd_rid, 0);
 
             if texture_ptr == 0 {
-                release_metal_texture(src_metal_texture);
                 return Err("Failed to get destination Metal texture handle".into());
             }
 
-            texture_ptr as *mut objc::runtime::Object
+            texture_ptr as *mut AnyObject
         };
 
-        // Perform the GPU copy
-        let result = self.metal_importer.copy_texture(
-            src_metal_texture,
-            dst_metal_texture,
+        // Ensure the destination pointer is suitably aligned for AnyObject before dereferencing.
+        let required_align = std::mem::align_of::<AnyObject>();
+        if (dst_texture_ptr as usize) % required_align != 0 {
+            return Err("Destination Metal texture handle is misaligned for AnyObject".into());
+        }
+
+        let dst_texture_ref = unsafe {
+            // SAFETY:
+            // - `dst_texture_ptr` originates from Godot's RenderingDevice via
+            //   `get_driver_resource(DriverResource::TEXTURE, ...)`, which on the Metal backend
+            //   is expected to return a valid pointer to a Metal texture object when non-zero.
+            // - We have checked that the raw handle is non-zero and suitably aligned for
+            //   `AnyObject` above.
+            // - Therefore, dereferencing `dst_texture_ptr` as `&AnyObject` is assumed to be valid.
+            &*dst_texture_ptr
+        };
+        self.metal_importer.copy_texture(
+            &*src_metal_texture,
+            dst_texture_ref,
             src_info.width,
             src_info.height,
-        );
-
-        // Clean up source texture (it was created just for this copy)
-        release_metal_texture(src_metal_texture);
-
-        result
+        )
     }
 }
 
@@ -358,15 +360,7 @@ impl Drop for GodotTextureImporter {
         if let Some(rid) = self.current_texture_rid.take() {
             rs.free_rid(rid);
         }
-        if let Some(tex) = self.current_metal_texture.take() {
-            release_metal_texture(tex);
-        }
-        if let Some(rid) = self.color_swap_material.take() {
-            rs.free_rid(rid);
-        }
-        if let Some(rid) = self.color_swap_shader.take() {
-            rs.free_rid(rid);
-        }
+        self.current_metal_texture.take();
     }
 }
 

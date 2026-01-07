@@ -23,8 +23,8 @@ wide = { workspace = true }
 plist = { workspace = true }
 serde = { workspace = true }
 libloading = { workspace = true }
-metal = { workspace = true }
-objc = { workspace = true }
+objc2 = { workspace = true }
+objc2-metal = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true }
