@@ -16,7 +16,10 @@ use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
     DisplayServer, Engine, ITextureRect, Image, ImageTexture, InputEvent, InputEventKey,
     InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, RenderingServer,
-    Shader, ShaderMaterial, TextureRect,
+    Shader, ShaderMaterial, Texture2Drd, TextureRect,
+};
+use godot::classes::rendering_device::{
+    DataFormat, TextureSamples, TextureType as RdTextureType, TextureUsageBits,
 };
 use godot::init::*;
 use godot::prelude::*;
@@ -156,8 +159,10 @@ enum RenderMode {
     Accelerated {
         texture_info: Arc<Mutex<PlatformSharedTextureInfo>>,
         importer: GodotTextureImporter,
-        /// The Godot-owned texture that we copy CEF's texture into
-        godot_texture: Gd<ImageTexture>,
+        /// The RenderingDevice texture RID (for native handle access)
+        rd_texture_rid: Rid,
+        /// The Texture2DRD wrapper for display in TextureRect
+        texture_2d_rd: Gd<Texture2Drd>,
         /// Current texture dimensions
         texture_width: u32,
         texture_height: u32,
@@ -266,9 +271,14 @@ impl CefTexture {
     }
 
     fn shutdown(&mut self) {
-        // Note: The Godot-owned texture, shader, and material in Accelerated mode
+        // Clean up RenderingDevice texture for accelerated mode
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+        if let Some(RenderMode::Accelerated { rd_texture_rid, .. }) = &self.app.render_mode {
+            Self::free_rd_texture(*rd_texture_rid);
+        }
+
+        // Note: The Gd objects (shader, material, texture_2d_rd) in Accelerated mode
         // will be cleaned up automatically when render_mode is set to None
-        // (Gd objects are dropped)
 
         self.app.browser = None;
         self.app.render_mode = None;
@@ -442,9 +452,10 @@ impl CefTexture {
         let mut color_swap_material = ShaderMaterial::new_gd();
         color_swap_material.set_shader(&color_swap_shader);
 
-        // Create a Godot-owned texture for GPU copy destination
-        let godot_texture = Self::create_godot_texture(pixel_width, pixel_height);
-        self.base_mut().set_texture(&godot_texture);
+        // Create a RenderingDevice texture for GPU copy destination
+        // This exposes the native handle via DRIVER_RESOURCE_TEXTURE
+        let (rd_texture_rid, texture_2d_rd) = Self::create_rd_texture(pixel_width, pixel_height);
+        self.base_mut().set_texture(&texture_2d_rd);
         
         // Apply color swap material to the TextureRect
         self.base_mut().set_material(&color_swap_material);
@@ -452,7 +463,8 @@ impl CefTexture {
         self.app.render_mode = Some(RenderMode::Accelerated {
             texture_info,
             importer,
-            godot_texture,
+            rd_texture_rid,
+            texture_2d_rd,
             texture_width: pixel_width as u32,
             texture_height: pixel_height as u32,
             color_swap_shader,
@@ -477,17 +489,53 @@ impl CefTexture {
         )
     }
 
-    /// Creates a Godot-owned ImageTexture with proper usage flags for GPU copying.
-    fn create_godot_texture(width: i32, height: i32) -> Gd<ImageTexture> {
-        let width = width.max(1);
-        let height = height.max(1);
+    /// Creates a RenderingDevice texture with proper usage flags for GPU copying.
+    /// Returns (rd_texture_rid, Texture2DRD wrapper).
+    /// This approach exposes the native handle via DRIVER_RESOURCE_TEXTURE for D3D12/Vulkan/Metal.
+    fn create_rd_texture(width: i32, height: i32) -> (Rid, Gd<Texture2Drd>) {
+        let width = width.max(1) as i64;
+        let height = height.max(1) as i64;
 
-        let image = Image::create(width, height, false, ImageFormat::RGBA8)
-            .expect("Failed to create placeholder image");
+        let mut rd = RenderingServer::singleton()
+            .get_rendering_device()
+            .expect("Failed to get RenderingDevice");
+
+        // Create texture format for RGBA8
+        let mut format = godot::classes::RdTextureFormat::new_gd();
+        format.set_format(DataFormat::R8G8B8A8_UNORM);
+        format.set_width(width as u32);
+        format.set_height(height as u32);
+        format.set_depth(1);
+        format.set_array_layers(1);
+        format.set_mipmaps(1);
+        format.set_texture_type(RdTextureType::TYPE_2D);
+        format.set_samples(TextureSamples::SAMPLES_1);
+        // Usage flags: sampling (for display) + can_copy_to (for GPU copy destination)
+        format.set_usage_bits(
+            TextureUsageBits::SAMPLING_BIT | TextureUsageBits::CAN_COPY_TO_BIT
+        );
+
+        // Create the RenderingDevice texture
+        let rd_texture_rid = rd.texture_create(&format, &godot::classes::RdTextureView::new_gd());
         
-        let mut texture = ImageTexture::new_gd();
-        texture.set_image(&image);
-        texture
+        if !rd_texture_rid.is_valid() {
+            panic!("[CefTexture] Failed to create RenderingDevice texture {}x{}", width, height);
+        }
+
+        // Wrap in Texture2DRD for display in TextureRect
+        let mut texture_2d_rd = Texture2Drd::new_gd();
+        texture_2d_rd.set_texture_rd_rid(rd_texture_rid);
+
+        (rd_texture_rid, texture_2d_rd)
+    }
+    
+    /// Frees a RenderingDevice texture.
+    fn free_rd_texture(rd_texture_rid: Rid) {
+        if rd_texture_rid.is_valid() {
+            if let Some(mut rd) = RenderingServer::singleton().get_rendering_device() {
+                rd.free_rid(rd_texture_rid);
+            }
+        }
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -640,11 +688,19 @@ impl CefTexture {
 
             // Handle resize outside of the render_mode borrow
             if needs_resize {
+                // First, get the old RD texture RID to free it later
+                let old_rd_rid = if let Some(RenderMode::Accelerated { rd_texture_rid, .. }) = &self.app.render_mode {
+                    Some(*rd_texture_rid)
+                } else {
+                    None
+                };
+
                 let new_texture_clone = if let Some(RenderMode::Accelerated {
                     texture_info,
                     texture_width,
                     texture_height,
-                    godot_texture,
+                    rd_texture_rid,
+                    texture_2d_rd,
                     ..
                 }) = &mut self.app.render_mode
                 {
@@ -653,10 +709,11 @@ impl CefTexture {
                         let new_h = tex_info.height;
                         drop(tex_info); // Release the lock before creating texture
                         
-                        // Recreate the Godot texture with new dimensions
-                        let new_texture = Self::create_godot_texture(new_w as i32, new_h as i32);
-                        let texture_clone = new_texture.clone();
-                        *godot_texture = new_texture;
+                        // Recreate the RenderingDevice texture with new dimensions
+                        let (new_rd_rid, new_texture_2d_rd) = Self::create_rd_texture(new_w as i32, new_h as i32);
+                        let texture_clone = new_texture_2d_rd.clone();
+                        *rd_texture_rid = new_rd_rid;
+                        *texture_2d_rd = new_texture_2d_rd;
                         *texture_width = new_w;
                         *texture_height = new_h;
                         Some(texture_clone)
@@ -666,6 +723,11 @@ impl CefTexture {
                 } else {
                     None
                 };
+                
+                // Free the old RD texture
+                if let Some(old_rid) = old_rd_rid {
+                    Self::free_rd_texture(old_rid);
+                }
                 
                 // Now set the texture on base (outside of render_mode borrow)
                 if let Some(texture) = new_texture_clone {
@@ -677,7 +739,7 @@ impl CefTexture {
             if let Some(RenderMode::Accelerated {
                 texture_info,
                 importer,
-                godot_texture,
+                rd_texture_rid,
                 ..
             }) = &mut self.app.render_mode
             {
@@ -694,21 +756,18 @@ impl CefTexture {
                     return;
                 }
 
-                // Get the RenderingDevice RID for the destination texture
-                let texture_rid = godot_texture.get_rid();
-                let rs = RenderingServer::singleton();
-                let rd_texture_rid = rs.texture_get_rd_texture(texture_rid);
-
+                // rd_texture_rid is already the RenderingDevice texture RID
+                // Use it directly for the GPU copy
                 if !rd_texture_rid.is_valid() {
                     godot::global::godot_warn!(
-                        "[CefTexture] Failed to get RD texture RID for copy"
+                        "[CefTexture] RD texture RID is invalid for copy"
                     );
                     tex_info.dirty = false;
                     return;
                 }
 
                 // Perform GPU copy from CEF texture to Godot texture
-                match importer.copy_texture(&tex_info, rd_texture_rid) {
+                match importer.copy_texture(&tex_info, *rd_texture_rid) {
                     Ok(()) => {
                         // Copy successful - texture is now updated
                     }
