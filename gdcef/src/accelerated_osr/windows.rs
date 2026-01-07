@@ -8,22 +8,17 @@ use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
 use std::ffi::c_void;
 use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_12_0;
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_BARRIER,
     D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
     D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
     D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE,
-    D3D12_RESOURCE_TRANSITION_BARRIER, D3D12CreateDevice, ID3D12CommandAllocator,
+    D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator,
     ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM,
-};
-use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory2, DXGI_ADAPTER_FLAG, DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_CREATE_FACTORY_FLAGS,
-    IDXGIAdapter1, IDXGIFactory4,
 };
 use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS};
 use windows::Win32::System::Threading::{CreateEventW, GetCurrentProcess, WaitForSingleObject, INFINITE};
@@ -169,75 +164,76 @@ impl NativeHandleTrait for NativeHandle {
 }
 
 /// D3D12 device and resources for importing shared textures from CEF.
+/// Uses Godot's D3D12 device obtained via RenderingDevice::get_driver_resource()
+/// to ensure resource compatibility for GPU copy operations.
 pub struct NativeTextureImporter {
-    device: ID3D12Device,
-    command_queue: ID3D12CommandQueue,
+    /// D3D12 device borrowed from Godot - wrapped in ManuallyDrop to prevent Release
+    device: std::mem::ManuallyDrop<ID3D12Device>,
+    /// Command queue borrowed from Godot - wrapped in ManuallyDrop to prevent Release
+    command_queue: std::mem::ManuallyDrop<ID3D12CommandQueue>,
+    /// Command allocator - owned by us
     command_allocator: ID3D12CommandAllocator,
+    /// Fence for synchronization - owned by us
     fence: ID3D12Fence,
     fence_value: u64,
     fence_event: HANDLE,
-    adapter_name: String,
 }
 
 impl NativeTextureImporter {
     pub fn new() -> Option<Self> {
-        // Create DXGI factory
-        let factory: IDXGIFactory4 = unsafe { CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0)) }
-            .map_err(|e| {
-                godot_error!(
-                    "[AcceleratedOSR/Windows] Failed to create DXGI factory: {:?}",
-                    e
-                )
+        // Get D3D12 device from Godot's RenderingDevice
+        // This ensures we use the same device as Godot, which is required for
+        // cross-resource GPU operations like texture copying
+        let mut rd = RenderingServer::singleton()
+            .get_rendering_device()
+            .ok_or_else(|| {
+                godot_error!("[AcceleratedOSR/Windows] Failed to get RenderingDevice");
             })
             .ok()?;
 
-        // Find a suitable hardware adapter
-        let adapter = Self::get_hardware_adapter(&factory)?;
-        let adapter_desc = unsafe { adapter.GetDesc1() }
-            .map_err(|e| {
-                godot_error!(
-                    "[AcceleratedOSR/Windows] Failed to get adapter description: {:?}",
-                    e
-                )
-            })
-            .ok()?;
-
-        let adapter_name = String::from_utf16_lossy(
-            &adapter_desc.Description[..adapter_desc
-                .Description
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(adapter_desc.Description.len())],
+        // Get the D3D12 device from Godot
+        let device_ptr = rd.get_driver_resource(
+            DriverResource::LOGICAL_DEVICE,
+            Rid::Invalid,
+            0,
         );
 
-        // Create D3D12 device
-        let mut device: Option<ID3D12Device> = None;
-        unsafe { D3D12CreateDevice(&adapter, D3D_FEATURE_LEVEL_12_0, &mut device) }
-            .map_err(|e| {
-                godot_error!(
-                    "[AcceleratedOSR/Windows] Failed to create D3D12 device: {:?}",
-                    e
-                )
-            })
-            .ok()?;
+        if device_ptr == 0 {
+            godot_error!("[AcceleratedOSR/Windows] Failed to get D3D12 device from Godot");
+            return None;
+        }
 
-        let device = device?;
-
-        // Create command queue
-        let queue_desc = D3D12_COMMAND_QUEUE_DESC {
-            Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
-            ..Default::default()
+        let device: ID3D12Device = unsafe {
+            ID3D12Device::from_raw(device_ptr as *mut c_void)
         };
-        let command_queue: ID3D12CommandQueue = unsafe { device.CreateCommandQueue(&queue_desc) }
-            .map_err(|e| {
-                godot_error!(
-                    "[AcceleratedOSR/Windows] Failed to create command queue: {:?}",
-                    e
-                )
-            })
-            .ok()?;
 
-        // Create command allocator
+        // Get the command queue from Godot
+        let command_queue_ptr = rd.get_driver_resource(
+            DriverResource::COMMAND_QUEUE,
+            Rid::Invalid,
+            0,
+        );
+
+        let command_queue: ID3D12CommandQueue = if command_queue_ptr != 0 {
+            unsafe { ID3D12CommandQueue::from_raw(command_queue_ptr as *mut c_void) }
+        } else {
+            // Fallback: create our own command queue using Godot's device
+            godot_warn!("[AcceleratedOSR/Windows] Could not get command queue from Godot, creating one");
+            let queue_desc = D3D12_COMMAND_QUEUE_DESC {
+                Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
+                ..Default::default()
+            };
+            unsafe { device.CreateCommandQueue(&queue_desc) }
+                .map_err(|e| {
+                    godot_error!(
+                        "[AcceleratedOSR/Windows] Failed to create command queue: {:?}",
+                        e
+                    )
+                })
+                .ok()?
+        };
+
+        // Create command allocator using Godot's device
         let command_allocator: ID3D12CommandAllocator =
             unsafe { device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT) }
                 .map_err(|e| {
@@ -268,57 +264,20 @@ impl NativeTextureImporter {
             .ok()?;
 
         godot_print!(
-            "[AcceleratedOSR/Windows] Created D3D12 device on adapter: {}",
-            adapter_name
+            "[AcceleratedOSR/Windows] Using Godot's D3D12 device for accelerated OSR"
         );
 
         Some(Self {
-            device,
-            command_queue,
+            device: std::mem::ManuallyDrop::new(device),
+            command_queue: std::mem::ManuallyDrop::new(command_queue),
             command_allocator,
             fence,
             fence_value: 0,
             fence_event,
-            adapter_name,
         })
     }
 
-    fn get_hardware_adapter(factory: &IDXGIFactory4) -> Option<IDXGIAdapter1> {
-        for i in 0.. {
-            let adapter: IDXGIAdapter1 = match unsafe { factory.EnumAdapters1(i) } {
-                Ok(adapter) => adapter,
-                Err(_) => break,
-            };
 
-            let desc = match unsafe { adapter.GetDesc1() } {
-                Ok(desc) => desc,
-                Err(_) => continue,
-            };
-
-            // Skip software adapters
-            if (DXGI_ADAPTER_FLAG(desc.Flags as i32) & DXGI_ADAPTER_FLAG_SOFTWARE)
-                != DXGI_ADAPTER_FLAG(0)
-            {
-                continue;
-            }
-
-            // Check if the adapter supports D3D12
-            let result = unsafe {
-                D3D12CreateDevice(
-                    &adapter,
-                    D3D_FEATURE_LEVEL_12_0,
-                    std::ptr::null_mut::<Option<ID3D12Device>>(),
-                )
-            };
-
-            if result.is_ok() {
-                return Some(adapter);
-            }
-        }
-
-        godot_warn!("[AcceleratedOSR/Windows] No suitable D3D12 hardware adapter found");
-        None
-    }
 
     /// Import a shared texture handle from CEF into a D3D12 resource.
     ///
@@ -363,10 +322,6 @@ impl NativeTextureImporter {
 
     pub fn device(&self) -> &ID3D12Device {
         &self.device
-    }
-
-    pub fn adapter_name(&self) -> &str {
-        &self.adapter_name
     }
 
     /// Copies from a source D3D12 resource to a destination D3D12 resource.
@@ -502,8 +457,7 @@ impl TextureImporterTrait for GodotTextureImporter {
         }
 
         godot_print!(
-            "[AcceleratedOSR/Windows] Using D3D12 backend for texture import (adapter: {})",
-            d3d12_importer.adapter_name()
+            "[AcceleratedOSR/Windows] Using Godot's D3D12 backend for texture import"
         );
 
         // Create color swap shader for BGRA -> RGBA conversion if needed
@@ -641,6 +595,23 @@ impl TextureImporterTrait for GodotTextureImporter {
 
     fn get_color_swap_material(&self) -> Option<Rid> {
         self.color_swap_material
+    }
+}
+
+impl Drop for NativeTextureImporter {
+    fn drop(&mut self) {
+        // Close the fence event (we own this)
+        if !self.fence_event.is_invalid() {
+            let _ = unsafe { CloseHandle(self.fence_event) };
+        }
+
+        // The device and command_queue are wrapped in ManuallyDrop because they're
+        // borrowed from Godot. ManuallyDrop prevents the automatic COM Release call
+        // that would occur when these COM objects are dropped.
+        // We intentionally do NOT call ManuallyDrop::drop() on them.
+        
+        // command_allocator and fence are owned by us, so they will be dropped normally
+        // (their Drop implementations will call COM Release as expected)
     }
 }
 
