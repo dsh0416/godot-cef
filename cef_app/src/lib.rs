@@ -222,7 +222,7 @@ wrap_v8_handler! {
                             return 0;
                         }
 
-                        let route = CefStringUtf16::from("ipcRendererToBrowser");
+                        let route = CefStringUtf16::from("ipcRendererToGodot");
                         let msg_str = CefStringUtf16::from(&arg.string_value());
                         if let Some(frame) = self.handler.frame.as_ref() {
                             let frame = frame.lock().unwrap();
@@ -275,9 +275,9 @@ wrap_render_process_handler! {
                 let global = context.global();
                 if let Some(global) = global {
                     if let Some(frame) = frame {
-                        let key: CefStringUtf16 = "ipcSend".to_string().as_str().into();
+                        let key: CefStringUtf16 = "sendIpcMessage".to_string().as_str().into();
                         let mut handler = OsrIpcHandlerBuilder::build(OsrIpcHandler::new(Some(Arc::new(Mutex::new(frame.clone())))));
-                        let mut func = v8_value_create_function(Some(&"ipcSend".into()), Some(&mut handler)).unwrap();
+                        let mut func = v8_value_create_function(Some(&"sendIpcMessage".into()), Some(&mut handler)).unwrap();
                         global.set_value_bykey(Some(&key), Some(&mut func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
                     }
                 }

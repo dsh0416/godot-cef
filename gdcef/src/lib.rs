@@ -23,6 +23,7 @@ use godot::classes::{
 };
 use godot::init::*;
 use godot::prelude::*;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use winit::dpi::PhysicalSize;
 
@@ -160,12 +161,16 @@ enum RenderMode {
     },
 }
 
+/// A queue for messages received from CEF's renderer process.
+pub type MessageQueue = Arc<Mutex<VecDeque<String>>>;
+
 struct App {
     browser: Option<cef::Browser>,
     render_mode: Option<RenderMode>,
     render_size: Option<Arc<Mutex<PhysicalSize<f32>>>>,
     device_scale_factor: Option<Arc<Mutex<f32>>>,
     cursor_type: Option<Arc<Mutex<CursorType>>>,
+    message_queue: Option<MessageQueue>,
     last_size: Vector2,
     last_dpi: f32,
     last_cursor: CursorType,
@@ -180,6 +185,7 @@ impl Default for App {
             render_size: None,
             device_scale_factor: None,
             cursor_type: None,
+            message_queue: None,
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
             last_cursor: CursorType::Arrow,
@@ -233,6 +239,11 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
+    /// Signal emitted when a message is received from the CEF renderer process via IPC.
+    /// The message parameter contains the message content as a string.
+    #[signal]
+    fn ipc_message(message: GString);
+
     #[func]
     fn on_ready(&mut self) {
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
@@ -256,6 +267,7 @@ impl CefTexture {
 
         self.request_external_begin_frame();
         self.update_cursor();
+        self.process_message_queue();
     }
 
     fn shutdown(&mut self) {
@@ -269,6 +281,7 @@ impl CefTexture {
         self.app.render_size = None;
         self.app.device_scale_factor = None;
         self.app.cursor_type = None;
+        self.app.message_queue = None;
         self.app.last_max_fps = self.get_max_fps();
 
         cef_init::shutdown_cef();
@@ -368,6 +381,7 @@ impl CefTexture {
         let render_size = render_handler.get_size();
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
+        let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
 
         let texture = ImageTexture::new_gd();
         self.base_mut().set_texture(&texture);
@@ -379,8 +393,9 @@ impl CefTexture {
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
+        self.app.message_queue = Some(message_queue.clone());
 
-        let mut client = webrender::SoftwareClientImpl::build(render_handler);
+        let mut client = webrender::SoftwareClientImpl::build(render_handler, message_queue);
 
         cef::browser_host_create_browser_sync(
             Some(&window_info),
@@ -428,6 +443,7 @@ impl CefTexture {
         let render_size = render_handler.get_size();
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
+        let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
 
         let (rd_texture_rid, texture_2d_rd) = Self::create_rd_texture(pixel_width, pixel_height);
         self.base_mut().set_texture(&texture_2d_rd);
@@ -443,10 +459,12 @@ impl CefTexture {
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
+        self.app.message_queue = Some(message_queue.clone());
 
         let mut client = webrender::AcceleratedClientImpl::build(
             render_handler,
             self.app.cursor_type.clone().unwrap(),
+            message_queue,
         );
 
         cef::browser_host_create_browser_sync(
@@ -760,6 +778,24 @@ impl CefTexture {
         self.app.last_cursor = current_cursor;
         let shape = cursor::cursor_type_to_shape(current_cursor);
         self.base_mut().set_default_cursor_shape(shape);
+    }
+
+    fn process_message_queue(&mut self) {
+        let Some(queue) = &self.app.message_queue else {
+            return;
+        };
+
+        let messages: Vec<String> = {
+            let Ok(mut q) = queue.lock() else {
+                return;
+            };
+            q.drain(..).collect()
+        };
+
+        for message in messages {
+            self.base_mut()
+                .emit_signal("ipc_message", &[GString::from(&message).to_variant()]);
+        }
     }
 
     fn handle_input_event(&mut self, event: Gd<InputEvent>) {
