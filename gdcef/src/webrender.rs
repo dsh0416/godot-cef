@@ -349,6 +349,7 @@ fn on_process_message_received(
 
                     if let Ok(mut queue) = message_queue.lock() {
                         queue.push_back(msg_str);
+                        return 1;
                     }
                 }
             }
