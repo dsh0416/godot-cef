@@ -268,8 +268,20 @@ impl CefTexture {
     }
 
     fn shutdown(&mut self) {
+        // Hide the TextureRect and clear its texture BEFORE freeing resources.
+        // This prevents Godot from trying to render with an invalid texture during shutdown.
+        self.base_mut().set_visible(false);
+
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        if let Some(RenderMode::Accelerated { rd_texture_rid, .. }) = &self.app.render_mode {
+        if let Some(RenderMode::Accelerated {
+            rd_texture_rid,
+            texture_2d_rd,
+            ..
+        }) = &mut self.app.render_mode
+        {
+            // Clear the RD texture RID from the Texture2Drd to break the reference
+            // before we free the underlying RD texture.
+            texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
             Self::free_rd_texture(*rd_texture_rid);
         }
 
