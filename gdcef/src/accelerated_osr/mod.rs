@@ -127,7 +127,26 @@ pub trait TextureImporterTrait {
     where
         Self: Sized;
 
+    /// Legacy method: Creates a Godot texture from the CEF shared texture handle.
+    /// This has compatibility issues with USAGE_FLAGS across D3D12/Vulkan.
+    /// Prefer using `copy_texture` instead.
     fn import_texture(&mut self, texture_info: &SharedTextureInfo<Self::Handle>) -> Option<Rid>;
+
+    /// Copies the CEF shared texture to a Godot-owned texture via GPU-to-GPU copy.
+    ///
+    /// # Arguments
+    /// * `src_info` - The source texture info from CEF
+    /// * `dst_rd_rid` - The RenderingDevice RID of the destination Godot texture
+    ///                  (obtained via RenderingServer::texture_get_rd_texture)
+    ///
+    /// # Returns
+    /// * `Ok(())` on successful copy
+    /// * `Err(String)` with error description on failure
+    fn copy_texture(
+        &mut self,
+        src_info: &SharedTextureInfo<Self::Handle>,
+        dst_rd_rid: Rid,
+    ) -> Result<(), String>;
 
     fn get_color_swap_material(&self) -> Option<Rid> {
         None
@@ -247,4 +266,28 @@ impl NativeHandleTrait for () {
     }
 
     fn from_accelerated_paint_info(_info: &AcceleratedPaintInfo) -> Self {}
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+pub struct GodotTextureImporter;
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+impl TextureImporterTrait for GodotTextureImporter {
+    type Handle = ();
+
+    fn new() -> Option<Self> {
+        None
+    }
+
+    fn import_texture(&mut self, _texture_info: &SharedTextureInfo<Self::Handle>) -> Option<Rid> {
+        None
+    }
+
+    fn copy_texture(
+        &mut self,
+        _src_info: &SharedTextureInfo<Self::Handle>,
+        _dst_rd_rid: Rid,
+    ) -> Result<(), String> {
+        Err("Accelerated OSR not supported on this platform".to_string())
+    }
 }
