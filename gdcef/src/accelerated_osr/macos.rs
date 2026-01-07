@@ -5,9 +5,9 @@ use godot::classes::rendering_device::DriverResource;
 use godot::global::godot_warn;
 use godot::prelude::*;
 use objc2::encode::{Encode, Encoding};
+use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{msg_send, msg_send_id};
 use objc2_metal::{
     MTLOrigin, MTLPixelFormat, MTLSize, MTLStorageMode, MTLTextureDescriptor, MTLTextureType,
     MTLTextureUsage,
@@ -132,7 +132,7 @@ impl NativeTextureImporter {
             Retained::retain(device_ptr)?
         };
 
-        let command_queue: Retained<AnyObject> = unsafe { msg_send_id![&*device, newCommandQueue] };
+        let command_queue: Retained<AnyObject> = unsafe { msg_send![&*device, newCommandQueue] };
 
         Some(Self {
             device,
@@ -158,9 +158,8 @@ impl NativeTextureImporter {
 
         unsafe {
             let command_buffer: Retained<AnyObject> =
-                msg_send_id![&*self.command_queue, commandBuffer];
-            let blit_encoder: Retained<AnyObject> =
-                msg_send_id![&*command_buffer, blitCommandEncoder];
+                msg_send![&*self.command_queue, commandBuffer];
+            let blit_encoder: Retained<AnyObject> = msg_send![&*command_buffer, blitCommandEncoder];
 
             let _: () = msg_send![
                 &*blit_encoder,
@@ -228,7 +227,7 @@ impl NativeTextureImporter {
             desc.setStorageMode(MTLStorageMode::Managed);
 
             let io_surface_ref = IOSurfaceRef(io_surface);
-            let texture: Option<Retained<AnyObject>> = msg_send_id![
+            let texture: Option<Retained<AnyObject>> = msg_send![
                 &*self.device,
                 newTextureWithDescriptor: &*desc,
                 iosurface: io_surface_ref,
