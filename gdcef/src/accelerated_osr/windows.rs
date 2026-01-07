@@ -181,9 +181,6 @@ pub struct NativeTextureImporter {
 
 impl NativeTextureImporter {
     pub fn new() -> Option<Self> {
-        // Get D3D12 device from Godot's RenderingDevice
-        // This ensures we use the same device as Godot, which is required for
-        // cross-resource GPU operations like texture copying
         let mut rd = RenderingServer::singleton()
             .get_rendering_device()
             .ok_or_else(|| {
@@ -191,7 +188,6 @@ impl NativeTextureImporter {
             })
             .ok()?;
 
-        // Get the D3D12 device from Godot
         let device_ptr = rd.get_driver_resource(
             DriverResource::LOGICAL_DEVICE,
             Rid::Invalid,
@@ -574,20 +570,10 @@ impl TextureImporterTrait for GodotTextureImporter {
                 return Err("Failed to get destination D3D12 resource handle".into());
             }
 
-            // Convert pointer to ID3D12Resource
-            // The pointer is a raw ID3D12Resource*, we need to wrap it
-            unsafe {
-                let resource_raw = resource_ptr as *mut c_void;
-                ID3D12Resource::from_raw(resource_raw)
-            }
+            unsafe { ID3D12Resource::from_raw(resource_ptr as *mut c_void) }
         };
 
-        // Perform the GPU copy
         self.d3d12_importer.copy_texture(&src_resource, &dst_resource)?;
-
-        // Note: src_resource will be dropped here, releasing the COM reference
-        // dst_resource is borrowed from Godot, we shouldn't drop it (but from_raw takes ownership)
-        // We need to prevent drop by forgetting it
         std::mem::forget(dst_resource);
 
         Ok(())
@@ -600,18 +586,10 @@ impl TextureImporterTrait for GodotTextureImporter {
 
 impl Drop for NativeTextureImporter {
     fn drop(&mut self) {
-        // Close the fence event (we own this)
         if !self.fence_event.is_invalid() {
             let _ = unsafe { CloseHandle(self.fence_event) };
         }
-
-        // The device and command_queue are wrapped in ManuallyDrop because they're
-        // borrowed from Godot. ManuallyDrop prevents the automatic COM Release call
-        // that would occur when these COM objects are dropped.
-        // We intentionally do NOT call ManuallyDrop::drop() on them.
-        
-        // command_allocator and fence are owned by us, so they will be dropped normally
-        // (their Drop implementations will call COM Release as expected)
+        // device and command_queue are ManuallyDrop (borrowed from Godot)
     }
 }
 

@@ -155,11 +155,8 @@ impl NativeTextureImporter {
             depth: 1,
         };
         let dst_origin = MTLOrigin { x: 0, y: 0, z: 0 };
-
-        // Get the raw pointer from the blit encoder reference using ForeignTypeRef trait
         let blit_encoder_ptr = blit_encoder.as_ptr() as *mut objc::runtime::Object;
 
-        // Use objc messaging to call copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:
         unsafe {
             let _: () = objc::msg_send![
                 blit_encoder_ptr,
