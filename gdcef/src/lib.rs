@@ -562,7 +562,7 @@ impl CefTexture {
     }
 
     fn get_device_scale_factor(&self) -> f32 {
-        DisplayServer::singleton().screen_get_scale()
+        utils::get_display_scale_factor()
     }
 
     fn get_max_fps(&self) -> i32 {

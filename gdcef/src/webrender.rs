@@ -1,13 +1,12 @@
 use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::CursorType;
-use godot::{classes::DisplayServer, obj::Singleton};
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
 
 use crate::MessageQueue;
-
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
+use crate::utils::get_display_scale_factor;
 
 /// Swizzle indices for BGRA -> RGBA conversion.
 /// [B,G,R,A] at indices [0,1,2,3] -> [R,G,B,A] means pick [2,1,0,3] for each pixel.
@@ -53,7 +52,7 @@ fn compute_view_rect(size: &Arc<Mutex<PhysicalSize<f32>>>, rect: Option<&mut Rec
     if let Some(rect) = rect {
         if let Ok(size) = size.lock() {
             if size.width > 0.0 && size.height > 0.0 {
-                let scale = DisplayServer::singleton().screen_get_scale();
+                let scale = get_display_scale_factor();
                 rect.width = (size.width / scale) as i32;
                 rect.height = (size.height / scale) as i32;
             }
@@ -64,7 +63,7 @@ fn compute_view_rect(size: &Arc<Mutex<PhysicalSize<f32>>>, rect: Option<&mut Rec
 /// Common helper for screen_info implementation.
 fn compute_screen_info(screen_info: Option<&mut ScreenInfo>) -> ::std::os::raw::c_int {
     if let Some(screen_info) = screen_info {
-        screen_info.device_scale_factor = DisplayServer::singleton().screen_get_scale();
+        screen_info.device_scale_factor = get_display_scale_factor();
         return true as _;
     }
     false as _

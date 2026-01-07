@@ -1,5 +1,26 @@
+use godot::{classes::DisplayServer, obj::Singleton};
 use process_path::get_dylib_path;
 use std::{io::Error, path::PathBuf};
+
+pub fn get_display_scale_factor() -> f32 {
+    let display_server = DisplayServer::singleton();
+
+    // NOTE: `display_server.screen_get_scale` is implemented on Android, iOS, Web, macOS, and Linux (Wayland). On other platforms, this method always returns 1.0.
+    #[cfg(target_os = "windows")]
+    {
+        let dpi = display_server.screen_get_dpi();
+        if dpi > 0 {
+            (dpi as f32 / 96.0).max(1.0)
+        } else {
+            1.0
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        display_server.screen_get_scale()
+    }
+}
 
 #[cfg(target_os = "macos")]
 pub fn get_framework_path() -> Result<PathBuf, Error> {
