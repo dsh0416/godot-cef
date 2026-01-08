@@ -16,26 +16,10 @@ pub static CEF_INITIALIZED: Once = Once::new();
 /// Loads the CEF framework library (macOS-specific)
 #[cfg(target_os = "macos")]
 pub fn load_cef_framework() {
-    use cef::sys::cef_load_library;
-
-    let framework_path = get_framework_path();
-    let path = framework_path
-        .unwrap()
-        .join("Chromium Embedded Framework")
-        .canonicalize()
-        .unwrap();
-
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
-        panic!("Failed to convert library path to CString");
-    };
-    let result = unsafe {
-        let arg_path = Some(&*path.as_ptr().cast());
-        let arg_path = arg_path.map(std::ptr::from_ref).unwrap_or(std::ptr::null());
-        cef_load_library(arg_path) == 1
-    };
-
-    assert!(result, "Failed to load macOS CEF framework");
+    match get_framework_path() {
+        Ok(framework_path) => cef_app::load_cef_framework_from_path(&framework_path),
+        Err(e) => panic!("Failed to get CEF framework path: {}", e),
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -45,25 +29,10 @@ pub fn load_cef_framework() {
 
 /// Loads the CEF sandbox (macOS-specific)
 #[cfg(target_os = "macos")]
-pub fn load_sandbox(args: &cef::MainArgs) {
-    use libloading::Library;
-
-    let framework_path = get_framework_path();
-    let path = framework_path
-        .unwrap()
-        .join("Libraries/libcef_sandbox.dylib")
-        .canonicalize()
-        .unwrap();
-
-    unsafe {
-        let lib = Library::new(path).unwrap();
-        let func =
-            lib.get::<unsafe extern "C" fn(
-                argc: std::os::raw::c_int,
-                argv: *mut *mut ::std::os::raw::c_char,
-            )>(b"cef_sandbox_initialize\0")
-                .unwrap();
-        func(args.argc, args.argv);
+fn load_sandbox(args: &cef::MainArgs) {
+    match get_framework_path() {
+        Ok(framework_path) => cef_app::load_sandbox_from_path(&framework_path, args),
+        Err(e) => godot::global::godot_warn!("Failed to load CEF sandbox: {}", e),
     }
 }
 
@@ -83,35 +52,53 @@ pub fn initialize_cef() {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
     let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_godot_backend(godot_backend));
+
     #[cfg(target_os = "macos")]
     load_sandbox(args.as_main_args());
 
-    let subprocess_path = get_subprocess_path().unwrap();
+    let subprocess_path = match get_subprocess_path() {
+        Ok(path) => path,
+        Err(e) => panic!("Failed to get subprocess path: {}", e),
+    };
 
     let user_data_dir = PathBuf::from(Os::singleton().get_user_data_dir().to_string());
     let root_cache_path = user_data_dir.join("Godot CEF/Cache");
 
     let settings = Settings {
-        browser_subprocess_path: subprocess_path.to_str().unwrap().into(),
+        browser_subprocess_path: subprocess_path
+            .to_str()
+            .expect("subprocess path is not valid UTF-8")
+            .into(),
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         log_severity: cef::LogSeverity::DEFAULT as _,
-        root_cache_path: root_cache_path.to_str().unwrap().into(),
+        root_cache_path: root_cache_path
+            .to_str()
+            .expect("cache path is not valid UTF-8")
+            .into(),
         ..Default::default()
     };
 
     #[cfg(target_os = "macos")]
-    let settings = Settings {
-        framework_dir_path: get_framework_path().unwrap().to_str().unwrap().into(),
-        main_bundle_path: get_subprocess_path()
-            .unwrap()
+    let settings = {
+        let framework_path = get_framework_path().expect("Failed to get framework path");
+        let main_bundle_path = get_subprocess_path()
+            .expect("Failed to get subprocess path")
             .join("../../..")
             .canonicalize()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .into(),
-        ..settings
+            .expect("Failed to canonicalize main bundle path");
+
+        Settings {
+            framework_dir_path: framework_path
+                .to_str()
+                .expect("framework path is not valid UTF-8")
+                .into(),
+            main_bundle_path: main_bundle_path
+                .to_str()
+                .expect("main bundle path is not valid UTF-8")
+                .into(),
+            ..settings
+        }
     };
 
     let ret = cef::initialize(

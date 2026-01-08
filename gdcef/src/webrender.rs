@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
 
-use crate::MessageQueue;
+use crate::browser::MessageQueue;
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::utils::get_display_scale_factor;
 
@@ -215,6 +215,16 @@ fn cef_cursor_to_cursor_type(cef_type: cef::sys::cef_cursor_type_t) -> CursorTyp
     }
 }
 
+macro_rules! handle_cursor_change {
+    ($self:expr, $type_:expr) => {{
+        let cursor = cef_cursor_to_cursor_type($type_.into());
+        if let Ok(mut ct) = $self.cursor_type.lock() {
+            *ct = cursor;
+        }
+        false as i32
+    }};
+}
+
 wrap_display_handler! {
     pub(crate) struct DisplayHandlerImpl {
         cursor_type: Arc<Mutex<CursorType>>,
@@ -229,11 +239,7 @@ wrap_display_handler! {
             type_: cef::CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> i32 {
-            let cursor = cef_cursor_to_cursor_type(type_.into());
-            if let Ok(mut ct) = self.cursor_type.lock() {
-                *ct = cursor;
-            }
-            false as i32
+            handle_cursor_change!(self, type_)
         }
 
         #[cfg(target_os = "macos")]
@@ -244,11 +250,7 @@ wrap_display_handler! {
             type_: cef::CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> i32 {
-            let cursor = cef_cursor_to_cursor_type(type_.into());
-            if let Ok(mut ct) = self.cursor_type.lock() {
-                *ct = cursor;
-            }
-            false as i32
+            handle_cursor_change!(self, type_)
         }
 
         #[cfg(target_os = "linux")]
@@ -259,11 +261,7 @@ wrap_display_handler! {
             type_: cef::CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> i32 {
-            let cursor = cef_cursor_to_cursor_type(type_.into());
-            if let Ok(mut ct) = self.cursor_type.lock() {
-                *ct = cursor;
-            }
-            false as i32
+            handle_cursor_change!(self, type_)
         }
     }
 }
@@ -300,8 +298,9 @@ impl ContextMenuHandlerImpl {
 
 wrap_life_span_handler! {
     pub(crate) struct LifeSpanHandlerImpl {}
+
     impl LifeSpanHandler {
-        // Disable popup for now, maybe calling system
+        // Disable popup for now
         fn on_before_popup(
             &self,
             _browser: Option<&mut Browser>,
@@ -336,23 +335,18 @@ fn on_process_message_received(
     message: Option<&mut ProcessMessage>,
     message_queue: &MessageQueue,
 ) -> i32 {
-    if let Some(message) = message {
-        let route = CefStringUtf16::from(&message.name()).to_string();
+    let Some(message) = message else { return 0 };
+    let route = CefStringUtf16::from(&message.name()).to_string();
 
-        match route.as_str() {
-            "ipcRendererToGodot" => {
-                let args = message.argument_list();
-                if let Some(args) = args {
-                    let arg = args.string(0);
-                    let msg_str = CefStringUtf16::from(&arg).to_string();
+    if route == "ipcRendererToGodot" {
+        if let Some(args) = message.argument_list() {
+            let arg = args.string(0);
+            let msg_str = CefStringUtf16::from(&arg).to_string();
 
-                    if let Ok(mut queue) = message_queue.lock() {
-                        queue.push_back(msg_str);
-                        return 1;
-                    }
-                }
+            if let Ok(mut queue) = message_queue.lock() {
+                queue.push_back(msg_str);
+                return 1;
             }
-            _ => {}
         }
     }
 
@@ -385,8 +379,14 @@ wrap_client! {
             Some(self.life_span_handler.clone())
         }
 
-        fn on_process_message_received(&self, _browser: Option<&mut cef::Browser>, _frame: Option<&mut cef::Frame>, _source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {
-            on_process_message_received(_browser, _frame, _source_process, message, &self.message_queue)
+        fn on_process_message_received(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            frame: Option<&mut cef::Frame>,
+            source_process: ProcessId,
+            message: Option<&mut ProcessMessage>,
+        ) -> i32 {
+            on_process_message_received(browser, frame, source_process, message, &self.message_queue)
         }
     }
 }
@@ -433,8 +433,14 @@ wrap_client! {
             Some(self.life_span_handler.clone())
         }
 
-        fn on_process_message_received(&self, _browser: Option<&mut cef::Browser>, _frame: Option<&mut cef::Frame>, _source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {
-            on_process_message_received(_browser, _frame, _source_process, message, &self.message_queue)
+        fn on_process_message_received(
+            &self,
+            browser: Option<&mut cef::Browser>,
+            frame: Option<&mut cef::Frame>,
+            source_process: ProcessId,
+            message: Option<&mut ProcessMessage>,
+        ) -> i32 {
+            on_process_message_received(browser, frame, source_process, message, &self.message_queue)
         }
     }
 }

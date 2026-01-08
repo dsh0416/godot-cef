@@ -1,0 +1,73 @@
+//! Rendering utilities for CEF texture management.
+//!
+//! This module provides helper functions for creating and managing RenderingDevice
+//! textures used for GPU-accelerated off-screen rendering.
+
+use godot::classes::rendering_device::{
+    DataFormat, TextureSamples, TextureType as RdTextureType, TextureUsageBits,
+};
+use godot::classes::{RenderingServer, Texture2Drd};
+use godot::prelude::*;
+
+/// Creates a RenderingDevice texture with the specified dimensions.
+///
+/// The texture is created with BGRA8 format and appropriate usage flags for
+/// sampling and GPU copy operations.
+///
+/// # Arguments
+/// * `width` - Width in pixels (minimum 1)
+/// * `height` - Height in pixels (minimum 1)
+///
+/// # Returns
+/// A tuple of (RenderingDevice texture RID, Texture2Drd wrapper for display)
+///
+/// # Panics
+/// Panics if the RenderingDevice texture creation fails.
+pub fn create_rd_texture(width: i32, height: i32) -> (Rid, Gd<Texture2Drd>) {
+    let width = width.max(1) as i64;
+    let height = height.max(1) as i64;
+
+    let mut rd = RenderingServer::singleton()
+        .get_rendering_device()
+        .expect("Failed to get RenderingDevice");
+
+    let mut format = godot::classes::RdTextureFormat::new_gd();
+    format.set_format(DataFormat::B8G8R8A8_UNORM);
+    format.set_width(width as u32);
+    format.set_height(height as u32);
+    format.set_depth(1);
+    format.set_array_layers(1);
+    format.set_mipmaps(1);
+    format.set_texture_type(RdTextureType::TYPE_2D);
+    format.set_samples(TextureSamples::SAMPLES_1);
+    format.set_usage_bits(TextureUsageBits::SAMPLING_BIT | TextureUsageBits::CAN_COPY_TO_BIT);
+
+    let rd_texture_rid = rd.texture_create(&format, &godot::classes::RdTextureView::new_gd());
+
+    if !rd_texture_rid.is_valid() {
+        panic!(
+            "[CefTexture] Failed to create RenderingDevice texture {}x{}",
+            width, height
+        );
+    }
+
+    let mut texture_2d_rd = Texture2Drd::new_gd();
+    texture_2d_rd.set_texture_rd_rid(rd_texture_rid);
+
+    (rd_texture_rid, texture_2d_rd)
+}
+
+/// Frees a RenderingDevice texture.
+///
+/// This function safely handles invalid RIDs and missing RenderingDevice.
+///
+/// # Arguments
+/// * `rd_texture_rid` - The RID of the texture to free
+pub fn free_rd_texture(rd_texture_rid: Rid) {
+    if rd_texture_rid.is_valid() {
+        if let Some(mut rd) = RenderingServer::singleton().get_rendering_device() {
+            rd.free_rid(rd_texture_rid);
+        }
+    }
+}
+

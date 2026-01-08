@@ -1,25 +1,24 @@
 mod accelerated_osr;
+mod browser;
 mod cef_init;
 mod cursor;
+mod error;
 mod input;
+mod render;
+mod texture;
 mod utils;
 mod webrender;
 
 use cef::{
-    BrowserSettings, ImplBrowser, ImplBrowserHost, ImplFrame, RequestContextSettings, WindowInfo,
-    api_hash, do_message_loop_work,
+    api_hash, do_message_loop_work, BrowserSettings, ImplBrowser, ImplBrowserHost, ImplFrame,
+    RequestContextSettings, WindowInfo,
 };
-use cef_app::{CursorType, FrameBuffer};
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::notify::ControlNotification;
-use godot::classes::rendering_device::{
-    DataFormat, TextureSamples, TextureType as RdTextureType, TextureUsageBits,
-};
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
     DisplayServer, Engine, ITextureRect, Image, ImageTexture, InputEvent, InputEventKey,
-    InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, RenderingServer,
-    Texture2Drd, TextureRect,
+    InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, TextureRect,
 };
 use godot::init::*;
 use godot::prelude::*;
@@ -29,169 +28,17 @@ use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::{
     GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler,
-    PlatformSharedTextureInfo, TextureImporterTrait,
+    TextureImporterTrait,
 };
+use crate::browser::{App, MessageQueue, RenderMode};
 use crate::cef_init::CEF_INITIALIZED;
+
+pub use texture::TextureRectRd;
 
 struct GodotCef;
 
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotCef {}
-
-/// A TextureRect that creates and manages a Godot-owned texture suitable for
-/// GPU-to-GPU copying from external sources (like CEF shared textures).
-///
-/// This node creates an ImageTexture with a placeholder Image that has the correct
-/// usage flags for Godot's rendering pipeline. The native handle of this texture
-/// can be obtained via RenderingDevice::get_driver_resource() for direct GPU copying.
-#[derive(GodotClass)]
-#[class(base=TextureRect)]
-pub struct TextureRectRd {
-    base: Base<TextureRect>,
-    texture: Option<Gd<ImageTexture>>,
-    width: u32,
-    height: u32,
-}
-
-#[godot_api]
-impl ITextureRect for TextureRectRd {
-    fn init(base: Base<TextureRect>) -> Self {
-        Self {
-            base,
-            texture: None,
-            width: 0,
-            height: 0,
-        }
-    }
-
-    fn ready(&mut self) {
-        self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
-    }
-}
-
-#[godot_api]
-impl TextureRectRd {
-    /// Creates or resizes the internal texture to the specified dimensions.
-    /// Returns the RID of the texture for use with RenderingServer operations.
-    #[func]
-    pub fn ensure_texture_size(&mut self, width: i32, height: i32) -> Rid {
-        let width = width.max(1) as u32;
-        let height = height.max(1) as u32;
-
-        if self.width == width && self.height == height {
-            if let Some(ref texture) = self.texture {
-                return texture.get_rid();
-            }
-        }
-
-        self.width = width;
-        self.height = height;
-
-        let image = Image::create(width as i32, height as i32, false, ImageFormat::RGBA8);
-
-        if let Some(image) = image {
-            let mut texture = ImageTexture::new_gd();
-            texture.set_image(&image);
-            let rid = texture.get_rid();
-            self.base_mut().set_texture(&texture);
-            self.texture = Some(texture);
-
-            rid
-        } else {
-            godot::global::godot_error!(
-                "[TextureRectRd] Failed to create placeholder image {}x{}",
-                width,
-                height
-            );
-            Rid::Invalid
-        }
-    }
-
-    /// Returns the RID of the internal texture, or Invalid if no texture exists.
-    #[func]
-    pub fn get_texture_rid(&self) -> Rid {
-        self.texture
-            .as_ref()
-            .map(|t| t.get_rid())
-            .unwrap_or(Rid::Invalid)
-    }
-
-    /// Returns the RenderingDevice RID for the texture, which can be used with
-    /// get_driver_resource() to obtain the native handle.
-    #[func]
-    pub fn get_rd_texture_rid(&self) -> Rid {
-        let texture_rid = self.get_texture_rid();
-        if !texture_rid.is_valid() {
-            return Rid::Invalid;
-        }
-
-        let rs = RenderingServer::singleton();
-        rs.texture_get_rd_texture(texture_rid)
-    }
-
-    /// Returns the current texture width.
-    #[func]
-    pub fn get_texture_width(&self) -> i32 {
-        self.width as i32
-    }
-
-    /// Returns the current texture height.
-    #[func]
-    pub fn get_texture_height(&self) -> i32 {
-        self.height as i32
-    }
-}
-
-enum RenderMode {
-    Software {
-        frame_buffer: Arc<Mutex<FrameBuffer>>,
-        texture: Gd<ImageTexture>,
-    },
-    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-    Accelerated {
-        texture_info: Arc<Mutex<PlatformSharedTextureInfo>>,
-        importer: GodotTextureImporter,
-        /// The RenderingDevice texture RID (for native handle access)
-        rd_texture_rid: Rid,
-        /// The Texture2DRD wrapper for display in TextureRect
-        texture_2d_rd: Gd<Texture2Drd>,
-        /// Current texture dimensions
-        texture_width: u32,
-        texture_height: u32,
-    },
-}
-
-pub type MessageQueue = Arc<Mutex<VecDeque<String>>>;
-
-struct App {
-    browser: Option<cef::Browser>,
-    render_mode: Option<RenderMode>,
-    render_size: Option<Arc<Mutex<PhysicalSize<f32>>>>,
-    device_scale_factor: Option<Arc<Mutex<f32>>>,
-    cursor_type: Option<Arc<Mutex<CursorType>>>,
-    message_queue: Option<MessageQueue>,
-    last_size: Vector2,
-    last_dpi: f32,
-    last_cursor: CursorType,
-    last_max_fps: i32,
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            browser: None,
-            render_mode: None,
-            render_size: None,
-            device_scale_factor: None,
-            cursor_type: None,
-            message_queue: None,
-            last_size: Vector2::ZERO,
-            last_dpi: 1.0,
-            last_cursor: CursorType::Arrow,
-            last_max_fps: 0,
-        }
-    }
-}
 
 #[derive(GodotClass)]
 #[class(base=TextureRect)]
@@ -221,13 +68,13 @@ impl ITextureRect for CefTexture {
         match what {
             ControlNotification::READY => {
                 self.on_ready();
-            },
+            }
             ControlNotification::PROCESS => {
                 self.on_process();
-            },
+            }
             ControlNotification::WM_CLOSE_REQUEST => {
                 self.shutdown();
-            },
+            }
             _ => {}
         }
     }
@@ -283,7 +130,7 @@ impl CefTexture {
             // Clear the RD texture RID from the Texture2Drd to break the reference
             // before we free the underlying RD texture.
             texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
-            Self::free_rd_texture(*rd_texture_rid);
+            render::free_rd_texture(*rd_texture_rid);
         }
 
         self.app.browser = None;
@@ -455,7 +302,7 @@ impl CefTexture {
         let cursor_type = render_handler.get_cursor_type();
         let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
 
-        let (rd_texture_rid, texture_2d_rd) = Self::create_rd_texture(pixel_width, pixel_height);
+        let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height);
         self.base_mut().set_texture(&texture_2d_rd);
 
         self.app.render_mode = Some(RenderMode::Accelerated {
@@ -485,49 +332,6 @@ impl CefTexture {
             None,
             context,
         )
-    }
-
-    fn create_rd_texture(width: i32, height: i32) -> (Rid, Gd<Texture2Drd>) {
-        let width = width.max(1) as i64;
-        let height = height.max(1) as i64;
-
-        let mut rd = RenderingServer::singleton()
-            .get_rendering_device()
-            .expect("Failed to get RenderingDevice");
-
-        let mut format = godot::classes::RdTextureFormat::new_gd();
-        format.set_format(DataFormat::B8G8R8A8_UNORM);
-        format.set_width(width as u32);
-        format.set_height(height as u32);
-        format.set_depth(1);
-        format.set_array_layers(1);
-        format.set_mipmaps(1);
-        format.set_texture_type(RdTextureType::TYPE_2D);
-        format.set_samples(TextureSamples::SAMPLES_1);
-        format.set_usage_bits(TextureUsageBits::SAMPLING_BIT | TextureUsageBits::CAN_COPY_TO_BIT);
-
-        let rd_texture_rid = rd.texture_create(&format, &godot::classes::RdTextureView::new_gd());
-
-        if !rd_texture_rid.is_valid() {
-            panic!(
-                "[CefTexture] Failed to create RenderingDevice texture {}x{}",
-                width, height
-            );
-        }
-
-        let mut texture_2d_rd = Texture2Drd::new_gd();
-        texture_2d_rd.set_texture_rd_rid(rd_texture_rid);
-
-        (rd_texture_rid, texture_2d_rd)
-    }
-
-    /// Frees a RenderingDevice texture.
-    fn free_rd_texture(rd_texture_rid: Rid) {
-        if rd_texture_rid.is_valid() {
-            if let Some(mut rd) = RenderingServer::singleton().get_rendering_device() {
-                rd.free_rid(rd_texture_rid);
-            }
-        }
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -568,12 +372,10 @@ impl CefTexture {
         let screen_cap_fps = DisplayServer::singleton().screen_get_refresh_rate().round() as i32;
         if engine_cap_fps > 0 {
             engine_cap_fps
+        } else if screen_cap_fps > 0 {
+            screen_cap_fps
         } else {
-            if screen_cap_fps > 0 {
-                screen_cap_fps
-            } else {
-                60
-            }
+            60
         }
     }
 
@@ -629,7 +431,7 @@ impl CefTexture {
 
         self.app.last_size = logical_size;
         self.app.last_dpi = current_dpi;
-        return true;
+        true
     }
 
     fn update_texture(&mut self) {
@@ -701,7 +503,7 @@ impl CefTexture {
                         drop(tex_info);
 
                         let (new_rd_rid, new_texture_2d_rd) =
-                            Self::create_rd_texture(new_w as i32, new_h as i32);
+                            render::create_rd_texture(new_w as i32, new_h as i32);
                         let texture_clone = new_texture_2d_rd.clone();
                         *rd_texture_rid = new_rd_rid;
                         *texture_2d_rd = new_texture_2d_rd;
@@ -716,7 +518,7 @@ impl CefTexture {
                 };
 
                 if let Some(old_rid) = old_rd_rid {
-                    Self::free_rd_texture(old_rid);
+                    render::free_rd_texture(old_rid);
                 }
 
                 if let Some(texture) = new_texture_clone {

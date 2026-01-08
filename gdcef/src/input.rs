@@ -8,6 +8,43 @@ use godot::prelude::*;
 
 mod keycode;
 
+/// Macro to extract keyboard modifier flags from any event with modifier methods
+macro_rules! keyboard_modifiers {
+    ($event:expr) => {{
+        let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
+        if $event.is_shift_pressed() {
+            modifiers |= cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0;
+        }
+        if $event.is_ctrl_pressed() {
+            modifiers |= cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0;
+        }
+        if $event.is_alt_pressed() {
+            modifiers |= cef_event_flags_t::EVENTFLAG_ALT_DOWN.0;
+        }
+        if $event.is_meta_pressed() {
+            modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0;
+        }
+        modifiers
+    }};
+}
+
+/// Extracts mouse button modifier flags from a button mask
+fn mouse_button_modifiers(button_mask: MouseButtonMask) -> u32 {
+    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
+
+    if button_mask.is_set(MouseButtonMask::LEFT) {
+        modifiers |= cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0;
+    }
+    if button_mask.is_set(MouseButtonMask::MIDDLE) {
+        modifiers |= cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0;
+    }
+    if button_mask.is_set(MouseButtonMask::RIGHT) {
+        modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0;
+    }
+
+    modifiers
+}
+
 /// Creates a CEF mouse event from Godot position and DPI scale
 pub fn create_mouse_event(
     position: Vector2,
@@ -28,13 +65,9 @@ pub fn handle_mouse_button(
     pixel_scale_factor: f32,
     device_scale_factor: f32,
 ) {
+    let modifiers = keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask());
     let position = event.get_position();
-    let mouse_event = create_mouse_event(
-        position,
-        pixel_scale_factor,
-        device_scale_factor,
-        get_modifiers_from_button_event(event),
-    );
+    let mouse_event = create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
 
     match event.get_button_index() {
         MouseButton::LEFT | MouseButton::MIDDLE | MouseButton::RIGHT => {
@@ -80,13 +113,9 @@ pub fn handle_mouse_motion(
     pixel_scale_factor: f32,
     device_scale_factor: f32,
 ) {
+    let modifiers = keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask());
     let position = event.get_position();
-    let mouse_event = create_mouse_event(
-        position,
-        pixel_scale_factor,
-        device_scale_factor,
-        get_modifiers_from_motion_event(event),
-    );
+    let mouse_event = create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
     host.send_mouse_move_event(Some(&mouse_event), false as i32);
 }
 
@@ -97,13 +126,9 @@ pub fn handle_pan_gesture(
     pixel_scale_factor: f32,
     device_scale_factor: f32,
 ) {
+    let modifiers = keyboard_modifiers!(event);
     let position = event.get_position();
-    let mouse_event = create_mouse_event(
-        position,
-        pixel_scale_factor,
-        device_scale_factor,
-        get_modifiers_from_pan_gesture_event(event),
-    );
+    let mouse_event = create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
 
     let delta = event.get_delta();
     // Convert pan delta to scroll wheel delta
@@ -117,119 +142,17 @@ pub fn handle_pan_gesture(
     }
 }
 
-/// Extracts modifier flags from a pan gesture event
-pub fn get_modifiers_from_pan_gesture_event(event: &Gd<InputEventPanGesture>) -> u32 {
-    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
-
-    if event.is_shift_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0;
-    }
-    if event.is_ctrl_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0;
-    }
-    if event.is_alt_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_ALT_DOWN.0;
-    }
-    if event.is_meta_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0;
-    }
-
-    modifiers as u32
-}
-
-/// Extracts modifier flags from a mouse button event
-pub fn get_modifiers_from_button_event(event: &Gd<InputEventMouseButton>) -> u32 {
-    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
-
-    if event.is_shift_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0;
-    }
-    if event.is_ctrl_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0;
-    }
-    if event.is_alt_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_ALT_DOWN.0;
-    }
-    if event.is_meta_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0;
-    }
-
-    let button_mask = event.get_button_mask();
-    if button_mask.is_set(MouseButtonMask::LEFT) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0;
-    }
-    if button_mask.is_set(MouseButtonMask::MIDDLE) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0;
-    }
-    if button_mask.is_set(MouseButtonMask::RIGHT) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0;
-    }
-
-    modifiers as u32
-}
-
-/// Extracts modifier flags from a mouse motion event
-pub fn get_modifiers_from_motion_event(event: &Gd<InputEventMouseMotion>) -> u32 {
-    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
-
-    if event.is_shift_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0;
-    }
-    if event.is_ctrl_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0;
-    }
-    if event.is_alt_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_ALT_DOWN.0;
-    }
-    if event.is_meta_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0;
-    }
-
-    let button_mask = event.get_button_mask();
-    if button_mask.is_set(MouseButtonMask::LEFT) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0;
-    }
-    if button_mask.is_set(MouseButtonMask::MIDDLE) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0;
-    }
-    if button_mask.is_set(MouseButtonMask::RIGHT) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0;
-    }
-
-    modifiers as u32
-}
-
-/// Extracts modifier flags from a keyboard event
-pub fn get_modifiers_from_key_event(event: &Gd<InputEventKey>) -> u32 {
-    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
-
-    if event.is_shift_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0;
-    }
-    if event.is_ctrl_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0;
-    }
-    if event.is_alt_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_ALT_DOWN.0;
-    }
-    if event.is_meta_pressed() {
-        modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0;
-    }
+/// Handles keyboard events and sends them to CEF browser host
+pub fn handle_key_event(host: &impl ImplBrowserHost, event: &Gd<InputEventKey>) {
+    let mut modifiers = keyboard_modifiers!(event);
 
     // Check if it's from the keypad
     if is_keypad_key(event.get_physical_keycode()) {
         modifiers |= cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0;
     }
 
-    modifiers as u32
-}
-
-/// Handles keyboard events and sends them to CEF browser host
-pub fn handle_key_event(host: &impl ImplBrowserHost, event: &Gd<InputEventKey>) {
-    let modifiers = get_modifiers_from_key_event(event);
     let is_pressed = event.is_pressed();
     let is_echo = event.is_echo();
-
     let keycode = event.get_keycode();
 
     // Get the Windows virtual key code from Godot key (CEF expects this on all platforms)

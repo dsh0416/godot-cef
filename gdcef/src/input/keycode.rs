@@ -376,3 +376,100 @@ pub fn godot_key_to_native_keycode(key: Key) -> i32 {
         _ => 0,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Windows virtual key code constants for testing.
+    mod vk {
+        pub const VK_A: i32 = 0x41;
+        pub const VK_Z: i32 = 0x5A;
+        pub const VK_0: i32 = 0x30;
+        pub const VK_9: i32 = 0x39;
+        pub const VK_RETURN: i32 = 0x0D;
+        pub const VK_ESCAPE: i32 = 0x1B;
+        pub const VK_SPACE: i32 = 0x20;
+        pub const VK_TAB: i32 = 0x09;
+        pub const VK_BACK: i32 = 0x08;
+        pub const VK_F1: i32 = 0x70;
+        pub const VK_F12: i32 = 0x7B;
+        pub const VK_NUMPAD0: i32 = 0x60;
+        pub const VK_NUMPAD9: i32 = 0x69;
+    }
+
+    #[test]
+    fn test_letter_keys_windows() {
+        assert_eq!(godot_key_to_windows_keycode(Key::A), vk::VK_A);
+        assert_eq!(godot_key_to_windows_keycode(Key::Z), vk::VK_Z);
+    }
+
+    #[test]
+    fn test_number_keys_windows() {
+        assert_eq!(godot_key_to_windows_keycode(Key::KEY_0), vk::VK_0);
+        assert_eq!(godot_key_to_windows_keycode(Key::KEY_9), vk::VK_9);
+    }
+
+    #[test]
+    fn test_control_keys_windows() {
+        assert_eq!(godot_key_to_windows_keycode(Key::ENTER), vk::VK_RETURN);
+        assert_eq!(godot_key_to_windows_keycode(Key::ESCAPE), vk::VK_ESCAPE);
+        assert_eq!(godot_key_to_windows_keycode(Key::SPACE), vk::VK_SPACE);
+        assert_eq!(godot_key_to_windows_keycode(Key::TAB), vk::VK_TAB);
+        assert_eq!(godot_key_to_windows_keycode(Key::BACKSPACE), vk::VK_BACK);
+    }
+
+    #[test]
+    fn test_function_keys_windows() {
+        assert_eq!(godot_key_to_windows_keycode(Key::F1), vk::VK_F1);
+        assert_eq!(godot_key_to_windows_keycode(Key::F12), vk::VK_F12);
+    }
+
+    #[test]
+    fn test_keypad_keys_windows() {
+        assert_eq!(godot_key_to_windows_keycode(Key::KP_0), vk::VK_NUMPAD0);
+        assert_eq!(godot_key_to_windows_keycode(Key::KP_9), vk::VK_NUMPAD9);
+    }
+
+    #[cfg(target_os = "macos")]
+    mod macos_tests {
+        use super::super::*;
+
+        /// macOS virtual key codes from HIToolbox/Events.h.
+        mod kv {
+            pub const KVK_ANSI_A: i32 = 0x00;
+            pub const KVK_RETURN: i32 = 0x24;
+            pub const KVK_ESCAPE: i32 = 0x35;
+            pub const KVK_SPACE: i32 = 0x31;
+        }
+
+        #[test]
+        fn test_macos_native_keys() {
+            assert_eq!(godot_key_to_native_keycode(Key::A), kv::KVK_ANSI_A);
+            assert_eq!(godot_key_to_native_keycode(Key::ENTER), kv::KVK_RETURN);
+            assert_eq!(godot_key_to_native_keycode(Key::ESCAPE), kv::KVK_ESCAPE);
+            assert_eq!(godot_key_to_native_keycode(Key::SPACE), kv::KVK_SPACE);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    mod linux_tests {
+        use super::super::*;
+
+        /// X11 keycodes (evdev + 8).
+        mod xk {
+            pub const XK_A: i32 = 38;
+            pub const XK_RETURN: i32 = 36;
+            pub const XK_ESCAPE: i32 = 9;
+            pub const XK_SPACE: i32 = 65;
+        }
+
+        #[test]
+        fn test_linux_native_keys() {
+            assert_eq!(godot_key_to_native_keycode(Key::A), xk::XK_A);
+            assert_eq!(godot_key_to_native_keycode(Key::ENTER), xk::XK_RETURN);
+            assert_eq!(godot_key_to_native_keycode(Key::ESCAPE), xk::XK_ESCAPE);
+            assert_eq!(godot_key_to_native_keycode(Key::SPACE), xk::XK_SPACE);
+        }
+    }
+}
