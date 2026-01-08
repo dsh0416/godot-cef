@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 
 #[cfg(target_os = "macos")]
 use serde::Serialize;
+#[cfg(target_os = "macos")]
 use std::collections::HashMap;
 
 #[cfg(target_os = "macos")]

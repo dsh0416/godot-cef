@@ -176,6 +176,9 @@ pub fn handle_key_event(host: &impl ImplBrowserHost, event: &Gd<InputEventKey>) 
 
     // Check if it's from the keypad
     if is_keypad_key(event.get_physical_keycode()) {
+        #[cfg(target_os = "windows")]
+        modifiers |= cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0 as u32;
+        #[cfg(not(target_os = "windows"))]
         modifiers |= cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0;
     }
 
