@@ -28,7 +28,7 @@ jobs:
     name: macOS ${{ matrix.arch }}
 
     env:
-      CEF_PATH: $HOME/.local/share/cef
+      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -54,7 +54,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force $HOME/.local/share/cef
+        run: export-cef-dir --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for macOS
         run: cargo xtask bundle --release
@@ -103,7 +103,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir ${{ github.workspace }}/cef
+        run: export-cef-dir --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for Windows
         run: cargo xtask bundle --release
@@ -146,7 +146,7 @@ jobs:
     name: Linux x86_64
 
     env:
-      CEF_DIR: ${{ github.workspace }}/cef
+      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -192,7 +192,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir ${{ github.workspace }}/cef
+        run: export-cef-dir --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for Linux
         run: cargo xtask bundle --release
