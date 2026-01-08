@@ -47,3 +47,4 @@ objc2-metal = { version = "0.3", features = [
 
 [profile.release]
 debug = "line-tables-only"
+lto = true
