@@ -181,6 +181,68 @@ pub fn get_target_dir(release: bool, custom_target_dir: Option<&Path>) -> PathBu
     base.join(profile)
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn get_cef_dir() -> Option<PathBuf> {
     env::var("CEF_PATH").ok().map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+pub fn get_cef_dir_arm64() -> Option<PathBuf> {
+    env::var("CEF_PATH_ARM64").ok().map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+pub fn get_cef_dir_x64() -> Option<PathBuf> {
+    env::var("CEF_PATH_X64").ok().map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+pub fn get_target_dir_for_target(
+    release: bool,
+    target: &str,
+    custom_target_dir: Option<&Path>,
+) -> PathBuf {
+    let profile = if release { "release" } else { "debug" };
+    let base = custom_target_dir.map(PathBuf::from).unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask should be in workspace")
+            .join("target")
+    });
+    base.join(target).join(profile)
+}
+
+#[cfg(target_os = "macos")]
+pub fn run_lipo(
+    input1: &Path,
+    input2: &Path,
+    output: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "Running: lipo -create {} {} -output {}",
+        input1.display(),
+        input2.display(),
+        output.display()
+    );
+
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let status = Command::new("lipo")
+        .args([
+            "-create",
+            input1.to_str().unwrap(),
+            input2.to_str().unwrap(),
+            "-output",
+            output.to_str().unwrap(),
+        ])
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("lipo failed with status: {}", status).into());
+    }
+    Ok(())
 }

@@ -5,18 +5,13 @@ reloadable = true
 
 [libraries]
 linux.x86_64     = "bin/x86_64-unknown-linux-gnu/libgdcef.so"
-macos.arm64      = "bin/aarch64-apple-darwin/Godot CEF.framework"
+macos     = "bin/universal-apple-darwin/Godot CEF.framework"
 windows.x86_64   = "bin/x86_64-pc-windows-msvc/gdcef.dll"
 
 [icons]
 WebView = "icons/webview.svg"
 
 [dependencies]
-
-macos.arm64 = {
-  "bin/aarch64-apple-darwin/Godot CEF.framework" : "Contents/Frameworks",
-  "bin/aarch64-apple-darwin/Godot CEF.app" : "Contents/Frameworks"
-}
 
 windows.x86_64 = {
   "bin/x86_64-pc-windows-msvc/gdcef.dll" : "",
@@ -40,6 +35,11 @@ windows.x86_64 = {
   "bin/x86_64-pc-windows-msvc/vk_swiftshader.dll" : "",
   "bin/x86_64-pc-windows-msvc/vk_swiftshader_icd.json" : "",
   "bin/x86_64-pc-windows-msvc/vulkan-1.dll" : ""
+}
+
+macos = {
+  "bin/universal-apple-darwin/Godot CEF.framework" : "Contents/Frameworks",
+  "bin/universal-apple-darwin/Godot CEF.app" : "Contents/Frameworks"
 }
 
 linux.x86_64 = {

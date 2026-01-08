@@ -1,4 +1,7 @@
-use crate::bundle_common::{AppInfoPlist, copy_directory, get_cef_dir, get_target_dir, run_cargo};
+use crate::bundle_common::{
+    AppInfoPlist, copy_directory, get_cef_dir_arm64, get_cef_dir_x64, get_target_dir,
+    get_target_dir_for_target, run_cargo, run_lipo,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -6,6 +9,10 @@ const EXEC_PATH: &str = "Contents/MacOS";
 const FRAMEWORKS_PATH: &str = "Contents/Frameworks";
 const RESOURCES_PATH: &str = "Contents/Resources";
 const FRAMEWORK: &str = "Chromium Embedded Framework.framework";
+const FRAMEWORK_ARM64: &str = "Chromium Embedded Framework (ARM64).framework";
+const FRAMEWORK_X64: &str = "Chromium Embedded Framework (X86_64).framework";
+const TARGET_ARM64: &str = "aarch64-apple-darwin";
+const TARGET_X64: &str = "x86_64-apple-darwin";
 const HELPERS: &[&str] = &[
     "Godot CEF Helper (GPU)",
     "Godot CEF Helper (Renderer)",
@@ -44,27 +51,35 @@ fn create_app(
     Ok(app_path)
 }
 
-fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let main_app_path = create_app(
-        target_dir,
-        "Godot CEF",
-        &target_dir.join("gdcef_helper"),
-        false,
-    )?;
+fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let main_app_path = create_app(target_dir, "Godot CEF", universal_helper, false)?;
 
-    let cef_path = get_cef_dir()
-        .ok_or("CEF directory not found. Please set CEF_PATH environment variable.")?;
-    let to = main_app_path.join(FRAMEWORKS_PATH).join(FRAMEWORK);
-    if to.exists() {
-        fs::remove_dir_all(&to)?;
+    // Copy ARM64 CEF framework
+    let cef_path_arm64 = get_cef_dir_arm64()
+        .ok_or("CEF ARM64 directory not found. Please set CEF_PATH_ARM64 environment variable.")?;
+    let to_arm64 = main_app_path.join(FRAMEWORKS_PATH).join(FRAMEWORK_ARM64);
+    if to_arm64.exists() {
+        fs::remove_dir_all(&to_arm64)?;
     }
-    copy_directory(&cef_path.join(FRAMEWORK), &to)?;
+    copy_directory(&cef_path_arm64.join(FRAMEWORK), &to_arm64)?;
+    println!("Copied: {}", FRAMEWORK_ARM64);
 
+    // Copy X64 CEF framework
+    let cef_path_x64 = get_cef_dir_x64()
+        .ok_or("CEF X64 directory not found. Please set CEF_PATH_X64 environment variable.")?;
+    let to_x64 = main_app_path.join(FRAMEWORKS_PATH).join(FRAMEWORK_X64);
+    if to_x64.exists() {
+        fs::remove_dir_all(&to_x64)?;
+    }
+    copy_directory(&cef_path_x64.join(FRAMEWORK), &to_x64)?;
+    println!("Copied: {}", FRAMEWORK_X64);
+
+    // Create helper apps with universal binary
     for helper in HELPERS {
         create_app(
             &main_app_path.join(FRAMEWORKS_PATH),
             helper,
-            &target_dir.join("gdcef_helper"),
+            universal_helper,
             true,
         )?;
     }
@@ -74,14 +89,36 @@ fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cargo_args = vec!["build", "--bin", "gdcef_helper"];
+    // Build for ARM64
+    let mut cargo_args_arm64 = vec!["build", "--bin", "gdcef_helper", "--target", TARGET_ARM64];
     if release {
-        cargo_args.push("--release");
+        cargo_args_arm64.push("--release");
     }
-    run_cargo(&cargo_args)?;
+    run_cargo(&cargo_args_arm64)?;
 
-    let target_dir = get_target_dir(release, target_dir);
-    bundle(&target_dir)?;
+    // Build for X64
+    let mut cargo_args_x64 = vec!["build", "--bin", "gdcef_helper", "--target", TARGET_X64];
+    if release {
+        cargo_args_x64.push("--release");
+    }
+    run_cargo(&cargo_args_x64)?;
+
+    // Get target directories for each architecture
+    let target_dir_arm64 = get_target_dir_for_target(release, TARGET_ARM64, target_dir);
+    let target_dir_x64 = get_target_dir_for_target(release, TARGET_X64, target_dir);
+    let output_dir = get_target_dir(release, target_dir);
+
+    // Create universal binary with lipo
+    let helper_arm64 = target_dir_arm64.join("gdcef_helper");
+    let helper_x64 = target_dir_x64.join("gdcef_helper");
+    let universal_helper = output_dir.join("gdcef_helper_universal");
+
+    run_lipo(&helper_arm64, &helper_x64, &universal_helper)?;
+
+    bundle(&output_dir, &universal_helper)?;
+
+    // Clean up temporary universal binary
+    fs::remove_file(&universal_helper)?;
 
     Ok(())
 }

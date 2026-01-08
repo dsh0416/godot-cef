@@ -6,8 +6,7 @@ use std::path::Path;
 
 /// Platform targets and their artifact directory names
 const PLATFORMS: &[(&str, &str)] = &[
-    ("aarch64-apple-darwin", "gdcef-aarch64-apple-darwin"),
-    ("x86_64-apple-darwin", "gdcef-x86_64-apple-darwin"),
+    ("universal-apple-darwin", "gdcef-universal-apple-darwin"),
     ("x86_64-pc-windows-msvc", "gdcef-x86_64-pc-windows-msvc"),
     ("x86_64-unknown-linux-gnu", "gdcef-x86_64-unknown-linux-gnu"),
 ];
