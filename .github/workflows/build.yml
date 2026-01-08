@@ -28,7 +28,7 @@ jobs:
     name: macOS ${{ matrix.arch }}
 
     env:
-      CEF_DIR: $HOME/.local/share/cef
+      CEF_PATH: $HOME/.local/share/cef
 
     steps:
       - name: Checkout repository
@@ -76,6 +76,9 @@ jobs:
     runs-on: windows-latest
     name: Windows x86_64
 
+    env:
+      CEF_PATH: ${{ github.workspace }}/cef
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -100,7 +103,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir
+        run: export-cef-dir ${{ github.workspace }}/cef
 
       - name: Build and bundle for Windows
         run: cargo xtask bundle --release
@@ -141,6 +144,9 @@ jobs:
   build-linux:
     runs-on: ubuntu-22.04
     name: Linux x86_64
+
+    env:
+      CEF_DIR: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -186,7 +192,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir
+        run: export-cef-dir ${{ github.workspace }}/cef
 
       - name: Build and bundle for Linux
         run: cargo xtask bundle --release
@@ -218,9 +224,41 @@ jobs:
           path: artifacts/x86_64-unknown-linux-gnu
           retention-days: 30
 
-  release:
+  pack:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    name: Pack Addon
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Pack Godot addon
+        run: |
+          cargo xtask pack \
+            --artifacts artifacts \
+            --output godot_cef \
+            --addon-src addons/godot_cef
+
+      - name: Upload packed addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot_cef-addon
+          path: godot_cef
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [pack]
     runs-on: ubuntu-latest
     name: Create Release
 
@@ -228,24 +266,19 @@ jobs:
       contents: write
 
     steps:
-      - name: Download all artifacts
+      - name: Download packed addon
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: godot_cef-addon
+          path: godot_cef
 
-      - name: Create release archives
-        run: |
-          cd artifacts
-          for dir in */; do
-            name="${dir%/}"
-            zip -r "../${name}.zip" "$dir"
-          done
-          cd ..
+      - name: Create release archive
+        run: zip -r godot_cef.zip godot_cef
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: "*.zip"
+          files: godot_cef.zip
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
