@@ -136,7 +136,14 @@ fn parse_res_url(url: &str) -> String {
 
     let mut full_path = format!("res://{}", path);
 
-    if full_path.ends_with('/') || !full_path.contains('.') || full_path.ends_with("res://") {
+    // Determine whether the last path component (ignoring trailing '/')
+    // has an extension (i.e., contains a dot). This avoids treating dots
+    // in parent directory names as file extensions.
+    let trimmed = full_path.trim_end_matches('/');
+    let last_segment = trimmed.rsplit('/').next().unwrap_or("");
+    let has_extension = last_segment.contains('.');
+
+    if full_path.ends_with('/') || !has_extension || full_path.ends_with("res://") {
         if !full_path.ends_with('/') {
             full_path.push('/');
         }
@@ -219,29 +226,66 @@ wrap_resource_handler! {
 
             let range_header = request.header_by_name(Some(&"Range".into()));
             let range_str = CefStringUtf16::from(&range_header).to_string();
-            let content_range: Option<(u64, Option<u64>)> = if !range_str.is_empty() && range_str.starts_with("bytes=") {
-                let range_part = &range_str[6..];
-                let parts: Vec<&str> = range_part.split('-').collect();
-                if parts.len() == 2 {
-                    let start = parts[0].parse::<u64>().ok();
-                    let end = if parts[1].is_empty() {
-                        None
-                    } else {
-                        parts[1].parse::<u64>().ok()
-                    };
-                    start.map(|s| (s, end))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
 
             match FileAccess::open(&gstring_path, ModeFlags::READ) {
                 Some(mut file) => {
                     let file_size = file.get_length();
                     state.total_file_size = file_size;
 
+                    // Parse `Range` header. Supports "bytes=start-end", "bytes=start-",
+                    // and "bytes=-suffix_length". Multi-range requests (with commas)
+                    // are not supported and are treated as if no Range header was set.
+                    let content_range: Option<(u64, Option<u64>)> =
+                        if !range_str.is_empty() && range_str.starts_with("bytes=") {
+                            let range_part = &range_str[6..];
+
+                            // Reject multi-range specifications like "bytes=0-100,200-300".
+                            if range_part.contains(',') {
+                                None
+                            } else {
+                                let parts: Vec<&str> = range_part.split('-').collect();
+                                if parts.len() != 2 {
+                                    None
+                                } else {
+                                    let start_str = parts[0].trim();
+                                    let end_str = parts[1].trim();
+
+                                    if !start_str.is_empty() {
+                                        // "bytes=start-" or "bytes=start-end"
+                                        match start_str.parse::<u64>() {
+                                            Ok(start) => {
+                                                let end_opt = if end_str.is_empty() {
+                                                    None
+                                                } else {
+                                                    match end_str.parse::<u64>() {
+                                                        Ok(e) => Some(e),
+                                                        Err(_) => None,
+                                                    }
+                                                };
+                                                end_opt.map(|e| (start, Some(e))).or_else(|| Some((start, None)))
+                                            }
+                                            Err(_) => None,
+                                        }
+                                    } else if !end_str.is_empty() {
+                                        // "bytes=-suffix_length"
+                                        match end_str.parse::<u64>() {
+                                            Ok(suffix_len) if suffix_len > 0 => {
+                                                if suffix_len >= file_size {
+                                                    Some((0, None))
+                                                } else {
+                                                    Some((file_size - suffix_len, None))
+                                                }
+                                            }
+                                            _ => None,
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                            }
+                        } else {
+                            None
+                        };
                     let path = PathBuf::from(&res_path);
                     let extension = path
                         .extension()
