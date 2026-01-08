@@ -49,11 +49,15 @@ This tool downloads and extracts the correct CEF binaries for your platform. For
 On macOS, you need to create proper app bundles for CEF to function correctly:
 
 ```bash
-# Build and bundle the helper subprocess app
-cargo run --bin bundle_app
+# Build and bundle everything (helper app + framework)
+cargo xtask bundle-all
 
-# Build and bundle the GDExtension framework
-cargo run --bin bundle_framework
+# Or build components individually:
+cargo xtask bundle-app        # Build the helper subprocess app
+cargo xtask bundle-framework  # Build the GDExtension framework
+
+# For release builds, add the --release flag:
+cargo xtask bundle-all --release
 ```
 
 This creates:
@@ -68,6 +72,10 @@ cargo build --lib
 
 # Build the helper subprocess
 cargo build --bin gdcef_helper
+
+# For release builds:
+cargo build --lib --release
+cargo build --bin gdcef_helper --release
 ```
 
 ### Step 3: Copy to Your Godot Project
