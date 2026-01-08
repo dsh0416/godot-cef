@@ -276,7 +276,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Godot CEF ${{ github.ref_name }}
-          draft: false
+          draft: true # release is draft until it is manually published
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |
