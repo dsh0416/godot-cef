@@ -5,6 +5,7 @@ mod cursor;
 mod error;
 mod input;
 mod render;
+mod res_protocol;
 mod texture;
 mod utils;
 mod webrender;
@@ -175,6 +176,11 @@ impl CefTexture {
                 webrender::OsrRequestContextHandler {},
             )),
         );
+
+        // Register the res:// scheme handler on this specific request context
+        if let Some(ctx) = context.as_mut() {
+            res_protocol::register_res_scheme_handler_on_context(ctx);
+        }
 
         let browser = if use_accelerated {
             self.create_accelerated_browser(

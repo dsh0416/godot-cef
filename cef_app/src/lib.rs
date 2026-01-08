@@ -79,6 +79,29 @@ wrap_app! {
     }
 
     impl App {
+        fn on_register_custom_schemes(&self, registrar: Option<&mut cef::SchemeRegistrar>) {
+            let Some(registrar) = registrar else {
+                return;
+            };
+
+            // Register the "res" scheme for loading Godot packed resources.
+            // Options:
+            // - STANDARD: Parse URLs in standard format (scheme://host/path)
+            // - LOCAL: Treat as local content (like file://)
+            // - SECURE: Treat as secure origin (allows loading from https pages)
+            // - CORS_ENABLED: Allow CORS requests to this scheme
+            // - FETCH_ENABLED: Allow fetch() API to use this scheme
+            // - CSP_BYPASSING: Bypass Content-Security-Policy checks
+            let options = cef::SchemeOptions::STANDARD.get_raw()
+                | cef::SchemeOptions::LOCAL.get_raw()
+                | cef::SchemeOptions::SECURE.get_raw()
+                | cef::SchemeOptions::CORS_ENABLED.get_raw()
+                | cef::SchemeOptions::FETCH_ENABLED.get_raw()
+                | cef::SchemeOptions::CSP_BYPASSING.get_raw();
+
+            registrar.add_custom_scheme(Some(&"res".into()), options as i32);
+        }
+
         fn on_before_command_line_processing(
             &self,
             _process_type: Option<&cef::CefStringUtf16>,
@@ -99,31 +122,6 @@ wrap_app! {
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
             command_line
                 .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
-
-            match self.app.godot_backend() {
-                GodotRenderBackend::Direct3D12 => {
-                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
-                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"d3d11on12".into()));
-                }
-                GodotRenderBackend::Metal => {
-                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
-                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"metal".into()));
-                }
-                #[cfg(target_os = "macos")]
-                // using --use=angle=vulkan would disables GPU acceleration on macOS.
-                // thus we keep using metal backend for Vulkan on macOS.
-                // We use MoltenVK on macOS to translate Vulkan to Metal.
-                GodotRenderBackend::Vulkan => {
-                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
-                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"metal".into()));
-                }
-                #[cfg(not(target_os = "macos"))]
-                GodotRenderBackend::Vulkan => {
-                    command_line.append_switch_with_value(Some(&"use-gl".into()), Some(&"angle".into()));
-                    command_line.append_switch_with_value(Some(&"use-angle".into()), Some(&"vulkan".into()));
-                }
-                _ => {}
-            }
         }
 
         fn browser_process_handler(&self) -> Option<cef::BrowserProcessHandler> {

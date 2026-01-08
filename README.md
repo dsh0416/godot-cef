@@ -233,7 +233,7 @@ There are several projects that bring web content into Godot. Here's how this pr
 | **HiDPI Aware** | ✅ Yes | ✅ Yes | ❌ No |
 | **Consistent Cross-Platform** | ✅ Same engine everywhere | ❌ Different engines | ✅ Same engine everywhere |
 | **JS ↔ GDScript IPC** | ✅ Yes | ✅ Yes | ✅ Yes |
-| **Godot Filesystem Access** | 🚧 WIP | ✅ Yes | ❌ No |
+| **Godot Filesystem Access** | ✅ Yes (`res://`) | ✅ Yes | ❌ No |
 | **Project Export** | ✅ Yes | ✅ Yes | ❌ No |
 | **Headless CI Support** | ✅ Yes | ❌ No | ✅ Yes |
 | **Bundle Size** | Large (~100MB+) | Small (uses OS webview) | Large (~100MB+) |
@@ -264,11 +264,11 @@ The motivation for developing this project comes from our work-in-progress game,
 
 - [x] Automatic Building Support
 - [x] CI/CD Configuration
-- [ ] Custom Scheme Support
+- [x] Custom Scheme Support (`res://` protocol)
 - [x] IPC Support
 - [ ] Better IME Support
 - [ ] Gamepad Support
-- [ ] Access to Godot Filesystem
+- [x] Access to Godot Filesystem
 
 ## 📄 License
 
