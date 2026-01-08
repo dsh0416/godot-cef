@@ -56,17 +56,14 @@ jobs:
       - name: Download CEF binaries
         run: export-cef-dir --force $HOME/.local/share/cef
 
-      - name: Build and bundle helper app
-        run: cargo run --bin bundle_app --release
-
-      - name: Build and bundle GDExtension framework
-        run: cargo run --bin bundle_framework --release
+      - name: Build and bundle for macOS
+        run: cargo xtask bundle-all --release
 
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts/${{ matrix.target }}
-          cp -R "target/debug/Godot CEF.app" "artifacts/${{ matrix.target }}/"
-          cp -R "target/debug/Godot CEF.framework" "artifacts/${{ matrix.target }}/"
+          cp -R "target/release/Godot CEF.app" "artifacts/${{ matrix.target }}/"
+          cp -R "target/release/Godot CEF.framework" "artifacts/${{ matrix.target }}/"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

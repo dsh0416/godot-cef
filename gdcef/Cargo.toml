@@ -6,10 +6,6 @@ edition = "2024"
 name = "gdcef"
 crate-type = ["cdylib"]  # Compile this crate to a dynamic C library.
 
-[[bin]]
-name = "bundle_framework"
-path = "src/mac/bundle_framework.rs"
-
 [dependencies]
 godot = { workspace = true }
 cef = { workspace = true }
@@ -20,8 +16,6 @@ cef_app = { path = "../cef_app" }
 wide = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-plist = { workspace = true }
-serde = { workspace = true }
 libloading = { workspace = true }
 objc2 = { workspace = true }
 objc2-metal = { workspace = true }

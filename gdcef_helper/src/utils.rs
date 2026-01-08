@@ -1,7 +1,6 @@
 #[cfg(target_os = "macos")]
 use std::{io::Error, path::PathBuf};
 
-
 #[cfg(target_os = "macos")]
 pub fn get_framework_path() -> Result<PathBuf, Error> {
     use process_path::get_executable_path;
