@@ -1,9 +1,7 @@
 use super::{NativeHandleTrait, RenderBackend, SharedTextureInfo, TextureImporterTrait};
 use cef::AcceleratedPaintInfo;
 use godot::classes::RenderingServer;
-use godot::classes::image::Format as ImageFormat;
 use godot::classes::rendering_device::DriverResource;
-use godot::classes::rendering_server::TextureType;
 use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
 use std::ffi::c_void;
@@ -26,15 +24,6 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::Interface;
 
-const COLOR_SWAP_SHADER: &str = r#"
-shader_type canvas_item;
-
-void fragment() {
-    vec4 tex_color = texture(TEXTURE, UV);
-    COLOR = vec4(tex_color.b, tex_color.g, tex_color.r, tex_color.a);
-}
-"#;
-
 /// Native handle wrapping a Windows HANDLE for D3D12 shared textures.
 /// CEF provides this handle for cross-process texture sharing.
 /// We duplicate the handle to keep it valid after CEF's on_accelerated_paint returns.
@@ -47,10 +36,6 @@ pub struct NativeHandle {
 impl NativeHandle {
     pub fn as_handle(&self) -> HANDLE {
         self.handle
-    }
-
-    pub fn as_ptr(&self) -> *mut c_void {
-        self.handle.0
     }
 
     /// Creates a NativeHandle by duplicating the given handle.
@@ -307,10 +292,6 @@ impl NativeTextureImporter {
         Ok(resource)
     }
 
-    pub fn device(&self) -> &ID3D12Device {
-        &self.device
-    }
-
     /// Copies from a source D3D12 resource to a destination D3D12 resource.
     pub fn copy_texture(
         &mut self,
@@ -428,10 +409,7 @@ impl NativeTextureImporter {
 /// Imports D3D12 shared textures from CEF into Godot's rendering system.
 pub struct GodotTextureImporter {
     d3d12_importer: NativeTextureImporter,
-    current_d3d12_resource: Option<ID3D12Resource>,
     current_texture_rid: Option<Rid>,
-    color_swap_shader: Option<Rid>,
-    color_swap_material: Option<Rid>,
 }
 
 impl TextureImporterTrait for GodotTextureImporter {
@@ -452,19 +430,9 @@ impl TextureImporterTrait for GodotTextureImporter {
 
         godot_print!("[AcceleratedOSR/Windows] Using Godot's D3D12 backend for texture import");
 
-        // Create color swap shader for BGRA -> RGBA conversion if needed
-        let mut rs = RenderingServer::singleton();
-        let shader_rid = rs.shader_create();
-        rs.shader_set_code(shader_rid, COLOR_SWAP_SHADER);
-        let material_rid = rs.material_create();
-        rs.material_set_shader(material_rid, shader_rid);
-
         Some(Self {
             d3d12_importer,
-            current_d3d12_resource: None,
             current_texture_rid: None,
-            color_swap_shader: Some(shader_rid),
-            color_swap_material: Some(material_rid),
         })
     }
 
@@ -533,15 +501,6 @@ impl Drop for GodotTextureImporter {
 
         // Free Godot resources
         if let Some(rid) = self.current_texture_rid.take() {
-            rs.free_rid(rid);
-        }
-
-        // D3D12 resource will be dropped automatically via the COM Release mechanism
-
-        if let Some(rid) = self.color_swap_material.take() {
-            rs.free_rid(rid);
-        }
-        if let Some(rid) = self.color_swap_shader.take() {
             rs.free_rid(rid);
         }
     }

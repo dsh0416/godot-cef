@@ -495,10 +495,7 @@ impl CefTexture {
             .expect("Failed to get RenderingDevice");
 
         let mut format = godot::classes::RdTextureFormat::new_gd();
-        #[cfg(target_os = "macos")]
         format.set_format(DataFormat::B8G8R8A8_UNORM);
-        #[cfg(not(target_os = "macos"))]
-        format.set_format(DataFormat::R8G8B8A8_UNORM);
         format.set_width(width as u32);
         format.set_height(height as u32);
         format.set_depth(1);

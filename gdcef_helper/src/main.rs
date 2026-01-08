@@ -1,4 +1,6 @@
-use cef::{CefString, ImplCommandLine, MainArgs, api_hash, args::Args, execute_process};
+use cef::{CefString, ImplCommandLine, api_hash, args::Args, execute_process};
+#[cfg(target_os = "macos")]
+use cef::{MainArgs};
 
 mod utils;
 
