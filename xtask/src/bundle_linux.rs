@@ -34,7 +34,6 @@ fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
 
     println!("Copying CEF assets from: {}", cef_dir.display());
 
-    // Copy individual files
     for file in CEF_FILES {
         let src = cef_dir.join(file);
         let dst = target_dir.join(file);
@@ -47,7 +46,6 @@ fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
         }
     }
 
-    // Copy directories
     for dir in CEF_DIRS {
         let src = cef_dir.join(dir);
         let dst = target_dir.join(dir);
@@ -73,14 +71,12 @@ fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
-    // Build the GDExtension library
     let mut cargo_args = vec!["build", "--lib", "--package", "gdcef"];
     if release {
         cargo_args.push("--release");
     }
     run_cargo(&cargo_args)?;
 
-    // Build the helper subprocess
     let mut cargo_args = vec!["build", "--bin", "gdcef_helper"];
     if release {
         cargo_args.push("--release");
@@ -92,4 +88,3 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
 
     Ok(())
 }
-

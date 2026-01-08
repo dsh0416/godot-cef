@@ -31,7 +31,6 @@ fn copy_platform_artifacts(
     }
     fs::create_dir_all(&dst_dir)?;
 
-    // Copy all contents from the artifact directory
     for entry in fs::read_dir(&src_dir)? {
         let entry = entry?;
         let dst_path = dst_dir.join(entry.file_name());
@@ -48,14 +47,12 @@ fn copy_platform_artifacts(
 }
 
 fn copy_addon_files(addon_src: &Path, output_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    // Copy gdextension file
     let gdext_src = addon_src.join("godot_cef.gdextension");
     if gdext_src.exists() {
         fs::copy(&gdext_src, output_dir.join("godot_cef.gdextension"))?;
         println!("  Copied: godot_cef.gdextension");
     }
 
-    // Copy icons directory if it exists
     let icons_src = addon_src.join("icons");
     if icons_src.exists() {
         let icons_dst = output_dir.join("icons");
@@ -78,18 +75,15 @@ pub fn run(
     println!("  Artifacts: {}", artifacts_dir.display());
     println!("  Output: {}", output_dir.display());
 
-    // Create output directory structure
     if output_dir.exists() {
         fs::remove_dir_all(output_dir)?;
     }
     let bin_dir = output_dir.join("bin");
     fs::create_dir_all(&bin_dir)?;
 
-    // Copy addon files (gdextension, icons)
     if let Some(addon_path) = addon_src {
         copy_addon_files(addon_path, output_dir)?;
     } else {
-        // Default to the workspace's addon directory
         let workspace_addon = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask should be in workspace")
@@ -99,7 +93,6 @@ pub fn run(
         }
     }
 
-    // Copy platform artifacts
     let mut platforms_found = 0;
     for (platform_target, artifact_name) in PLATFORMS {
         if copy_platform_artifacts(&artifacts_dir, &bin_dir, platform_target, artifact_name)? {

@@ -138,8 +138,8 @@ cef_texture.ime_finish_composing_text(false) # Finish composing
 
 ## 🛣️ Roadmap
 
-- [ ] Automatic Building Support
-- [ ] CI/CD Configuration
+- [x] Automatic Building Support
+- [x] CI/CD Configuration
 - [ ] Custom Scheme Support
 - [x] IPC Support
 - [ ] Better IME Support
