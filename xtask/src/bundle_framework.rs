@@ -1,5 +1,3 @@
-//! Bundle the macOS framework
-
 use crate::bundle_common::{FrameworkInfoPlist, get_target_dir, run_cargo};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,8 +24,6 @@ fn create_framework(
     bin: &Path,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let fmwk_path = fmwk_path.join("Godot CEF.framework");
-
-    // Remove existing framework if present
     if fmwk_path.exists() {
         fs::remove_dir_all(&fmwk_path)?;
     }
@@ -49,7 +45,6 @@ fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Bundle the GDExtension framework for macOS
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
     let mut cargo_args = vec!["build", "--lib", "--package", "gdcef"];
     if release {

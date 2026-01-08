@@ -1,12 +1,9 @@
-//! Common utilities for macOS bundling
-
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Info.plist structure for the main helper app
 #[derive(Serialize)]
 pub struct AppInfoPlist {
     #[serde(rename = "CFBundleDevelopmentRegion")]
@@ -50,7 +47,6 @@ pub struct AppInfoPlist {
     pub ns_microphone_usage_description: String,
 }
 
-/// Info.plist structure for the framework
 #[derive(Serialize)]
 pub struct FrameworkInfoPlist {
     #[serde(rename = "CFBundleDevelopmentRegion")]
@@ -83,7 +79,6 @@ pub struct FrameworkInfoPlist {
 }
 
 impl AppInfoPlist {
-    /// Create a new AppInfoPlist with default values
     pub fn new(exec_name: &str, is_helper: bool) -> Self {
         Self {
             cf_bundle_development_region: "en".to_string(),
@@ -117,7 +112,6 @@ impl AppInfoPlist {
 }
 
 impl FrameworkInfoPlist {
-    /// Create a new FrameworkInfoPlist with default values
     pub fn new(lib_name: &str) -> Self {
         Self {
             cf_bundle_development_region: "en".to_string(),
@@ -140,7 +134,6 @@ impl FrameworkInfoPlist {
     }
 }
 
-/// Recursively copy a directory
 pub fn copy_directory(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
@@ -155,7 +148,6 @@ pub fn copy_directory(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-/// Run a cargo command with the given arguments
 pub fn run_cargo(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running: cargo {}", args.join(" "));
     let status = Command::new("cargo")
@@ -170,7 +162,6 @@ pub fn run_cargo(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Get the target directory for the specified profile
 pub fn get_target_dir(release: bool, custom_target_dir: Option<&Path>) -> PathBuf {
     let profile = if release { "release" } else { "debug" };
     let base = custom_target_dir.map(PathBuf::from).unwrap_or_else(|| {

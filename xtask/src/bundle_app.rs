@@ -1,5 +1,3 @@
-//! Bundle the macOS helper app
-
 use crate::bundle_common::{AppInfoPlist, copy_directory, get_target_dir, run_cargo};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -75,7 +73,6 @@ fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Bundle the helper app for macOS
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
     let mut cargo_args = vec!["build", "--bin", "gdcef_helper"];
     if release {
