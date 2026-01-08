@@ -724,6 +724,16 @@ impl CefTexture {
     }
 
     #[func]
+    /// Sends a message into the page via `window.onIpcMessage`.
+    ///
+    /// This is intentionally separate from [`eval`]: callers could achieve a
+    /// similar effect with `eval("window.onIpcMessage(...);")`, but this
+    /// helper:
+    /// - automatically escapes the string payload for safe JS embedding, and
+    /// - enforces a consistent IPC pattern (`window.onIpcMessage(message)`).
+    ///
+    /// Use this when you want structured IPC into the page, and `eval` when
+    /// you truly need arbitrary JavaScript execution.
     pub fn send_ipc_message(&mut self, message: GString) {
         let Some(browser) = self.app.browser.as_ref() else {
             godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no browser");
