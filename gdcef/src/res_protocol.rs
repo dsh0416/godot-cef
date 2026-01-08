@@ -7,12 +7,12 @@
 //! external web server.
 
 use cef::{
-    rc::Rc, wrap_resource_handler, wrap_scheme_handler_factory, CefStringUtf16, ImplRequest,
-    ImplResourceHandler, ImplResponse, ImplSchemeHandlerFactory, ResourceHandler,
-    SchemeHandlerFactory, WrapResourceHandler, WrapSchemeHandlerFactory,
+    CefStringUtf16, ImplRequest, ImplResourceHandler, ImplResponse, ImplSchemeHandlerFactory,
+    ResourceHandler, SchemeHandlerFactory, WrapResourceHandler, WrapSchemeHandlerFactory, rc::Rc,
+    wrap_resource_handler, wrap_scheme_handler_factory,
 };
-use godot::classes::file_access::ModeFlags;
 use godot::classes::FileAccess;
+use godot::classes::file_access::ModeFlags;
 use godot::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -239,7 +239,7 @@ wrap_resource_handler! {
 
             match FileAccess::open(&gstring_path, ModeFlags::READ) {
                 Some(mut file) => {
-                    let file_size = file.get_length() as u64;
+                    let file_size = file.get_length();
                     state.total_file_size = file_size;
 
                     let path = PathBuf::from(&res_path);
@@ -453,11 +453,7 @@ impl ResSchemeHandlerFactory {
 #[allow(dead_code)]
 pub fn register_res_scheme_handler() {
     let mut factory = ResSchemeHandlerFactory::build(ResSchemeHandler::new());
-    cef::register_scheme_handler_factory(
-        Some(&"res".into()),
-        Some(&"".into()),
-        Some(&mut factory),
-    );
+    cef::register_scheme_handler_factory(Some(&"res".into()), Some(&"".into()), Some(&mut factory));
 }
 
 pub fn register_res_scheme_handler_on_context(context: &mut cef::RequestContext) {
@@ -493,4 +489,3 @@ mod tests {
         assert_eq!(get_mime_type("unknown"), "application/octet-stream");
     }
 }
-
