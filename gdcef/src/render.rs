@@ -70,4 +70,3 @@ pub fn free_rd_texture(rd_texture_rid: Rid) {
         }
     }
 }
-

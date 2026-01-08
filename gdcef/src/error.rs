@@ -70,4 +70,3 @@ impl From<io::Error> for CefError {
 
 /// Result type alias for CEF operations.
 pub type CefResult<T> = Result<T, CefError>;
-

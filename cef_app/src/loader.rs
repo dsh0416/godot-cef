@@ -69,12 +69,12 @@ pub fn load_sandbox_from_path(framework_path: &Path, args: &cef::MainArgs) {
     // initialization function. The library path has been validated.
     unsafe {
         let lib = Library::new(path).expect("Failed to load CEF sandbox library");
-        let func = lib
-            .get::<unsafe extern "C" fn(
+        let func =
+            lib.get::<unsafe extern "C" fn(
                 argc: std::os::raw::c_int,
                 argv: *mut *mut ::std::os::raw::c_char,
             )>(b"cef_sandbox_initialize\0")
-            .expect("Failed to find cef_sandbox_initialize function");
+                .expect("Failed to find cef_sandbox_initialize function");
         func(args.argc, args.argv);
     }
 }
@@ -84,4 +84,3 @@ pub fn load_sandbox_from_path(framework_path: &Path, args: &cef::MainArgs) {
 pub fn load_sandbox_from_path(_framework_path: &Path, _args: &cef::MainArgs) {
     // Sandbox is handled differently on Windows and Linux
 }
-

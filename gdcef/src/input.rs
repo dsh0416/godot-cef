@@ -67,7 +67,8 @@ pub fn handle_mouse_button(
 ) {
     let modifiers = keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask());
     let position = event.get_position();
-    let mouse_event = create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
+    let mouse_event =
+        create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
 
     match event.get_button_index() {
         MouseButton::LEFT | MouseButton::MIDDLE | MouseButton::RIGHT => {
@@ -115,7 +116,8 @@ pub fn handle_mouse_motion(
 ) {
     let modifiers = keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask());
     let position = event.get_position();
-    let mouse_event = create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
+    let mouse_event =
+        create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
     host.send_mouse_move_event(Some(&mouse_event), false as i32);
 }
 
@@ -128,7 +130,8 @@ pub fn handle_pan_gesture(
 ) {
     let modifiers = keyboard_modifiers!(event);
     let position = event.get_position();
-    let mouse_event = create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
+    let mouse_event =
+        create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
 
     let delta = event.get_delta();
     // Convert pan delta to scroll wheel delta

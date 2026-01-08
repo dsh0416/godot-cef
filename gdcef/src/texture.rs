@@ -111,4 +111,3 @@ impl TextureRectRd {
         self.height as i32
     }
 }
-

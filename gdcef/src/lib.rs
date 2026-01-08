@@ -10,8 +10,8 @@ mod utils;
 mod webrender;
 
 use cef::{
-    api_hash, do_message_loop_work, BrowserSettings, ImplBrowser, ImplBrowserHost, ImplFrame,
-    RequestContextSettings, WindowInfo,
+    BrowserSettings, ImplBrowser, ImplBrowserHost, ImplFrame, RequestContextSettings, WindowInfo,
+    api_hash, do_message_loop_work,
 };
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::notify::ControlNotification;
@@ -27,8 +27,7 @@ use std::sync::{Arc, Mutex};
 use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::{
-    GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler,
-    TextureImporterTrait,
+    GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler, TextureImporterTrait,
 };
 use crate::browser::{App, MessageQueue, RenderMode};
 use crate::cef_init::CEF_INITIALIZED;

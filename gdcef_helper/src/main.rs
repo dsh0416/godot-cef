@@ -1,4 +1,4 @@
-use cef::{api_hash, args::Args, execute_process, CefString, ImplCommandLine};
+use cef::{CefString, ImplCommandLine, api_hash, args::Args, execute_process};
 
 mod utils;
 

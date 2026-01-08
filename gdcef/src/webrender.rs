@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
 
-use crate::browser::MessageQueue;
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
+use crate::browser::MessageQueue;
 use crate::utils::get_display_scale_factor;
 
 /// Swizzle indices for BGRA -> RGBA conversion.
