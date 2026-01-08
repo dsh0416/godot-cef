@@ -722,4 +722,32 @@ impl CefTexture {
         let url_str: cef::CefStringUtf16 = url.to_string().as_str().into();
         frame.load_url(Some(&url_str));
     }
+
+    #[func]
+    pub fn send_ipc_message(&mut self, message: GString) {
+        let Some(browser) = self.app.browser.as_ref() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no browser");
+            return;
+        };
+        let Some(frame) = browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no main frame");
+            return;
+        };
+
+        // Escape the message string for safe JavaScript embedding
+        let msg_str = message.to_string();
+        let escaped_msg = msg_str
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t");
+
+        let js_code = format!(
+            r#"if (typeof window.onIpcMessage === 'function') {{ window.onIpcMessage("{}"); }}"#,
+            escaped_msg
+        );
+        let js_code_str: cef::CefStringUtf16 = js_code.as_str().into();
+        frame.execute_java_script(Some(&js_code_str), None, 0);
+    }
 }
