@@ -225,7 +225,6 @@ jobs:
           retention-days: 30
 
   pack:
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     name: Pack Addon
@@ -255,31 +254,3 @@ jobs:
           name: godot_cef-addon
           path: godot_cef
           retention-days: 30
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [pack]
-    runs-on: ubuntu-latest
-    name: Create Release
-
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download packed addon
-        uses: actions/download-artifact@v4
-        with:
-          name: godot_cef-addon
-          path: godot_cef
-
-      - name: Create release archive
-        run: zip -r godot_cef.zip godot_cef
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: godot_cef.zip
-          generate_release_notes: true
-          draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
-
