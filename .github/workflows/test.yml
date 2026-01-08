@@ -78,7 +78,11 @@ jobs:
         run: export-cef-dir --force ${{ env.CEF_PATH }}
 
       - name: Run tests
-        run: cargo test --workspace --all-features
+        shell: bash
+        run: |
+          export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export DYLD_LIBRARY_PATH="${CEF_PATH}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+          cargo test --workspace --all-features
 
   clippy:
     runs-on: ubuntu-22.04
