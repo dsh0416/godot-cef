@@ -119,7 +119,7 @@ pub fn godot_key_to_windows_keycode(key: Key) -> i32 {
         Key::SCROLLLOCK => 0x91,
 
         // Default: use the key's ordinal value
-        _ => key.ord() as i32,
+        _ => key.ord(),
     }
 }
 

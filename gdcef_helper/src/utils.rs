@@ -12,19 +12,19 @@ pub fn get_framework_path() -> Result<PathBuf, Error> {
             // main app
             // from: Godot CEF.app/Contents/MacOS/Godot CEF
             // to:   Godot CEF.app/Contents/Frameworks/Chromium Embedded Framework.framework
-            return dylib_path
+            dylib_path
                 .join("../../Frameworks")
                 .join("Chromium Embedded Framework.framework")
-                .canonicalize();
+                .canonicalize()
         }
         false => {
             // helper app
             // from: Godot CEF.app/Contents/Frameworks/Godot CEF Helper.app/Contents/MacOS/Godot CEF Helper
             // to:   Godot CEF.app/Contents/Frameworks/Chromium Embedded Framework.framework
-            return dylib_path
+            dylib_path
                 .join("../../../..")
                 .join("Chromium Embedded Framework.framework")
-                .canonicalize();
+                .canonicalize()
         }
     }
 }

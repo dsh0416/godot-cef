@@ -49,15 +49,13 @@ fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
 
 /// Common helper for view_rect implementation.
 fn compute_view_rect(size: &Arc<Mutex<PhysicalSize<f32>>>, rect: Option<&mut Rect>) {
-    if let Some(rect) = rect {
-        if let Ok(size) = size.lock() {
-            if size.width > 0.0 && size.height > 0.0 {
+    if let Some(rect) = rect
+        && let Ok(size) = size.lock()
+            && size.width > 0.0 && size.height > 0.0 {
                 let scale = get_display_scale_factor();
                 rect.width = (size.width / scale) as i32;
                 rect.height = (size.height / scale) as i32;
             }
-        }
-    }
 }
 
 /// Common helper for screen_info implementation.
@@ -338,8 +336,8 @@ fn on_process_message_received(
     let Some(message) = message else { return 0 };
     let route = CefStringUtf16::from(&message.name()).to_string();
 
-    if route == "ipcRendererToGodot" {
-        if let Some(args) = message.argument_list() {
+    if route == "ipcRendererToGodot"
+        && let Some(args) = message.argument_list() {
             let arg = args.string(0);
             let msg_str = CefStringUtf16::from(&arg).to_string();
 
@@ -348,7 +346,6 @@ fn on_process_message_received(
                 return 1;
             }
         }
-    }
 
     0
 }

@@ -385,11 +385,10 @@ impl CefTexture {
         }
 
         self.app.last_max_fps = max_fps;
-        if let Some(browser) = self.app.browser.as_mut() {
-            if let Some(host) = browser.host() {
+        if let Some(browser) = self.app.browser.as_mut()
+            && let Some(host) = browser.host() {
                 host.set_windowless_frame_rate(max_fps);
             }
-        }
     }
 
     fn handle_size_change(&mut self) -> bool {
@@ -408,25 +407,22 @@ impl CefTexture {
         let pixel_width = logical_size.x * current_dpi;
         let pixel_height = logical_size.y * current_dpi;
 
-        if let Some(render_size) = &self.app.render_size {
-            if let Ok(mut size) = render_size.lock() {
+        if let Some(render_size) = &self.app.render_size
+            && let Ok(mut size) = render_size.lock() {
                 size.width = pixel_width;
                 size.height = pixel_height;
             }
-        }
 
-        if let Some(device_scale_factor) = &self.app.device_scale_factor {
-            if let Ok(mut dpi) = device_scale_factor.lock() {
+        if let Some(device_scale_factor) = &self.app.device_scale_factor
+            && let Ok(mut dpi) = device_scale_factor.lock() {
                 *dpi = current_dpi;
             }
-        }
 
-        if let Some(browser) = self.app.browser.as_mut() {
-            if let Some(host) = browser.host() {
+        if let Some(browser) = self.app.browser.as_mut()
+            && let Some(host) = browser.host() {
                 host.notify_screen_info_changed();
                 host.was_resized();
             }
-        }
 
         self.app.last_size = logical_size;
         self.app.last_dpi = current_dpi;
@@ -564,11 +560,10 @@ impl CefTexture {
     }
 
     fn request_external_begin_frame(&mut self) {
-        if let Some(browser) = self.app.browser.as_mut() {
-            if let Some(host) = browser.host() {
+        if let Some(browser) = self.app.browser.as_mut()
+            && let Some(host) = browser.host() {
                 host.send_external_begin_frame();
             }
-        }
     }
 
     fn update_cursor(&mut self) {

@@ -95,7 +95,7 @@ pub fn run(
 
     let mut platforms_found = 0;
     for (platform_target, artifact_name) in PLATFORMS {
-        if copy_platform_artifacts(&artifacts_dir, &bin_dir, platform_target, artifact_name)? {
+        if copy_platform_artifacts(artifacts_dir, &bin_dir, platform_target, artifact_name)? {
             platforms_found += 1;
         }
     }

@@ -331,7 +331,7 @@ impl TextureImporterTrait for GodotTextureImporter {
 
         // Ensure the destination pointer is suitably aligned for AnyObject before dereferencing.
         let required_align = std::mem::align_of::<AnyObject>();
-        if (dst_texture_ptr as usize) % required_align != 0 {
+        if !(dst_texture_ptr as usize).is_multiple_of(required_align) {
             return Err("Destination Metal texture handle is misaligned for AnyObject".into());
         }
 
@@ -346,7 +346,7 @@ impl TextureImporterTrait for GodotTextureImporter {
             &*dst_texture_ptr
         };
         self.metal_importer.copy_texture(
-            &*src_metal_texture,
+            &src_metal_texture,
             dst_texture_ref,
             src_info.width,
             src_info.height,

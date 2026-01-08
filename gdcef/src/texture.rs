@@ -48,11 +48,10 @@ impl TextureRectRd {
         let width = width.max(1) as u32;
         let height = height.max(1) as u32;
 
-        if self.width == width && self.height == height {
-            if let Some(ref texture) = self.texture {
+        if self.width == width && self.height == height
+            && let Some(ref texture) = self.texture {
                 return texture.get_rid();
             }
-        }
 
         self.width = width;
         self.height = height;

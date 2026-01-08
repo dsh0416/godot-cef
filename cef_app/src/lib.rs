@@ -51,6 +51,12 @@ pub struct OsrApp {
     godot_backend: GodotRenderBackend,
 }
 
+impl Default for OsrApp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OsrApp {
     pub fn new() -> Self {
         Self {
@@ -145,6 +151,12 @@ pub struct OsrBrowserProcessHandler {
     is_cef_ready: RefCell<bool>,
 }
 
+impl Default for OsrBrowserProcessHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OsrBrowserProcessHandler {
     pub fn new() -> Self {
         Self {
@@ -215,9 +227,9 @@ wrap_v8_handler! {
             retval: Option<&mut Option<cef::V8Value>>,
             _exception: Option<&mut CefStringUtf16>
         ) -> i32 {
-            if let Some(arguments) = arguments {
-                if let Some(arg) = arguments.get(0) {
-                    if let Some(arg) = arg {
+            if let Some(arguments) = arguments
+                && let Some(arg) = arguments.first()
+                    && let Some(arg) = arg {
                         if arg.is_string() != 1 {
                             if let Some(retval) = retval {
                                 *retval = v8_value_create_bool(false as _);
@@ -247,8 +259,6 @@ wrap_v8_handler! {
                             }
                         }
                     }
-                }
-            }
 
             if let Some(retval) = retval {
                 *retval = v8_value_create_bool(false as _);
@@ -277,14 +287,13 @@ wrap_render_process_handler! {
         fn on_context_created(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, context: Option<&mut V8Context>) {
             if let Some(context) = context {
                 let global = context.global();
-                if let Some(global) = global {
-                    if let Some(frame) = frame {
+                if let Some(global) = global
+                    && let Some(frame) = frame {
                         let key: CefStringUtf16 = "sendIpcMessage".to_string().as_str().into();
                         let mut handler = OsrIpcHandlerBuilder::build(OsrIpcHandler::new(Some(Arc::new(Mutex::new(frame.clone())))));
                         let mut func = v8_value_create_function(Some(&"sendIpcMessage".into()), Some(&mut handler)).unwrap();
                         global.set_value_bykey(Some(&key), Some(&mut func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
                     }
-                }
             }
         }
     }
