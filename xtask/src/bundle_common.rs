@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 #[derive(Serialize)]
+#[allow(dead_code)]
 pub struct AppInfoPlist {
     #[serde(rename = "CFBundleDevelopmentRegion")]
     pub cf_bundle_development_region: String,
@@ -48,6 +49,7 @@ pub struct AppInfoPlist {
 }
 
 #[derive(Serialize)]
+#[allow(dead_code)]
 pub struct FrameworkInfoPlist {
     #[serde(rename = "CFBundleDevelopmentRegion")]
     pub cf_bundle_development_region: String,

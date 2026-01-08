@@ -29,7 +29,7 @@ macro_rules! keyboard_modifiers {
 }
 
 /// Extracts mouse button modifier flags from a button mask
-fn mouse_button_modifiers(button_mask: MouseButtonMask) -> u32 {
+fn mouse_button_modifiers(button_mask: MouseButtonMask) -> i32 {
     let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
 
     if button_mask.is_set(MouseButtonMask::LEFT) {
@@ -50,12 +50,12 @@ pub fn create_mouse_event(
     position: Vector2,
     pixel_scale_factor: f32,
     device_scale_factor: f32,
-    modifiers: u32,
+    modifiers: i32,
 ) -> MouseEvent {
     let x = (position.x * pixel_scale_factor / device_scale_factor) as i32;
     let y = (position.y * pixel_scale_factor / device_scale_factor) as i32;
 
-    MouseEvent { x, y, modifiers }
+    MouseEvent { x, y, modifiers: modifiers as u32 }
 }
 
 /// Handles mouse button events and sends them to CEF browser host
