@@ -132,7 +132,7 @@ pub trait TextureImporterTrait {
     /// # Arguments
     /// * `src_info` - The source texture info from CEF
     /// * `dst_rd_rid` - The RenderingDevice RID of the destination Godot texture
-    ///                  (obtained via RenderingServer::texture_get_rd_texture)
+    ///                 (obtained via RenderingServer::texture_get_rd_texture)
     ///
     /// # Returns
     /// * `Ok(())` on successful copy
