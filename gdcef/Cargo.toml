@@ -8,7 +8,7 @@ repository.workspace = true
 
 [lib]
 name = "gdcef"
-crate-type = ["cdylib"]  # Compile this crate to a dynamic C library.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 godot = { workspace = true }

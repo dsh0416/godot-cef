@@ -7,6 +7,8 @@ pub struct NativeHandle {
     fd: i32,
 }
 
+/// Not implemented yet
+#[allow(dead_code)]
 impl NativeHandle {
     pub fn fd(&self) -> i32 {
         self.fd
