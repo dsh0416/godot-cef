@@ -122,29 +122,20 @@ static MIME_TYPES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new
     ])
 });
 
-/// Get the MIME type for a file based on its extension.
 fn get_mime_type(extension: &str) -> &'static str {
     MIME_TYPES
         .get(extension.to_lowercase().as_str())
         .unwrap_or(&"application/octet-stream")
 }
 
-/// Parse a `res://` URL and return the full Godot resource path.
-///
-/// URL format: `res://path/to/file.html` or `res://folder/`
-/// Returns: `res://path/to/file.html` or `res://folder/index.html` for directories
 fn parse_res_url(url: &str) -> String {
-    // Remove the scheme prefix if present
     let path = url
         .strip_prefix("res://")
         .or_else(|| url.strip_prefix("res:"))
         .unwrap_or(url);
 
-    // Build the full res:// path
     let mut full_path = format!("res://{}", path);
 
-    // Check if path ends with / or has no extension (likely a directory)
-    // In that case, append index.html
     if full_path.ends_with('/') || !full_path.contains('.') || full_path.ends_with("res://") {
         if !full_path.ends_with('/') {
             full_path.push('/');
@@ -155,22 +146,18 @@ fn parse_res_url(url: &str) -> String {
     full_path
 }
 
-/// State for tracking the resource being served.
 #[derive(Clone, Default)]
 struct ResourceState {
-    /// The file data loaded from Godot's FileAccess.
     data: Vec<u8>,
-    /// Current read position in the data.
     offset: usize,
-    /// HTTP status code for the response.
     status_code: i32,
-    /// MIME type of the resource.
     mime_type: String,
-    /// Error message if the resource could not be loaded.
     error_message: Option<String>,
+    total_file_size: u64,
+    range_start: Option<u64>,
+    range_end: Option<u64>,
 }
 
-/// Resource handler for serving files from Godot's res:// filesystem.
 #[derive(Clone)]
 pub struct ResResourceHandler {
     state: RefCell<ResourceState>,
@@ -206,17 +193,13 @@ wrap_resource_handler! {
                 return false as _;
             };
 
-            // Get the URL from the request
             let url_cef = request.url();
             let url = CefStringUtf16::from(&url_cef).to_string();
-
-            // Parse the res:// URL to get the full path
             let res_path = parse_res_url(&url);
             let gstring_path = GString::from(&res_path);
 
             let mut state = self.handler.state.borrow_mut();
 
-            // Check if the file exists
             if !FileAccess::file_exists(&gstring_path) {
                 state.status_code = 404;
                 state.mime_type = "text/plain".to_string();
@@ -234,12 +217,31 @@ wrap_resource_handler! {
                 return true as _;
             }
 
-            // Open the file using Godot's FileAccess
-            match FileAccess::open(&gstring_path, ModeFlags::READ) {
-                Some(file) => {
-                    let file_length = file.get_length() as usize;
+            let range_header = request.header_by_name(Some(&"Range".into()));
+            let range_str = CefStringUtf16::from(&range_header).to_string();
+            let content_range: Option<(u64, Option<u64>)> = if !range_str.is_empty() && range_str.starts_with("bytes=") {
+                let range_part = &range_str[6..];
+                let parts: Vec<&str> = range_part.split('-').collect();
+                if parts.len() == 2 {
+                    let start = parts[0].parse::<u64>().ok();
+                    let end = if parts[1].is_empty() {
+                        None
+                    } else {
+                        parts[1].parse::<u64>().ok()
+                    };
+                    start.map(|s| (s, end))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
-                    // Get file extension for MIME type
+            match FileAccess::open(&gstring_path, ModeFlags::READ) {
+                Some(mut file) => {
+                    let file_size = file.get_length() as u64;
+                    state.total_file_size = file_size;
+
                     let path = PathBuf::from(&res_path);
                     let extension = path
                         .extension()
@@ -247,11 +249,35 @@ wrap_resource_handler! {
                         .unwrap_or("");
                     state.mime_type = get_mime_type(extension).to_string();
 
-                    // Read the entire file into memory
-                    let buffer = file.get_buffer(file_length as i64);
-                    state.data = buffer.as_slice().to_vec();
-                    state.status_code = 200;
-                    state.offset = 0;
+                    if let Some((start, end_opt)) = content_range {
+                        if start >= file_size {
+                            state.status_code = 416;
+                            state.data = Vec::new();
+                            state.range_start = None;
+                            state.range_end = None;
+                        } else {
+                            let end = match end_opt {
+                                Some(e) if e < file_size => e,
+                                _ => file_size - 1,
+                            };
+
+                            let content_size = (end - start + 1) as i64;
+                            file.seek(start);
+                            let buffer = file.get_buffer(content_size);
+                            state.data = buffer.as_slice().to_vec();
+                            state.status_code = 206;
+                            state.range_start = Some(start);
+                            state.range_end = Some(end);
+                            state.offset = 0;
+                        }
+                    } else {
+                        let buffer = file.get_buffer(file_size as i64);
+                        state.data = buffer.as_slice().to_vec();
+                        state.status_code = 200;
+                        state.range_start = None;
+                        state.range_end = None;
+                        state.offset = 0;
+                    }
                 }
                 None => {
                     state.status_code = 500;
@@ -266,7 +292,6 @@ wrap_resource_handler! {
                 }
             }
 
-            // Signal that we handled the request synchronously
             if let Some(handle_request) = handle_request {
                 *handle_request = true as _;
             }
@@ -287,7 +312,9 @@ wrap_resource_handler! {
 
                 let status_text = match state.status_code {
                     200 => "OK",
+                    206 => "Partial Content",
                     404 => "Not Found",
+                    416 => "Range Not Satisfiable",
                     500 => "Internal Server Error",
                     _ => "Unknown",
                 };
@@ -295,15 +322,19 @@ wrap_resource_handler! {
 
                 response.set_mime_type(Some(&state.mime_type.as_str().into()));
 
-                // Set Content-Type header
-                let content_type_key: CefStringUtf16 = "Content-Type".into();
-                let content_type_value: CefStringUtf16 = state.mime_type.as_str().into();
-                response.set_header_by_name(Some(&content_type_key), Some(&content_type_value), true as _);
+                response.set_header_by_name(Some(&"Content-Type".into()), Some(&state.mime_type.as_str().into()), true as _);
+                response.set_header_by_name(Some(&"Access-Control-Allow-Origin".into()), Some(&"*".into()), true as _);
+                response.set_header_by_name(Some(&"Accept-Ranges".into()), Some(&"bytes".into()), true as _);
 
-                // Set Access-Control-Allow-Origin for CORS
-                let cors_key: CefStringUtf16 = "Access-Control-Allow-Origin".into();
-                let cors_value: CefStringUtf16 = "*".into();
-                response.set_header_by_name(Some(&cors_key), Some(&cors_value), true as _);
+                if state.status_code == 206 {
+                    if let (Some(start), Some(end)) = (state.range_start, state.range_end) {
+                        let value: CefStringUtf16 = format!("bytes {}-{}/{}", start, end, state.total_file_size).as_str().into();
+                        response.set_header_by_name(Some(&"Content-Range".into()), Some(&value), true as _);
+                    }
+                } else if state.status_code == 416 {
+                    let value: CefStringUtf16 = format!("bytes */{}", state.total_file_size).as_str().into();
+                    response.set_header_by_name(Some(&"Content-Range".into()), Some(&value), true as _);
+                }
             }
 
             if let Some(response_length) = response_length {
@@ -370,9 +401,7 @@ wrap_resource_handler! {
             true as _
         }
 
-        fn cancel(&self) {
-            // Nothing to cancel for synchronous file reading
-        }
+        fn cancel(&self) {}
     }
 }
 
@@ -382,7 +411,6 @@ impl ResResourceHandlerImpl {
     }
 }
 
-/// Factory for creating ResResourceHandler instances.
 #[derive(Clone)]
 pub struct ResSchemeHandler {}
 
@@ -422,10 +450,6 @@ impl ResSchemeHandlerFactory {
     }
 }
 
-/// Register the `res://` scheme handler with CEF globally.
-///
-/// NOTE: This only works for browsers using the global request context.
-/// For browsers with custom request contexts, use `register_res_scheme_handler_on_context`.
 #[allow(dead_code)]
 pub fn register_res_scheme_handler() {
     let mut factory = ResSchemeHandlerFactory::build(ResSchemeHandler::new());
@@ -436,9 +460,6 @@ pub fn register_res_scheme_handler() {
     );
 }
 
-/// Register the `res://` scheme handler on a specific request context.
-///
-/// This is needed when using a custom RequestContext for the browser.
 pub fn register_res_scheme_handler_on_context(context: &mut cef::RequestContext) {
     use cef::ImplRequestContext;
     let mut factory = ResSchemeHandlerFactory::build(ResSchemeHandler::new());

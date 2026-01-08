@@ -84,14 +84,6 @@ wrap_app! {
                 return;
             };
 
-            // Register the "res" scheme for loading Godot packed resources.
-            // Options:
-            // - STANDARD: Parse URLs in standard format (scheme://host/path)
-            // - LOCAL: Treat as local content (like file://)
-            // - SECURE: Treat as secure origin (allows loading from https pages)
-            // - CORS_ENABLED: Allow CORS requests to this scheme
-            // - FETCH_ENABLED: Allow fetch() API to use this scheme
-            // - CSP_BYPASSING: Bypass Content-Security-Policy checks
             let options = cef::SchemeOptions::STANDARD.get_raw()
                 | cef::SchemeOptions::LOCAL.get_raw()
                 | cef::SchemeOptions::SECURE.get_raw()
