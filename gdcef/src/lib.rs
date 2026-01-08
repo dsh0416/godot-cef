@@ -899,4 +899,19 @@ impl CefTexture {
         let code_str: cef::CefStringUtf16 = code.to_string().as_str().into();
         frame.execute_java_script(Some(&code_str), None, 0);
     }
+
+    #[func]
+    pub fn load_url(&mut self, url: GString) {
+        let Some(browser) = self.app.browser.as_ref() else {
+            godot::global::godot_warn!("[CefTexture] Cannot load URL: no browser");
+            return;
+        };
+        let Some(frame) = browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture] Cannot load URL: no main frame");
+            return;
+        };
+
+        let url_str: cef::CefStringUtf16 = url.to_string().as_str().into();
+        frame.load_url(Some(&url_str));
+    }
 }

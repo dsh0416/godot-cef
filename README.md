@@ -122,8 +122,63 @@ func _ready():
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `url` | `String` | `"https://google.com"` | The URL to load |
+| `url` | `String` | `"https://google.com"` | The initial URL to load |
 | `enable_accelerated_osr` | `bool` | `true` | Enable GPU-accelerated rendering |
+
+### Methods
+
+#### `load_url(url: String)`
+
+Loads a new URL in the browser at runtime. Use this to navigate to different pages during gameplay.
+
+```gdscript
+# Navigate to a different page
+cef_texture.load_url("https://example.com/game-ui")
+
+# Load a local file
+cef_texture.load_url("file:///path/to/local.html")
+```
+
+#### `eval(code: String)`
+
+Executes JavaScript code in the browser's main frame.
+
+```gdscript
+# Execute JavaScript
+cef_texture.eval("document.body.style.backgroundColor = 'red'")
+
+# Call a JavaScript function
+cef_texture.eval("updateScore(100)")
+
+# Interact with the DOM
+cef_texture.eval("document.getElementById('player-name').innerText = 'Player1'")
+```
+
+### Signals
+
+#### `ipc_message(message: String)`
+
+Emitted when JavaScript sends a message to Godot via the `sendIpcMessage` function. Use this for bidirectional communication between your web UI and game logic.
+
+```gdscript
+func _ready():
+    cef_texture.ipc_message.connect(_on_ipc_message)
+
+func _on_ipc_message(message: String):
+    print("Received from web: ", message)
+    var data = JSON.parse_string(message)
+    # Handle the message...
+```
+
+In your JavaScript (running in the CEF browser):
+
+```javascript
+// Send a message to Godot
+window.sendIpcMessage("button_clicked");
+
+// Send structured data as JSON
+window.sendIpcMessage(JSON.stringify({ action: "purchase", item_id: 42 }));
+```
 
 ### IME Methods
 
@@ -135,6 +190,47 @@ cef_texture.ime_set_composition("入力中")   # Set composition string
 cef_texture.ime_cancel_composition()        # Cancel composition
 cef_texture.ime_finish_composing_text(false) # Finish composing
 ```
+
+## 🔄 Comparison with Similar Projects
+
+There are several projects that bring web content into Godot. Here's how this project compares:
+
+| Feature | **Godot CEF** (this project) | [godot_wry](https://github.com/doceazedo/godot_wry) | [gdcef](https://github.com/Lecrapouille/gdcef) |
+|---------|------------------------------|-----------------------------------------------------|------------------------------------------------|
+| **Browser Engine** | Chromium (CEF) | Native OS webview (WRY) | Chromium (CEF) |
+| **Implementation** | Rust | Rust | C++ |
+| **Rendering** | Texture (OSR) | Window overlay | Texture (OSR) |
+| **GPU Acceleration** | ✅ Yes | ✅ Yes | ❌ Software only |
+| **3D Scene Support** | ✅ Yes | ❌ No (always on top) | ✅ Yes |
+| **HiDPI Aware** | ✅ Yes | ✅ Yes | ❌ No |
+| **Consistent Cross-Platform** | ✅ Same engine everywhere | ❌ Different engines | ✅ Same engine everywhere |
+| **JS ↔ GDScript IPC** | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Godot Filesystem Access** | 🚧 WIP | ✅ Yes | ❌ No |
+| **Project Export** | ✅ Yes | ✅ Yes | ❌ No |
+| **Headless CI Support** | ✅ Yes | ❌ No | ✅ Yes |
+| **Bundle Size** | Large (~100MB+) | Small (uses OS webview) | Large (~100MB+) |
+
+### When to Use Each
+
+**Choose Godot CEF (this project) if you need:**
+- GPU-accelerated web rendering for high performance
+- Smooth and high performance interactive UI
+- Web content as a texture in 3D scenes (e.g., in-game screens, VR/AR interfaces)
+- Consistent behavior across all platforms (same Chromium engine everywhere)
+- Modern Rust codebase with godot-rust
+
+**Choose godot_wry if you need:**
+- Minimal bundle size (uses the OS's built-in webview)
+- Simple overlay UI that doesn't need to be part of the 3D scene
+- Lightweight integration without bundling a full browser
+
+**Choose gdcef if you need:**
+- C++ codebase for a more mature CEF integration with more docs
+- Proven, mature implementation with longer history
+
+### Motivation
+
+The motivation for developing this project comes from our work-in-progress game, [Engram](https://store.steampowered.com/app/3928930/_Engram/). While our first demo version benefited greatly from an interactive UI written in Vue.js using godot_wry, we encountered the limitations of a wry-based browser solution. Since other implementations have long struggled with GPU-accelerated OSR, we decided to create our own solution.
 
 ## 🛣️ Roadmap
 
