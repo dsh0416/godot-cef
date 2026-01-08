@@ -19,7 +19,6 @@ jobs:
     name: macOS
 
     env:
-      CEF_PATH: ${{ github.workspace }}/cef
       CEF_PATH_ARM64: ${{ github.workspace }}/cef-arm64
       CEF_PATH_X64: ${{ github.workspace }}/cef-x64
 

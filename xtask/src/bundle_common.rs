@@ -181,7 +181,7 @@ pub fn get_target_dir(release: bool, custom_target_dir: Option<&Path>) -> PathBu
     base.join(profile)
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg(not(target_os = "macos"))]
 pub fn get_cef_dir() -> Option<PathBuf> {
     env::var("CEF_PATH").ok().map(PathBuf::from)
 }
@@ -230,13 +230,11 @@ pub fn run_lipo(
     }
 
     let status = Command::new("lipo")
-        .args([
-            "-create",
-            input1.to_str().unwrap(),
-            input2.to_str().unwrap(),
-            "-output",
-            output.to_str().unwrap(),
-        ])
+        .arg("-create")
+        .arg(input1)
+        .arg(input2)
+        .arg("-output")
+        .arg(output)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()?;
