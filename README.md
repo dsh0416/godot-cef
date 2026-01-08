@@ -208,6 +208,21 @@ window.sendIpcMessage("button_clicked");
 window.sendIpcMessage(JSON.stringify({ action: "purchase", item_id: 42 }));
 ```
 
+#### `url_changed(url: String)`
+
+Emitted when the browser navigates to a new URL. This fires for user-initiated navigation (clicking links), JavaScript navigation, redirects, and programmatic `load_url()` calls. Useful for injecting scripts or tracking navigation.
+
+```gdscript
+func _ready():
+    cef_texture.url_changed.connect(_on_url_changed)
+
+func _on_url_changed(url: String):
+    print("Navigated to: ", url)
+    # Inject data based on the current page
+    if "game-ui" in url:
+        cef_texture.eval("window.playerData = %s" % JSON.stringify(player_data))
+```
+
 ### IME Methods
 
 For input method editor (IME) support in text fields:
