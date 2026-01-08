@@ -282,7 +282,10 @@ wrap_display_handler! {
 }
 
 impl DisplayHandlerImpl {
-    pub fn build(cursor_type: Arc<Mutex<CursorType>>, url_change_queue: UrlChangeQueue) -> cef::DisplayHandler {
+    pub fn build(
+        cursor_type: Arc<Mutex<CursorType>>,
+        url_change_queue: UrlChangeQueue,
+    ) -> cef::DisplayHandler {
         Self::new(cursor_type, url_change_queue)
     }
 }

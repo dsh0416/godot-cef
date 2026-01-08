@@ -264,7 +264,8 @@ impl CefTexture {
         self.app.message_queue = Some(message_queue.clone());
         self.app.url_change_queue = Some(url_change_queue.clone());
 
-        let mut client = webrender::SoftwareClientImpl::build(render_handler, message_queue, url_change_queue);
+        let mut client =
+            webrender::SoftwareClientImpl::build(render_handler, message_queue, url_change_queue);
 
         cef::browser_host_create_browser_sync(
             Some(&window_info),
