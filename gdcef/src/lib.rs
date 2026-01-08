@@ -744,18 +744,17 @@ impl CefTexture {
             return;
         };
 
-        // Escape the message string for safe JavaScript embedding
+        // Use serde_json for proper JSON encoding which handles all edge cases:
+        // - Unicode line terminators (U+2028, U+2029) that can break JS strings
+        // - Backticks, single quotes, and all control characters
+        // - Proper backslash and quote escaping
+        // The result includes surrounding quotes, so we use it directly.
         let msg_str = message.to_string();
-        let escaped_msg = msg_str
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t");
+        let json_msg = serde_json::to_string(&msg_str).unwrap_or_else(|_| "\"\"".to_string());
 
         let js_code = format!(
-            r#"if (typeof window.onIpcMessage === 'function') {{ window.onIpcMessage("{}"); }}"#,
-            escaped_msg
+            r#"if (typeof window.onIpcMessage === 'function') {{ window.onIpcMessage({}); }}"#,
+            json_msg
         );
         let js_code_str: cef::CefStringUtf16 = js_code.as_str().into();
         frame.execute_java_script(Some(&js_code_str), None, 0);

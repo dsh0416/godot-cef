@@ -17,6 +17,7 @@ cef-dll-sys = { workspace = true }
 process_path = { workspace = true }
 winit = { workspace = true }
 cef_app = { path = "../cef_app" }
+serde_json = { workspace = true }
 wide = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
