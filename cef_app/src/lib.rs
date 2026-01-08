@@ -49,6 +49,7 @@ pub enum GodotRenderBackend {
 #[derive(Clone)]
 pub struct OsrApp {
     godot_backend: GodotRenderBackend,
+    enable_remote_debugging: bool,
 }
 
 impl Default for OsrApp {
@@ -61,15 +62,34 @@ impl OsrApp {
     pub fn new() -> Self {
         Self {
             godot_backend: GodotRenderBackend::Unknown,
+            enable_remote_debugging: false,
         }
     }
 
     pub fn with_godot_backend(godot_backend: GodotRenderBackend) -> Self {
-        Self { godot_backend }
+        Self {
+            godot_backend,
+            enable_remote_debugging: false,
+        }
+    }
+
+    /// Creates an OsrApp with the specified Godot render backend and remote debugging setting.
+    ///
+    /// Remote debugging should only be enabled in debug builds or when running from the editor
+    /// for security purposes.
+    pub fn with_options(godot_backend: GodotRenderBackend, enable_remote_debugging: bool) -> Self {
+        Self {
+            godot_backend,
+            enable_remote_debugging,
+        }
     }
 
     pub fn godot_backend(&self) -> GodotRenderBackend {
         self.godot_backend
+    }
+
+    pub fn enable_remote_debugging(&self) -> bool {
+        self.enable_remote_debugging
     }
 }
 
@@ -112,8 +132,13 @@ wrap_app! {
             command_line.append_switch(Some(&"transparent-painting-enabled".into()));
             command_line.append_switch(Some(&"enable-zero-copy".into()));
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
-            command_line
-                .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
+
+            // Only enable remote debugging in debug builds or when running from the editor
+            // for security purposes. In production builds, this should be disabled.
+            if self.app.enable_remote_debugging() {
+                command_line
+                    .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
+            }
         }
 
         fn browser_process_handler(&self) -> Option<cef::BrowserProcessHandler> {

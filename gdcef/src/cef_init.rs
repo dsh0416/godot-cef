@@ -1,5 +1,5 @@
 use cef::Settings;
-use godot::classes::Os;
+use godot::classes::{Engine, Os};
 use godot::prelude::*;
 use std::path::PathBuf;
 use std::sync::Once;
@@ -47,11 +47,32 @@ fn detect_godot_render_backend() -> cef_app::GodotRenderBackend {
     }
 }
 
+/// Determines if remote debugging should be enabled.
+///
+/// Remote debugging is only enabled when:
+/// - Godot is compiled in debug mode (OS.is_debug_build() returns true), OR
+/// - The game is running from the Godot editor (Engine.is_editor_hint() returns true)
+///
+/// This is a security measure to prevent remote debugging in production builds.
+fn should_enable_remote_debugging() -> bool {
+    let os = Os::singleton();
+    let engine = Engine::singleton();
+
+    let is_debug_build = os.is_debug_build();
+    let is_editor_hint = engine.is_editor_hint();
+
+    is_debug_build || is_editor_hint
+}
+
 /// Initializes CEF with the given settings
 pub fn initialize_cef() {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
-    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_godot_backend(godot_backend));
+    let enable_remote_debugging = should_enable_remote_debugging();
+    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_options(
+        godot_backend,
+        enable_remote_debugging,
+    ));
 
     #[cfg(target_os = "macos")]
     load_sandbox(args.as_main_args());
