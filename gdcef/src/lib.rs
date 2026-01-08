@@ -217,17 +217,18 @@ impl ITextureRect for CefTexture {
         }
     }
 
-    fn ready(&mut self) {
-        self.on_ready();
-    }
-
-    fn process(&mut self, _delta: f64) {
-        self.on_process();
-    }
-
     fn on_notification(&mut self, what: ControlNotification) {
-        if let ControlNotification::WM_CLOSE_REQUEST = what {
-            self.shutdown();
+        match what {
+            ControlNotification::READY => {
+                self.on_ready();
+            },
+            ControlNotification::PROCESS => {
+                self.on_process();
+            },
+            ControlNotification::WM_CLOSE_REQUEST => {
+                self.shutdown();
+            },
+            _ => {}
         }
     }
 
