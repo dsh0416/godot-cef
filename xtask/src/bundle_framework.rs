@@ -46,7 +46,6 @@ fn bundle(target_dir: &Path, universal_dylib: &Path) -> Result<(), Box<dyn std::
 }
 
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
-    // Build for ARM64
     let mut cargo_args_arm64 = vec![
         "build",
         "--lib",
@@ -60,7 +59,6 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
     }
     run_cargo(&cargo_args_arm64)?;
 
-    // Build for X64
     let mut cargo_args_x64 = vec![
         "build",
         "--lib",
@@ -74,12 +72,10 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
     }
     run_cargo(&cargo_args_x64)?;
 
-    // Get target directories for each architecture
     let target_dir_arm64 = get_target_dir_for_target(release, TARGET_ARM64, target_dir);
     let target_dir_x64 = get_target_dir_for_target(release, TARGET_X64, target_dir);
     let output_dir = get_target_dir(release, target_dir);
 
-    // Create universal binary with lipo
     let dylib_arm64 = target_dir_arm64.join("libgdcef.dylib");
     let dylib_x64 = target_dir_x64.join("libgdcef.dylib");
     let universal_dylib = output_dir.join("libgdcef_universal.dylib");
@@ -87,8 +83,6 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
     run_lipo(&dylib_arm64, &dylib_x64, &universal_dylib)?;
 
     bundle(&output_dir, &universal_dylib)?;
-
-    // Clean up temporary universal binary
     fs::remove_file(&universal_dylib)?;
 
     Ok(())

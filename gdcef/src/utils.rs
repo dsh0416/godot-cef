@@ -38,7 +38,6 @@ fn get_dylib_path_checked() -> CefResult<PathBuf> {
 pub fn get_framework_path() -> CefResult<PathBuf> {
     let dylib_path = get_dylib_path_checked()?;
 
-    // Determine the framework name based on the current architecture
     let framework_name = match std::env::consts::ARCH {
         "aarch64" => "Chromium Embedded Framework (ARM64).framework",
         "x86_64" => "Chromium Embedded Framework (X86_64).framework",

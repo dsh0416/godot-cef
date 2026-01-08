@@ -54,7 +54,6 @@ fn create_app(
 fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let main_app_path = create_app(target_dir, "Godot CEF", universal_helper, false)?;
 
-    // Copy ARM64 CEF framework
     let cef_path_arm64 = get_cef_dir_arm64()
         .ok_or("CEF ARM64 directory not found. Please set CEF_PATH_ARM64 environment variable.")?;
     let to_arm64 = main_app_path.join(FRAMEWORKS_PATH).join(FRAMEWORK_ARM64);
@@ -64,7 +63,6 @@ fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<(), Box<dyn std:
     copy_directory(&cef_path_arm64.join(FRAMEWORK), &to_arm64)?;
     println!("Copied: {}", FRAMEWORK_ARM64);
 
-    // Copy X64 CEF framework
     let cef_path_x64 = get_cef_dir_x64()
         .ok_or("CEF X64 directory not found. Please set CEF_PATH_X64 environment variable.")?;
     let to_x64 = main_app_path.join(FRAMEWORKS_PATH).join(FRAMEWORK_X64);
@@ -74,7 +72,6 @@ fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<(), Box<dyn std:
     copy_directory(&cef_path_x64.join(FRAMEWORK), &to_x64)?;
     println!("Copied: {}", FRAMEWORK_X64);
 
-    // Create helper apps with universal binary
     for helper in HELPERS {
         create_app(
             &main_app_path.join(FRAMEWORKS_PATH),
@@ -89,26 +86,22 @@ fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<(), Box<dyn std:
 }
 
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
-    // Build for ARM64
     let mut cargo_args_arm64 = vec!["build", "--bin", "gdcef_helper", "--target", TARGET_ARM64];
     if release {
         cargo_args_arm64.push("--release");
     }
     run_cargo(&cargo_args_arm64)?;
 
-    // Build for X64
     let mut cargo_args_x64 = vec!["build", "--bin", "gdcef_helper", "--target", TARGET_X64];
     if release {
         cargo_args_x64.push("--release");
     }
     run_cargo(&cargo_args_x64)?;
 
-    // Get target directories for each architecture
     let target_dir_arm64 = get_target_dir_for_target(release, TARGET_ARM64, target_dir);
     let target_dir_x64 = get_target_dir_for_target(release, TARGET_X64, target_dir);
     let output_dir = get_target_dir(release, target_dir);
 
-    // Create universal binary with lipo
     let helper_arm64 = target_dir_arm64.join("gdcef_helper");
     let helper_x64 = target_dir_x64.join("gdcef_helper");
     let universal_helper = output_dir.join("gdcef_helper_universal");
@@ -116,8 +109,6 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
     run_lipo(&helper_arm64, &helper_x64, &universal_helper)?;
 
     bundle(&output_dir, &universal_helper)?;
-
-    // Clean up temporary universal binary
     fs::remove_file(&universal_helper)?;
 
     Ok(())

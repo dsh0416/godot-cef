@@ -9,6 +9,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CEF_VERSION: "143.0.13"
 
 jobs:
   test:
@@ -75,7 +76,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Run tests (Linux/macOS)
         shell: bash
@@ -143,7 +144,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-features -- -D warnings

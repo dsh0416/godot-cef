@@ -44,26 +44,26 @@ Then install the CEF frameworks
 
 #### Linux
 ```bash
-export-cef-dir --force $HOME/.local/share/cef
+export-cef-dir --version "143.0.13" --force $HOME/.local/share/cef
 export CEF_PATH="$HOME/.local/share/cef"
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$CEF_PATH"
 ```
 
 #### macOS
 ```bash
-export-cef-dir --force $HOME/.local/share/cef
+export-cef-dir --version "143.0.13" --force $HOME/.local/share/cef
 export CEF_PATH="$HOME/.local/share/cef"
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$CEF_PATH"
 
-export-cef-dir --target x86_64-apple-darwin --force $HOME/.local/share/cef_x86_64
+export-cef-dir --version "143.0.13" --target x86_64-apple-darwin --force $HOME/.local/share/cef_x86_64
 export CEF_PATH_X64="$HOME/.local/share/cef_x86_64"
-export-cef-dir --target aarch64-apple-darwin --force $HOME/.local/share/cef_arm64
+export-cef-dir --version "143.0.13" --target aarch64-apple-darwin --force $HOME/.local/share/cef_arm64
 export CEF_PATH_ARM64="$HOME/.local/share/cef_arm64"
 ```
 
 #### Windows
 ```powershell
-export-cef-dir --force $env:USERPROFILE/.local/share/cef
+export-cef-dir --version "143.0.13" --force $env:USERPROFILE/.local/share/cef
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef"
 $env:PATH="$env:PATH;$env:CEF_PATH"
 ```

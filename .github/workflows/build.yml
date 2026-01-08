@@ -10,6 +10,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CEF_VERSION: "143.0.13"
 
 jobs:
   build-macos:
@@ -45,13 +46,13 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries (ARM64)
-        run: export-cef-dir --force --target aarch64-apple-darwin ${{ env.CEF_PATH_ARM64 }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target aarch64-apple-darwin ${{ env.CEF_PATH_ARM64 }}
       
       - name: Copy CEF binaries (ARM64)
         run: cp -R ${{ env.CEF_PATH_ARM64 }}/* ${{ env.CEF_PATH }}/
 
       - name: Download CEF binaries (X64)
-        run: export-cef-dir --force --target x86_64-apple-darwin ${{ env.CEF_PATH_X64 }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target x86_64-apple-darwin ${{ env.CEF_PATH_X64 }}
 
       - name: Build and bundle for macOS (Universal)
         run: cargo xtask bundle --release
@@ -100,7 +101,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for Windows
         run: cargo xtask bundle --release
@@ -189,7 +190,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for Linux
         run: cargo xtask bundle --release

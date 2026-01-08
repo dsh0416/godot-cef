@@ -103,10 +103,24 @@ unsafe impl Sync for NativeHandle {}
 
 impl NativeHandleTrait for NativeHandle {
     fn is_valid(&self) -> bool {
-        !self.io_surface.is_null()
+        if self.io_surface.is_null() {
+            return false;
+        }
+        // Also check that the pointer looks valid (not garbage)
+        let ptr_value = self.io_surface as usize;
+        ptr_value >= 0x1_0000_0000
     }
 
     fn from_accelerated_paint_info(info: &AcceleratedPaintInfo) -> Self {
+        // Log the raw pointer value for debugging
+        let ptr_value = info.shared_texture_io_surface as usize;
+        if ptr_value != 0 && ptr_value < 0x1_0000_0000 {
+            godot_warn!(
+                "[AcceleratedOSR/macOS] AcceleratedPaintInfo has suspicious IOSurface pointer: {:#x} (size field: {})",
+                ptr_value,
+                info.size
+            );
+        }
         Self::from_io_surface(info.shared_texture_io_surface)
     }
 }
