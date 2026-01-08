@@ -10,6 +10,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CEF_VERSION: "143.0.13"
+  CEF_PATH: ${{ github.workspace }}/cef
 
 jobs:
   test:
@@ -26,9 +27,6 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     name: Test (${{ matrix.os }})
-
-    env:
-      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -96,9 +94,6 @@ jobs:
   clippy:
     runs-on: ubuntu-22.04
     name: Clippy
-
-    env:
-      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository

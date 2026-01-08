@@ -11,6 +11,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CEF_VERSION: "143.0.13"
+  CEF_PATH: ${{ github.workspace }}/cef
 
 jobs:
   build-macos:
@@ -49,7 +50,9 @@ jobs:
         run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target aarch64-apple-darwin ${{ env.CEF_PATH_ARM64 }}
       
       - name: Copy CEF binaries (ARM64)
-        run: cp -R ${{ env.CEF_PATH_ARM64 }}/* ${{ env.CEF_PATH }}/
+        run: |
+          mkdir -p ${{ env.CEF_PATH }}
+          cp -R ${{ env.CEF_PATH_ARM64 }}/* ${{ env.CEF_PATH }}/
 
       - name: Download CEF binaries (X64)
         run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target x86_64-apple-darwin ${{ env.CEF_PATH_X64 }}
@@ -73,9 +76,6 @@ jobs:
   build-windows:
     runs-on: windows-latest
     name: Windows x86_64
-
-    env:
-      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -142,9 +142,6 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     name: Linux x86_64
-
-    env:
-      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
