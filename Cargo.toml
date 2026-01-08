@@ -7,8 +7,8 @@ version = "0.1.0"
 
 [workspace.dependencies]
 godot = { version = "0.4.5", features = ["api-4-5", "experimental-threads"] }
-cef = { version = "=143.4.0+143.0.13", features = ["sandbox", "accelerated_osr"] }
-cef-dll-sys = { version = "=143.4.0+143.0.13", features = ["sandbox"] }
+cef = { version = "=143.6.0+143.0.13", features = ["sandbox", "accelerated_osr"] }
+cef-dll-sys = { version = "=143.6.0+143.0.13", features = ["sandbox"] }
 process_path = "0.1.4"
 winit = "0.30.12"
 plist = { version = "1" }
