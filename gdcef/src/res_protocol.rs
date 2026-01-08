@@ -257,12 +257,9 @@ wrap_resource_handler! {
                                                 let end_opt = if end_str.is_empty() {
                                                     None
                                                 } else {
-                                                    match end_str.parse::<u64>() {
-                                                        Ok(e) => Some(e),
-                                                        Err(_) => None,
-                                                    }
+                                                    end_str.parse::<u64>().ok()
                                                 };
-                                                end_opt.map(|e| (start, Some(e))).or_else(|| Some((start, None)))
+                                                end_opt.map(|e| (start, Some(e))).or(Some((start, None)))
                                             }
                                             Err(_) => None,
                                         }
@@ -406,6 +403,7 @@ wrap_resource_handler! {
             }
 
             let to_copy = remaining.min(bytes_to_read);
+            if data_out.is_null() { return false as _; }
 
             unsafe {
                 std::ptr::copy_nonoverlapping(
