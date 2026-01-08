@@ -9,6 +9,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CEF_VERSION: "143.0.13"
+  CEF_PATH: ${{ github.workspace }}/cef
 
 jobs:
   test:
@@ -17,17 +19,14 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            os: macos-26
+            os: macos-latest
           - target: x86_64-pc-windows-msvc
             os: windows-latest
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
+            os: ubuntu-latest
 
     runs-on: ${{ matrix.os }}
     name: Test (${{ matrix.os }})
-
-    env:
-      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -75,7 +74,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Run tests (Linux/macOS)
         shell: bash
@@ -93,11 +92,8 @@ jobs:
           cargo test --workspace --all-features
 
   clippy:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     name: Clippy
-
-    env:
-      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -143,7 +139,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-features -- -D warnings

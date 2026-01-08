@@ -10,25 +10,17 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CEF_VERSION: "143.0.13"
+  CEF_PATH: ${{ github.workspace }}/cef
 
 jobs:
   build-macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            os: macos-26
-            arch: aarch64
-          - target: x86_64-apple-darwin
-            os: macos-15
-            arch: x86_64
-
-    runs-on: ${{ matrix.os }}
-    name: macOS ${{ matrix.arch }}
+    runs-on: macos-latest
+    name: macOS
 
     env:
-      CEF_PATH: ${{ github.workspace }}/cef
+      CEF_PATH_ARM64: ${{ github.workspace }}/cef-arm64
+      CEF_PATH_X64: ${{ github.workspace }}/cef-x64
 
     steps:
       - name: Checkout repository
@@ -37,7 +29,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Cache Cargo registry and build
         uses: actions/cache@v4
@@ -46,38 +38,43 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-universal-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-
+            ${{ runner.os }}-universal-cargo-
 
       - name: Install CEF export tool
         run: cargo install export-cef-dir
 
-      - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+      - name: Download CEF binaries (ARM64)
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target aarch64-apple-darwin ${{ env.CEF_PATH_ARM64 }}
+      
+      - name: Copy CEF binaries (ARM64)
+        run: |
+          mkdir -p ${{ env.CEF_PATH }}
+          cp -R ${{ env.CEF_PATH_ARM64 }}/* ${{ env.CEF_PATH }}/
 
-      - name: Build and bundle for macOS
+      - name: Download CEF binaries (X64)
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target x86_64-apple-darwin ${{ env.CEF_PATH_X64 }}
+
+      - name: Build and bundle for macOS (Universal)
         run: cargo xtask bundle --release
 
       - name: Prepare artifacts
         run: |
-          mkdir -p artifacts/${{ matrix.target }}
-          cp -R "target/release/Godot CEF.app" "artifacts/${{ matrix.target }}/"
-          cp -R "target/release/Godot CEF.framework" "artifacts/${{ matrix.target }}/"
+          mkdir -p artifacts/universal-apple-darwin
+          cp -R "target/release/Godot CEF.app" "artifacts/universal-apple-darwin/"
+          cp -R "target/release/Godot CEF.framework" "artifacts/universal-apple-darwin/"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gdcef-${{ matrix.target }}
-          path: artifacts/${{ matrix.target }}
+          name: gdcef-universal-apple-darwin
+          path: artifacts/universal-apple-darwin
           retention-days: 30
 
   build-windows:
     runs-on: windows-latest
     name: Windows x86_64
-
-    env:
-      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -103,7 +100,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for Windows
         run: cargo xtask bundle --release
@@ -142,11 +139,8 @@ jobs:
           retention-days: 30
 
   build-linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     name: Linux x86_64
-
-    env:
-      CEF_PATH: ${{ github.workspace }}/cef
 
     steps:
       - name: Checkout repository
@@ -192,7 +186,7 @@ jobs:
         run: cargo install export-cef-dir
 
       - name: Download CEF binaries
-        run: export-cef-dir --force ${{ env.CEF_PATH }}
+        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for Linux
         run: cargo xtask bundle --release
