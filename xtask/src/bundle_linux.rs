@@ -1,6 +1,6 @@
 //! Linux bundling - copies CEF assets alongside the built binaries
 
-use crate::bundle_common::{copy_directory, get_target_dir, run_cargo};
+use crate::bundle_common::{copy_directory, get_cef_dir, get_target_dir, run_cargo};
 use std::fs;
 use std::path::Path;
 
@@ -29,8 +29,8 @@ const CEF_FILES: &[&str] = &[
 const CEF_DIRS: &[&str] = &["locales"];
 
 fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let cef_dir = cef_dll_sys::get_cef_dir()
-        .ok_or("CEF directory not found. Please set CEF_DIR environment variable.")?;
+    let cef_dir = get_cef_dir()
+        .ok_or("CEF directory not found. Please set CEF_PATH environment variable.")?;
 
     println!("Copying CEF assets from: {}", cef_dir.display());
 

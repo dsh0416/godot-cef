@@ -10,4 +10,3 @@ repository.workspace = true
 clap = { version = "4", features = ["derive"] }
 plist = { workspace = true }
 serde = { workspace = true }
-cef-dll-sys = { workspace = true }

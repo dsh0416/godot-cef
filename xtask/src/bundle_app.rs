@@ -1,4 +1,4 @@
-use crate::bundle_common::{AppInfoPlist, copy_directory, get_target_dir, run_cargo};
+use crate::bundle_common::{AppInfoPlist, copy_directory, get_cef_dir, get_target_dir, run_cargo};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -52,8 +52,8 @@ fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         false,
     )?;
 
-    let cef_path = cef_dll_sys::get_cef_dir()
-        .ok_or("CEF directory not found. Please set CEF_DIR environment variable.")?;
+    let cef_path = get_cef_dir()
+        .ok_or("CEF directory not found. Please set CEF_PATH environment variable.")?;
     let to = main_app_path.join(FRAMEWORKS_PATH).join(FRAMEWORK);
     if to.exists() {
         fs::remove_dir_all(&to)?;

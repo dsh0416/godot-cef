@@ -77,12 +77,19 @@ jobs:
       - name: Download CEF binaries
         run: export-cef-dir --force ${{ env.CEF_PATH }}
 
-      - name: Run tests
+      - name: Run tests (Linux/macOS)
         shell: bash
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         run: |
           export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export DYLD_LIBRARY_PATH="${CEF_PATH}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-          export PATH="${CEF_PATH}${PATH:+$PATH}"
+          cargo test --workspace --all-features
+      
+      - name: Run tests (Windows)
+        shell: pwsh
+        if: runner.os == 'Windows'
+        run: |
+          $env:PATH = "${{ env.CEF_PATH }};$env:PATH"
           cargo test --workspace --all-features
 
   clippy:

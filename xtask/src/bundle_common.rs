@@ -1,3 +1,4 @@
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -178,4 +179,8 @@ pub fn get_target_dir(release: bool, custom_target_dir: Option<&Path>) -> PathBu
             .join("target")
     });
     base.join(profile)
+}
+
+pub fn get_cef_dir() -> Option<PathBuf> {
+    env::var("CEF_PATH").ok().map(PathBuf::from)
 }
