@@ -400,9 +400,10 @@ dependencies = [
 
 [[package]]
 name = "cef_app"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cef",
+ "windows-sys 0.61.2",
  "winit",
 ]
 
@@ -824,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cef",
  "cef-dll-sys",
@@ -836,18 +837,20 @@ dependencies = [
  "process_path",
  "wide",
  "windows",
+ "windows-sys 0.61.2",
  "winit",
 ]
 
 [[package]]
 name = "gdcef_helper"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "cef",
  "cef-dll-sys",
  "cef_app",
  "libloading 0.9.0",
  "process_path",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
