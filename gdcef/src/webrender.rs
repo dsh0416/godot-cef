@@ -5,7 +5,7 @@ use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
-use crate::browser::MessageQueue;
+use crate::browser::{MessageQueue, UrlChangeQueue};
 use crate::utils::get_display_scale_factor;
 
 /// Swizzle indices for BGRA -> RGBA conversion.
@@ -228,6 +228,7 @@ macro_rules! handle_cursor_change {
 wrap_display_handler! {
     pub(crate) struct DisplayHandlerImpl {
         cursor_type: Arc<Mutex<CursorType>>,
+        url_change_queue: UrlChangeQueue,
     }
 
     impl DisplayHandler {
@@ -263,12 +264,26 @@ wrap_display_handler! {
         ) -> i32 {
             handle_cursor_change!(self, type_)
         }
+
+        fn on_address_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            url: Option<&CefString>,
+        ) {
+            if let Some(url) = url {
+                let url_str = url.to_string();
+                if let Ok(mut queue) = self.url_change_queue.lock() {
+                    queue.push_back(url_str);
+                }
+            }
+        }
     }
 }
 
 impl DisplayHandlerImpl {
-    pub fn build(cursor_type: Arc<Mutex<CursorType>>) -> cef::DisplayHandler {
-        Self::new(cursor_type)
+    pub fn build(cursor_type: Arc<Mutex<CursorType>>, url_change_queue: UrlChangeQueue) -> cef::DisplayHandler {
+        Self::new(cursor_type, url_change_queue)
     }
 }
 
@@ -395,11 +410,12 @@ impl SoftwareClientImpl {
     pub(crate) fn build(
         render_handler: cef_app::OsrRenderHandler,
         message_queue: MessageQueue,
+        url_change_queue: UrlChangeQueue,
     ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
         Self::new(
             SoftwareOsrHandler::build(render_handler),
-            DisplayHandlerImpl::build(cursor_type),
+            DisplayHandlerImpl::build(cursor_type, url_change_queue),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
             message_queue,
@@ -450,10 +466,11 @@ impl AcceleratedClientImpl {
         render_handler: PlatformAcceleratedRenderHandler,
         cursor_type: Arc<Mutex<CursorType>>,
         message_queue: MessageQueue,
+        url_change_queue: UrlChangeQueue,
     ) -> cef::Client {
         Self::new(
             AcceleratedOsrHandler::build(render_handler),
-            DisplayHandlerImpl::build(cursor_type),
+            DisplayHandlerImpl::build(cursor_type, url_change_queue),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
             message_queue,

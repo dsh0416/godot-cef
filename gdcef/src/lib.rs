@@ -30,7 +30,7 @@ use winit::dpi::PhysicalSize;
 use crate::accelerated_osr::{
     GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler, TextureImporterTrait,
 };
-use crate::browser::{App, MessageQueue, RenderMode};
+use crate::browser::{App, MessageQueue, RenderMode, UrlChangeQueue};
 use crate::cef_init::CEF_INITIALIZED;
 
 pub use texture::TextureRectRd;
@@ -89,6 +89,9 @@ impl CefTexture {
     #[signal]
     fn ipc_message(message: GString);
 
+    #[signal]
+    fn url_changed(url: GString);
+
     #[func]
     fn on_ready(&mut self) {
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
@@ -113,6 +116,7 @@ impl CefTexture {
         self.request_external_begin_frame();
         self.update_cursor();
         self.process_message_queue();
+        self.process_url_change_queue();
     }
 
     fn shutdown(&mut self) {
@@ -139,6 +143,7 @@ impl CefTexture {
         self.app.device_scale_factor = None;
         self.app.cursor_type = None;
         self.app.message_queue = None;
+        self.app.url_change_queue = None;
         self.app.last_max_fps = self.get_max_fps();
 
         cef_init::shutdown_cef();
@@ -244,6 +249,7 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
         let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
 
         let texture = ImageTexture::new_gd();
         self.base_mut().set_texture(&texture);
@@ -256,8 +262,9 @@ impl CefTexture {
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
         self.app.message_queue = Some(message_queue.clone());
+        self.app.url_change_queue = Some(url_change_queue.clone());
 
-        let mut client = webrender::SoftwareClientImpl::build(render_handler, message_queue);
+        let mut client = webrender::SoftwareClientImpl::build(render_handler, message_queue, url_change_queue);
 
         cef::browser_host_create_browser_sync(
             Some(&window_info),
@@ -306,6 +313,7 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
         let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
 
         let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height);
         self.base_mut().set_texture(&texture_2d_rd);
@@ -322,11 +330,13 @@ impl CefTexture {
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
         self.app.message_queue = Some(message_queue.clone());
+        self.app.url_change_queue = Some(url_change_queue.clone());
 
         let mut client = webrender::AcceleratedClientImpl::build(
             render_handler,
             self.app.cursor_type.clone().unwrap(),
             message_queue,
+            url_change_queue,
         );
 
         cef::browser_host_create_browser_sync(
@@ -612,6 +622,24 @@ impl CefTexture {
         for message in messages {
             self.base_mut()
                 .emit_signal("ipc_message", &[GString::from(&message).to_variant()]);
+        }
+    }
+
+    fn process_url_change_queue(&mut self) {
+        let Some(queue) = &self.app.url_change_queue else {
+            return;
+        };
+
+        let urls: Vec<String> = {
+            let Ok(mut q) = queue.lock() else {
+                return;
+            };
+            q.drain(..).collect()
+        };
+
+        for url in urls {
+            self.base_mut()
+                .emit_signal("url_changed", &[GString::from(&url).to_variant()]);
         }
     }
 

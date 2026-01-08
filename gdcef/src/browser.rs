@@ -16,6 +16,9 @@ use crate::accelerated_osr::{GodotTextureImporter, PlatformSharedTextureInfo};
 /// Queue for IPC messages from the browser to Godot.
 pub type MessageQueue = Arc<Mutex<VecDeque<String>>>;
 
+/// Queue for URL change notifications from the browser to Godot.
+pub type UrlChangeQueue = Arc<Mutex<VecDeque<String>>>;
+
 /// Rendering mode for the CEF browser.
 ///
 /// Determines whether the browser uses software (CPU) rendering or
@@ -63,6 +66,8 @@ pub struct App {
     pub cursor_type: Option<Arc<Mutex<CursorType>>>,
     /// Queue for IPC messages from the browser.
     pub message_queue: Option<MessageQueue>,
+    /// Queue for URL change notifications from the browser.
+    pub url_change_queue: Option<UrlChangeQueue>,
     /// Last known logical size for change detection.
     pub last_size: Vector2,
     /// Last known DPI for change detection.
@@ -82,6 +87,7 @@ impl Default for App {
             device_scale_factor: None,
             cursor_type: None,
             message_queue: None,
+            url_change_queue: None,
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
             last_cursor: CursorType::Arrow,
