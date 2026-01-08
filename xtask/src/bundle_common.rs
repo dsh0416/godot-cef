@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[cfg(target_os = "macos")]
 #[derive(Serialize)]
-#[allow(dead_code)]
 pub struct AppInfoPlist {
     #[serde(rename = "CFBundleDevelopmentRegion")]
     pub cf_bundle_development_region: String,
@@ -48,8 +48,8 @@ pub struct AppInfoPlist {
     pub ns_microphone_usage_description: String,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Serialize)]
-#[allow(dead_code)]
 pub struct FrameworkInfoPlist {
     #[serde(rename = "CFBundleDevelopmentRegion")]
     pub cf_bundle_development_region: String,
@@ -80,6 +80,7 @@ pub struct FrameworkInfoPlist {
     pub ls_ui_element: Option<String>,
 }
 
+#[cfg(target_os = "macos")]
 impl AppInfoPlist {
     pub fn new(exec_name: &str, is_helper: bool) -> Self {
         Self {
@@ -113,6 +114,7 @@ impl AppInfoPlist {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl FrameworkInfoPlist {
     pub fn new(lib_name: &str) -> Self {
         Self {
