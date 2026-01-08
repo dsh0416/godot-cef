@@ -1,8 +1,10 @@
-use serde::Serialize;
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+#[cfg(target_os = "macos")]
+use serde::Serialize;
+use std::collections::HashMap;
 
 #[cfg(target_os = "macos")]
 #[derive(Serialize)]

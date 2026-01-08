@@ -11,38 +11,50 @@ mod keycode;
 /// Macro to extract keyboard modifier flags from any event with modifier methods
 macro_rules! keyboard_modifiers {
     ($event:expr) => {{
-        let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
+        let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE;
         if $event.is_shift_pressed() {
-            modifiers |= cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0;
+            modifiers |= cef_event_flags_t::EVENTFLAG_SHIFT_DOWN;
         }
         if $event.is_ctrl_pressed() {
-            modifiers |= cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0;
+            modifiers |= cef_event_flags_t::EVENTFLAG_CONTROL_DOWN;
         }
         if $event.is_alt_pressed() {
-            modifiers |= cef_event_flags_t::EVENTFLAG_ALT_DOWN.0;
+            modifiers |= cef_event_flags_t::EVENTFLAG_ALT_DOWN;
         }
         if $event.is_meta_pressed() {
-            modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0;
+            modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN;
         }
-        modifiers
+
+        // cef_event_flags_t returns u32 on linux and macOS, but i32 on Windows,
+        // so we need to cast to u32 to avoid type mismatch.
+        #[cfg(target_os = "windows")]
+        let ret = modifiers.0 as u32;
+        #[cfg(not(target_os = "windows"))]
+        let ret = modifiers.0;
+        ret
     }};
 }
 
 /// Extracts mouse button modifier flags from a button mask
 fn mouse_button_modifiers(button_mask: MouseButtonMask) -> u32 {
-    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0;
+    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE;
 
     if button_mask.is_set(MouseButtonMask::LEFT) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0;
+        modifiers |= cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON;
     }
     if button_mask.is_set(MouseButtonMask::MIDDLE) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0;
+        modifiers |= cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON;
     }
     if button_mask.is_set(MouseButtonMask::RIGHT) {
-        modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0;
+        modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON;
     }
 
-    modifiers
+    // cef_event_flags_t returns u32 on linux and macOS, but i32 on Windows,
+    // so we need to cast to u32 to avoid type mismatch.
+    #[cfg(target_os = "windows")]
+    return modifiers.0 as u32;
+    #[cfg(not(target_os = "windows"))]
+    return modifiers.0;
 }
 
 /// Creates a CEF mouse event from Godot position and DPI scale
