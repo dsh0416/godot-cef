@@ -65,7 +65,8 @@ pub fn create_rd_texture(width: i32, height: i32) -> (Rid, Gd<Texture2Drd>) {
 /// * `rd_texture_rid` - The RID of the texture to free
 pub fn free_rd_texture(rd_texture_rid: Rid) {
     if rd_texture_rid.is_valid()
-        && let Some(mut rd) = RenderingServer::singleton().get_rendering_device() {
-            rd.free_rid(rd_texture_rid);
-        }
+        && let Some(mut rd) = RenderingServer::singleton().get_rendering_device()
+    {
+        rd.free_rid(rd_texture_rid);
+    }
 }

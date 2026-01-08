@@ -45,10 +45,9 @@ impl fmt::Display for CefError {
             }
             CefError::ResourceNotFound(resource) => {
                 write!(f, "Resource not found: {}", resource)
-            }
-            // CefError::GpuDeviceError(msg) => {
-            //     write!(f, "GPU device error: {}", msg)
-            // }
+            } // CefError::GpuDeviceError(msg) => {
+              //     write!(f, "GPU device error: {}", msg)
+              // }
         }
     }
 }
