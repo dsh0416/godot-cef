@@ -57,7 +57,7 @@ jobs:
         run: export-cef-dir --force $HOME/.local/share/cef
 
       - name: Build and bundle for macOS
-        run: cargo xtask bundle-all --release
+        run: cargo xtask bundle --release
 
       - name: Prepare artifacts
         run: |
@@ -96,24 +96,40 @@ jobs:
           restore-keys: |
             windows-x86_64-cargo-
 
-      # - name: Install CEF export tool
-      #   run: cargo install export-cef-dir
+      - name: Install CEF export tool
+        run: cargo install export-cef-dir
 
-      # - name: Download CEF binaries
-      #   run: export-cef-dir
+      - name: Download CEF binaries
+        run: export-cef-dir
 
-      - name: Build GDExtension library
-        run: cargo build --package gdcef --release --target x86_64-pc-windows-msvc
-
-      - name: Build helper subprocess
-        run: cargo build --package gdcef_helper --bin gdcef_helper --release --target x86_64-pc-windows-msvc
+      - name: Build and bundle for Windows
+        run: cargo xtask bundle --release
 
       - name: Prepare artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/x86_64-pc-windows-msvc
-          Copy-Item target/x86_64-pc-windows-msvc/release/gdcef.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/x86_64-pc-windows-msvc/release/gdcef_helper.exe artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/gdcef.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/gdcef_helper.exe artifacts/x86_64-pc-windows-msvc/
+          # Copy CEF assets
+          Copy-Item target/release/libcef.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/chrome_elf.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/libEGL.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/libGLESv2.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/d3dcompiler_47.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/dxcompiler.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/dxil.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/vk_swiftshader.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/vk_swiftshader_icd.json artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/vulkan-1.dll artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/icudtl.dat artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/resources.pak artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/chrome_100_percent.pak artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/chrome_200_percent.pak artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/v8_context_snapshot.bin artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/bootstrap.exe artifacts/x86_64-pc-windows-msvc/
+          Copy-Item target/release/bootstrapc.exe artifacts/x86_64-pc-windows-msvc/
+          Copy-Item -Recurse target/release/locales artifacts/x86_64-pc-windows-msvc/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -166,28 +182,39 @@ jobs:
           restore-keys: |
             linux-x86_64-cargo-
 
-      # - name: Install CEF export tool
-      #   run: cargo install export-cef-dir
+      - name: Install CEF export tool
+        run: cargo install export-cef-dir
 
-      # - name: Download CEF binaries
-      #   run: export-cef-dir
+      - name: Download CEF binaries
+        run: export-cef-dir
 
-      - name: Build GDExtension library
-        run: cargo build --package gdcef --release --target x86_64-unknown-linux-gnu
-
-      - name: Build helper subprocess
-        run: cargo build --package gdcef_helper --bin gdcef_helper --release --target x86_64-unknown-linux-gnu
+      - name: Build and bundle for Linux
+        run: cargo xtask bundle --release
 
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts/x86_64-unknown-linux-gnu
-          cp target/x86_64-unknown-linux-gnu/release/libgdcef.so artifacts/x86_64-unknown-linux-gnu/
-          cp target/x86_64-unknown-linux-gnu/release/gdcef_helper artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/libgdcef.so artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/gdcef_helper artifacts/x86_64-unknown-linux-gnu/
+          # Copy CEF assets
+          cp target/release/libcef.so artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/libEGL.so artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/libGLESv2.so artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/libvk_swiftshader.so artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/libvulkan.so.1 artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/vk_swiftshader_icd.json artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/icudtl.dat artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/resources.pak artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/chrome_100_percent.pak artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/chrome_200_percent.pak artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/v8_context_snapshot.bin artifacts/x86_64-unknown-linux-gnu/
+          cp target/release/chrome-sandbox artifacts/x86_64-unknown-linux-gnu/
+          cp -r target/release/locales artifacts/x86_64-unknown-linux-gnu/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gdcef-86_64-unknown-linux-gnu
+          name: gdcef-x86_64-unknown-linux-gnu
           path: artifacts/x86_64-unknown-linux-gnu
           retention-days: 30
 
