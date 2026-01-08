@@ -173,13 +173,14 @@ pub fn handle_pan_gesture(
 /// Handles keyboard events and sends them to CEF browser host
 pub fn handle_key_event(host: &impl ImplBrowserHost, event: &Gd<InputEventKey>) {
     let mut modifiers = keyboard_modifiers!(event);
+    #[cfg(target_os = "windows")]
+    let keypad_key_modifier = cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0 as u32;
+    #[cfg(not(target_os = "windows"))]
+    let keypad_key_modifier = cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0;
 
     // Check if it's from the keypad
     if is_keypad_key(event.get_physical_keycode()) {
-        #[cfg(target_os = "windows")]
-        modifiers |= cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0 as u32;
-        #[cfg(not(target_os = "windows"))]
-        modifiers |= cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0;
+        modifiers |= keypad_key_modifier;
     }
 
     let is_pressed = event.is_pressed();
