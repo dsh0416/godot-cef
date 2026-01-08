@@ -1,0 +1,154 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+
+    runs-on: ${{ matrix.os }}
+    name: Test (${{ matrix.os }})
+
+    env:
+      CEF_PATH: ${{ github.workspace }}/cef
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            libgtk-3-dev \
+            libnss3-dev \
+            libatk1.0-dev \
+            libatk-bridge2.0-dev \
+            libcups2-dev \
+            libdrm-dev \
+            libxkbcommon-dev \
+            libxcomposite-dev \
+            libxdamage-dev \
+            libxrandr-dev \
+            libgbm-dev \
+            libpango1.0-dev \
+            libasound2-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-test-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Install CEF export tool
+        run: cargo install export-cef-dir
+
+      - name: Download CEF binaries
+        run: export-cef-dir --force ${{ env.CEF_PATH }}
+
+      - name: Run tests
+        run: cargo test --workspace --all-features
+
+  clippy:
+    runs-on: ubuntu-22.04
+    name: Clippy
+
+    env:
+      CEF_PATH: ${{ github.workspace }}/cef
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            libgtk-3-dev \
+            libnss3-dev \
+            libatk1.0-dev \
+            libatk-bridge2.0-dev \
+            libcups2-dev \
+            libdrm-dev \
+            libxkbcommon-dev \
+            libxcomposite-dev \
+            libxdamage-dev \
+            libxrandr-dev \
+            libgbm-dev \
+            libpango1.0-dev \
+            libasound2-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            linux-clippy-
+
+      - name: Install CEF export tool
+        run: cargo install export-cef-dir
+
+      - name: Download CEF binaries
+        run: export-cef-dir --force ${{ env.CEF_PATH }}
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-features -- -D warnings
+
+  fmt:
+    runs-on: ubuntu-latest
+    name: Format
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
