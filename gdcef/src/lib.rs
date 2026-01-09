@@ -122,6 +122,7 @@ impl CefTexture {
 
     fn cleanup_instance(&mut self) {
         if self.app.browser.is_none() {
+            cef_init::cef_release();
             return;
         }
 
