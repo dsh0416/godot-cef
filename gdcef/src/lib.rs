@@ -12,7 +12,7 @@ mod webrender;
 
 use cef::{
     BrowserSettings, ImplBrowser, ImplBrowserHost, ImplFrame, RequestContextSettings, WindowInfo,
-    api_hash, do_message_loop_work,
+    do_message_loop_work,
 };
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::notify::ControlNotification;
@@ -31,7 +31,6 @@ use crate::accelerated_osr::{
     GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler, TextureImporterTrait,
 };
 use crate::browser::{App, MessageQueue, RenderMode, UrlChangeQueue};
-use crate::cef_init::CEF_INITIALIZED;
 
 pub use texture::TextureRectRd;
 
@@ -72,8 +71,8 @@ impl ITextureRect for CefTexture {
             ControlNotification::PROCESS => {
                 self.on_process();
             }
-            ControlNotification::WM_CLOSE_REQUEST => {
-                self.shutdown();
+            ControlNotification::PREDELETE => {
+                self.cleanup_instance();
             }
             ControlNotification::FOCUS_ENTER => {
                 self.on_focus_enter();
@@ -102,11 +101,7 @@ impl CefTexture {
     fn on_ready(&mut self) {
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
 
-        CEF_INITIALIZED.call_once(|| {
-            cef_init::load_cef_framework();
-            api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
-            cef_init::initialize_cef();
-        });
+        cef_init::cef_retain();
 
         self.create_browser();
     }
@@ -125,7 +120,11 @@ impl CefTexture {
         self.process_url_change_queue();
     }
 
-    fn shutdown(&mut self) {
+    fn cleanup_instance(&mut self) {
+        if self.app.browser.is_none() {
+            return;
+        }
+
         // Hide the TextureRect and clear its texture BEFORE freeing resources.
         // This prevents Godot from trying to render with an invalid texture during shutdown.
         self.base_mut().set_visible(false);
@@ -143,16 +142,20 @@ impl CefTexture {
             render::free_rd_texture(*rd_texture_rid);
         }
 
-        self.app.browser = None;
+        if let Some(browser) = self.app.browser.take()
+            && let Some(host) = browser.host()
+        {
+            host.close_browser(true as _);
+        }
+
         self.app.render_mode = None;
         self.app.render_size = None;
         self.app.device_scale_factor = None;
         self.app.cursor_type = None;
         self.app.message_queue = None;
         self.app.url_change_queue = None;
-        self.app.last_max_fps = self.get_max_fps();
 
-        cef_init::shutdown_cef();
+        cef_init::cef_release();
     }
 
     fn create_browser(&mut self) {
