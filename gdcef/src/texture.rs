@@ -15,7 +15,7 @@ use godot::prelude::*;
 /// usage flags for Godot's rendering pipeline. The native handle of this texture
 /// can be obtained via RenderingDevice::get_driver_resource() for direct GPU copying.
 #[derive(GodotClass)]
-#[class(base=TextureRect)]
+#[class(base=TextureRect, internal)]
 pub struct TextureRectRd {
     base: Base<TextureRect>,
     texture: Option<Gd<ImageTexture>>,

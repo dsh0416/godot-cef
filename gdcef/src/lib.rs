@@ -75,6 +75,12 @@ impl ITextureRect for CefTexture {
             ControlNotification::WM_CLOSE_REQUEST => {
                 self.shutdown();
             }
+            ControlNotification::FOCUS_ENTER => {
+                self.on_focus_enter();
+            }
+            ControlNotification::FOCUS_EXIT => {
+                self.on_focus_exit();
+            }
             _ => {}
         }
     }
@@ -787,5 +793,25 @@ impl CefTexture {
         );
         let js_code_str: cef::CefStringUtf16 = js_code.as_str().into();
         frame.execute_java_script(Some(&js_code_str), None, 0);
+    }
+
+    fn on_focus_enter(&mut self) {
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+        host.set_focus(true as _);
+    }
+
+    fn on_focus_exit(&mut self) {
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+        host.set_focus(false as _);
     }
 }
