@@ -2,7 +2,7 @@ use cef::Settings;
 use godot::classes::{Engine, Os};
 use godot::prelude::*;
 use std::path::PathBuf;
-use std::sync::Once;
+use std::sync::Mutex;
 
 #[cfg(target_os = "macos")]
 use crate::utils::get_framework_path;
@@ -10,12 +10,47 @@ use crate::utils::get_subprocess_path;
 
 use crate::accelerated_osr::RenderBackend;
 
-/// Global initialization guard - CEF can only be initialized once
-pub static CEF_INITIALIZED: Once = Once::new();
+struct CefState {
+    ref_count: usize,
+    initialized: bool,
+}
+
+static CEF_STATE: Mutex<CefState> = Mutex::new(CefState {
+    ref_count: 0,
+    initialized: false,
+});
+
+pub fn cef_retain() {
+    let mut state = CEF_STATE.lock().unwrap();
+
+    if state.ref_count == 0 {
+        load_cef_framework();
+        cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
+        initialize_cef();
+        state.initialized = true;
+    }
+
+    state.ref_count += 1;
+}
+
+pub fn cef_release() {
+    let mut state = CEF_STATE.lock().unwrap();
+
+    if state.ref_count == 0 {
+        return;
+    }
+
+    state.ref_count -= 1;
+
+    if state.ref_count == 0 && state.initialized {
+        cef::shutdown();
+        state.initialized = false;
+    }
+}
 
 /// Loads the CEF framework library (macOS-specific)
 #[cfg(target_os = "macos")]
-pub fn load_cef_framework() {
+fn load_cef_framework() {
     match get_framework_path() {
         Ok(framework_path) => cef_app::load_cef_framework_from_path(&framework_path),
         Err(e) => panic!("Failed to get CEF framework path: {}", e),
@@ -23,7 +58,7 @@ pub fn load_cef_framework() {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn load_cef_framework() {
+fn load_cef_framework() {
     // No-op on other platforms
 }
 
@@ -65,7 +100,7 @@ fn should_enable_remote_debugging() -> bool {
 }
 
 /// Initializes CEF with the given settings
-pub fn initialize_cef() {
+fn initialize_cef() {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
     let enable_remote_debugging = should_enable_remote_debugging();
@@ -130,11 +165,4 @@ pub fn initialize_cef() {
     );
 
     assert_eq!(ret, 1, "failed to initialize CEF");
-}
-
-/// Shuts down CEF if it was initialized
-pub fn shutdown_cef() {
-    if CEF_INITIALIZED.is_completed() {
-        cef::shutdown();
-    }
 }
