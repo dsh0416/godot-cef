@@ -11,6 +11,16 @@ use crate::browser::{
 };
 use crate::utils::get_display_scale_factor;
 
+/// Bundles all the event queues used for browser-to-Godot communication.
+pub(crate) struct ClientQueues {
+    pub message_queue: MessageQueue,
+    pub url_change_queue: UrlChangeQueue,
+    pub title_change_queue: TitleChangeQueue,
+    pub loading_state_queue: LoadingStateQueue,
+    pub ime_enable_queue: ImeEnableQueue,
+    pub ime_composition_queue: ImeCompositionQueue,
+}
+
 /// Swizzle indices for BGRA -> RGBA conversion.
 /// [B,G,R,A] at indices [0,1,2,3] -> [R,G,B,A] means pick [2,1,0,3] for each pixel.
 const BGRA_TO_RGBA_INDICES: i8x16 =
@@ -583,22 +593,21 @@ wrap_client! {
 impl SoftwareClientImpl {
     pub(crate) fn build(
         render_handler: cef_app::OsrRenderHandler,
-        message_queue: MessageQueue,
-        url_change_queue: UrlChangeQueue,
-        title_change_queue: TitleChangeQueue,
-        loading_state_queue: LoadingStateQueue,
-        ime_enable_queue: ImeEnableQueue,
-        ime_composition_queue: ImeCompositionQueue,
+        queues: ClientQueues,
     ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
         Self::new(
-            SoftwareOsrHandler::build(render_handler, ime_composition_queue),
-            DisplayHandlerImpl::build(cursor_type, url_change_queue, title_change_queue),
+            SoftwareOsrHandler::build(render_handler, queues.ime_composition_queue),
+            DisplayHandlerImpl::build(
+                cursor_type,
+                queues.url_change_queue,
+                queues.title_change_queue,
+            ),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
-            LoadHandlerImpl::build(loading_state_queue),
-            message_queue,
-            ime_enable_queue,
+            LoadHandlerImpl::build(queues.loading_state_queue),
+            queues.message_queue,
+            queues.ime_enable_queue,
         )
     }
 }
@@ -651,21 +660,20 @@ impl AcceleratedClientImpl {
     pub(crate) fn build(
         render_handler: PlatformAcceleratedRenderHandler,
         cursor_type: Arc<Mutex<CursorType>>,
-        message_queue: MessageQueue,
-        url_change_queue: UrlChangeQueue,
-        title_change_queue: TitleChangeQueue,
-        loading_state_queue: LoadingStateQueue,
-        ime_enable_queue: ImeEnableQueue,
-        ime_composition_queue: ImeCompositionQueue,
+        queues: ClientQueues,
     ) -> cef::Client {
         Self::new(
-            AcceleratedOsrHandler::build(render_handler, ime_composition_queue),
-            DisplayHandlerImpl::build(cursor_type, url_change_queue, title_change_queue),
+            AcceleratedOsrHandler::build(render_handler, queues.ime_composition_queue),
+            DisplayHandlerImpl::build(
+                cursor_type,
+                queues.url_change_queue,
+                queues.title_change_queue,
+            ),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
-            LoadHandlerImpl::build(loading_state_queue),
-            message_queue,
-            ime_enable_queue,
+            LoadHandlerImpl::build(queues.loading_state_queue),
+            queues.message_queue,
+            queues.ime_enable_queue,
         )
     }
 }

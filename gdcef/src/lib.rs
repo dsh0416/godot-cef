@@ -319,12 +319,14 @@ impl CefTexture {
 
         let mut client = webrender::SoftwareClientImpl::build(
             render_handler,
-            message_queue,
-            url_change_queue,
-            title_change_queue,
-            loading_state_queue,
-            ime_enable_queue,
-            ime_composition_queue,
+            webrender::ClientQueues {
+                message_queue,
+                url_change_queue,
+                title_change_queue,
+                loading_state_queue,
+                ime_enable_queue,
+                ime_composition_queue,
+            },
         );
 
         cef::browser_host_create_browser_sync(
@@ -404,12 +406,14 @@ impl CefTexture {
         let mut client = webrender::AcceleratedClientImpl::build(
             render_handler,
             self.app.cursor_type.clone().unwrap(),
-            message_queue,
-            url_change_queue,
-            title_change_queue,
-            loading_state_queue,
-            ime_enable_queue,
-            ime_composition_queue,
+            webrender::ClientQueues {
+                message_queue,
+                url_change_queue,
+                title_change_queue,
+                loading_state_queue,
+                ime_enable_queue,
+                ime_composition_queue,
+            },
         );
 
         cef::browser_host_create_browser_sync(
