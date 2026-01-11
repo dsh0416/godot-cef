@@ -12,7 +12,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CEF_VERSION: "143.0.13"
+  CEF_VERSION: "143.0.14"
   CEF_PATH: ${{ github.workspace }}/cef
 
 jobs:
