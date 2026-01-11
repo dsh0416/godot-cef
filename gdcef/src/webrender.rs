@@ -421,9 +421,8 @@ wrap_load_handler! {
                 let error_text = error_string
                     .map(|e| e.to_string())
                     .unwrap_or_default();
-                // Use unsafe to access the raw error code value since the struct field is private
-                // Errorcode is a repr(transparent) wrapper around cef_errorcode_t
-                let error_code_i32: i32 = unsafe { std::mem::transmute(error_code) };
+                // Use the get_raw() method to safely convert Errorcode to i32
+                let error_code_i32: i32 = error_code.get_raw();
                 if let Ok(mut queue) = self.loading_state_queue.lock() {
                     queue.push_back(LoadingStateEvent::Error {
                         url,
