@@ -311,6 +311,38 @@ wrap_render_process_handler! {
                     }
             }
         }
+
+        fn on_focused_node_changed(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, node: Option<&mut Domnode>) {
+            if let Some(node) = node
+                && node.is_editable() == 1 {
+                    // send to the browser process to activate IME
+                    let route = CefStringUtf16::from("triggerIme");
+                    let process_message = process_message_create(Some(&route));
+                    if let Some(mut process_message) = process_message {
+                        if let Some(argument_list) = process_message.argument_list() {
+                            argument_list.set_bool(0, true as _);
+                        }
+
+                        if let Some(frame) = frame {
+                            frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+                            return;
+                        }
+                    }
+                }
+
+            // send to the browser process to deactivate IME
+            let route = CefStringUtf16::from("triggerIme");
+            let process_message = process_message_create(Some(&route));
+            if let Some(mut process_message) = process_message {
+                if let Some(argument_list) = process_message.argument_list() {
+                    argument_list.set_bool(0, false as _);
+                }
+
+                if let Some(frame) = frame {
+                    frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+                }
+            }
+        }
     }
 }
 

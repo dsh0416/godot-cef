@@ -6,7 +6,8 @@ use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
-    LoadingStateEvent, LoadingStateQueue, MessageQueue, TitleChangeQueue, UrlChangeQueue,
+    ImeCompositionQueue, ImeCompositionRange, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue,
+    MessageQueue, TitleChangeQueue, UrlChangeQueue,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -71,9 +72,25 @@ fn compute_screen_info(screen_info: Option<&mut ScreenInfo>) -> ::std::os::raw::
     false as _
 }
 
+fn compute_screen_point(
+    view_x: ::std::os::raw::c_int,
+    view_y: ::std::os::raw::c_int,
+    screen_x: Option<&mut ::std::os::raw::c_int>,
+    screen_y: Option<&mut ::std::os::raw::c_int>,
+) -> ::std::os::raw::c_int {
+    if let Some(screen_x) = screen_x {
+        *screen_x = view_x;
+    }
+    if let Some(screen_y) = screen_y {
+        *screen_y = view_y;
+    }
+    true as _
+}
+
 wrap_render_handler! {
     pub struct SoftwareOsrHandler {
         handler: cef_app::OsrRenderHandler,
+        ime_composition_queue: ImeCompositionQueue,
     }
 
     impl RenderHandler {
@@ -92,12 +109,12 @@ wrap_render_handler! {
         fn screen_point(
             &self,
             _browser: Option<&mut Browser>,
-            _view_x: ::std::os::raw::c_int,
-            _view_y: ::std::os::raw::c_int,
-            _screen_x: Option<&mut ::std::os::raw::c_int>,
-            _screen_y: Option<&mut ::std::os::raw::c_int>,
+            view_x: ::std::os::raw::c_int,
+            view_y: ::std::os::raw::c_int,
+            screen_x: Option<&mut ::std::os::raw::c_int>,
+            screen_y: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
-            false as _
+            compute_screen_point(view_x, view_y, screen_x, screen_y)
         }
 
         fn on_paint(
@@ -123,18 +140,38 @@ wrap_render_handler! {
                 frame_buffer.update(rgba_data, width, height);
             }
         }
+
+        fn on_ime_composition_range_changed(
+            &self,
+            _browser: Option<&mut Browser>,
+            _selected_range: Option<&Range>,
+            character_bounds: Option<&[Rect]>,
+        ) {
+            if let Some(bounds) = character_bounds.and_then(|b| b.last())
+                && let Ok(mut queue) = self.ime_composition_queue.lock() {
+                    *queue = Some(ImeCompositionRange {
+                        caret_x: bounds.x,
+                        caret_y: bounds.y,
+                        caret_height: bounds.height,
+                    });
+                }
+        }
     }
 }
 
 impl SoftwareOsrHandler {
-    pub fn build(handler: cef_app::OsrRenderHandler) -> cef::RenderHandler {
-        Self::new(handler)
+    pub fn build(
+        handler: cef_app::OsrRenderHandler,
+        ime_composition_queue: ImeCompositionQueue,
+    ) -> cef::RenderHandler {
+        Self::new(handler, ime_composition_queue)
     }
 }
 
 wrap_render_handler! {
     pub struct AcceleratedOsrHandler {
         handler: PlatformAcceleratedRenderHandler,
+        ime_composition_queue: ImeCompositionQueue,
     }
 
     impl RenderHandler {
@@ -153,12 +190,12 @@ wrap_render_handler! {
         fn screen_point(
             &self,
             _browser: Option<&mut Browser>,
-            _view_x: ::std::os::raw::c_int,
-            _view_y: ::std::os::raw::c_int,
-            _screen_x: Option<&mut ::std::os::raw::c_int>,
-            _screen_y: Option<&mut ::std::os::raw::c_int>,
+            view_x: ::std::os::raw::c_int,
+            view_y: ::std::os::raw::c_int,
+            screen_x: Option<&mut ::std::os::raw::c_int>,
+            screen_y: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
-            false as _
+            compute_screen_point(view_x, view_y, screen_x, screen_y)
         }
 
         fn on_accelerated_paint(
@@ -181,12 +218,31 @@ wrap_render_handler! {
             _height: ::std::os::raw::c_int,
         ) {
         }
+
+        fn on_ime_composition_range_changed(
+            &self,
+            _browser: Option<&mut Browser>,
+            _selected_range: Option<&Range>,
+            character_bounds: Option<&[Rect]>,
+        ) {
+            if let Some(bounds) = character_bounds.and_then(|b| b.last())
+                && let Ok(mut queue) = self.ime_composition_queue.lock() {
+                    *queue = Some(ImeCompositionRange {
+                        caret_x: bounds.x,
+                        caret_y: bounds.y,
+                        caret_height: bounds.height,
+                    });
+                }
+        }
     }
 }
 
 impl AcceleratedOsrHandler {
-    pub fn build(handler: PlatformAcceleratedRenderHandler) -> cef::RenderHandler {
-        Self::new(handler)
+    pub fn build(
+        handler: PlatformAcceleratedRenderHandler,
+        ime_composition_queue: ImeCompositionQueue,
+    ) -> cef::RenderHandler {
+        Self::new(handler, ime_composition_queue)
     }
 }
 
@@ -447,20 +503,34 @@ fn on_process_message_received(
     _source_process: ProcessId,
     message: Option<&mut ProcessMessage>,
     message_queue: &MessageQueue,
+    ime_enable_queue: &ImeEnableQueue,
 ) -> i32 {
     let Some(message) = message else { return 0 };
     let route = CefStringUtf16::from(&message.name()).to_string();
 
-    if route == "ipcRendererToGodot"
-        && let Some(args) = message.argument_list()
-    {
-        let arg = args.string(0);
-        let msg_str = CefStringUtf16::from(&arg).to_string();
-
-        if let Ok(mut queue) = message_queue.lock() {
-            queue.push_back(msg_str);
-            return 1;
+    match route.as_str() {
+        "ipcRendererToGodot" => {
+            if let Some(args) = message.argument_list() {
+                let arg = args.string(0);
+                let msg_str = CefStringUtf16::from(&arg).to_string();
+                if let Ok(mut queue) = message_queue.lock() {
+                    queue.push_back(msg_str);
+                }
+            }
         }
+        "triggerIme" => {
+            if let Some(args) = message.argument_list() {
+                let arg = args.bool(0);
+                if arg == 1 {
+                    if let Ok(mut queue) = ime_enable_queue.lock() {
+                        queue.push_back(true);
+                    }
+                } else if let Ok(mut queue) = ime_enable_queue.lock() {
+                    queue.push_back(false);
+                }
+            }
+        }
+        _ => {}
     }
 
     0
@@ -474,6 +544,7 @@ wrap_client! {
         life_span_handler: cef::LifeSpanHandler,
         load_handler: cef::LoadHandler,
         message_queue: MessageQueue,
+        ime_enable_queue: ImeEnableQueue,
     }
 
     impl Client {
@@ -504,7 +575,7 @@ wrap_client! {
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            on_process_message_received(browser, frame, source_process, message, &self.message_queue)
+            on_process_message_received(browser, frame, source_process, message, &self.message_queue, &self.ime_enable_queue)
         }
     }
 }
@@ -516,15 +587,18 @@ impl SoftwareClientImpl {
         url_change_queue: UrlChangeQueue,
         title_change_queue: TitleChangeQueue,
         loading_state_queue: LoadingStateQueue,
+        ime_enable_queue: ImeEnableQueue,
+        ime_composition_queue: ImeCompositionQueue,
     ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
         Self::new(
-            SoftwareOsrHandler::build(render_handler),
+            SoftwareOsrHandler::build(render_handler, ime_composition_queue),
             DisplayHandlerImpl::build(cursor_type, url_change_queue, title_change_queue),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
             LoadHandlerImpl::build(loading_state_queue),
             message_queue,
+            ime_enable_queue,
         )
     }
 }
@@ -537,6 +611,7 @@ wrap_client! {
         life_span_handler: cef::LifeSpanHandler,
         load_handler: cef::LoadHandler,
         message_queue: MessageQueue,
+        ime_enable_queue: ImeEnableQueue,
     }
 
     impl Client {
@@ -567,7 +642,7 @@ wrap_client! {
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            on_process_message_received(browser, frame, source_process, message, &self.message_queue)
+            on_process_message_received(browser, frame, source_process, message, &self.message_queue, &self.ime_enable_queue)
         }
     }
 }
@@ -580,14 +655,17 @@ impl AcceleratedClientImpl {
         url_change_queue: UrlChangeQueue,
         title_change_queue: TitleChangeQueue,
         loading_state_queue: LoadingStateQueue,
+        ime_enable_queue: ImeEnableQueue,
+        ime_composition_queue: ImeCompositionQueue,
     ) -> cef::Client {
         Self::new(
-            AcceleratedOsrHandler::build(render_handler),
+            AcceleratedOsrHandler::build(render_handler, ime_composition_queue),
             DisplayHandlerImpl::build(cursor_type, url_change_queue, title_change_queue),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
             LoadHandlerImpl::build(loading_state_queue),
             message_queue,
+            ime_enable_queue,
         )
     }
 }

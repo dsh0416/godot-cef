@@ -171,7 +171,11 @@ pub fn handle_pan_gesture(
 }
 
 /// Handles keyboard events and sends them to CEF browser host
-pub fn handle_key_event(host: &impl ImplBrowserHost, event: &Gd<InputEventKey>) {
+pub fn handle_key_event(
+    host: &impl ImplBrowserHost,
+    event: &Gd<InputEventKey>,
+    focus_on_editable_field: bool,
+) {
     let mut modifiers = keyboard_modifiers!(event);
     #[cfg(target_os = "windows")]
     let keypad_key_modifier = cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0 as u32;
@@ -203,17 +207,23 @@ pub fn handle_key_event(host: &impl ImplBrowserHost, event: &Gd<InputEventKey>) 
         get_control_char_code(keycode)
     };
 
-    // For key press events (not echo/repeat), send RAWKEYDOWN
-    if is_pressed && !is_echo {
+    let focus_on_editable_field = focus_on_editable_field as i32;
+
+    // For key press events, send RAWKEYDOWN for initial press, KEYDOWN for repeat
+    if is_pressed {
         let key_event = KeyEvent {
-            type_: KeyEventType::RAWKEYDOWN,
+            type_: if is_echo {
+                KeyEventType::KEYDOWN
+            } else {
+                KeyEventType::RAWKEYDOWN
+            },
             modifiers,
             windows_key_code,
             native_key_code,
             is_system_key: 0,
             character,
             unmodified_character: character,
-            focus_on_editable_field: 0,
+            focus_on_editable_field,
             ..Default::default()
         };
         host.send_key_event(Some(&key_event));
@@ -229,25 +239,29 @@ pub fn handle_key_event(host: &impl ImplBrowserHost, event: &Gd<InputEventKey>) 
                 is_system_key: 0,
                 character,
                 unmodified_character: character,
-                focus_on_editable_field: 0,
+                focus_on_editable_field,
                 ..Default::default()
             };
             host.send_key_event(Some(&char_event));
         }
-    } else if !is_pressed {
+    } else {
         // Key release event
-        let key_event = KeyEvent {
-            type_: KeyEventType::KEYUP,
-            modifiers,
-            windows_key_code,
-            native_key_code,
-            is_system_key: 0,
-            character,
-            unmodified_character: character,
-            focus_on_editable_field: 0,
-            ..Default::default()
-        };
-        host.send_key_event(Some(&key_event));
+        // Skip KEYUP for navigation keys - works around a CEF issue where KEYUP
+        // triggers arrow key actions on macOS
+        if !is_navigation_key(keycode) {
+            let key_event = KeyEvent {
+                type_: KeyEventType::KEYUP,
+                modifiers,
+                windows_key_code,
+                native_key_code,
+                is_system_key: 0,
+                character,
+                unmodified_character: character,
+                focus_on_editable_field,
+                ..Default::default()
+            };
+            host.send_key_event(Some(&key_event));
+        }
     }
 }
 
@@ -265,15 +279,31 @@ fn get_control_char_code(key: Key) -> u16 {
 
 /// Determines if a CHAR event should be sent for this key
 fn should_send_char_event(key: Key, unicode: u32) -> bool {
+    // Never send CHAR for modifier or navigation keys
+    if is_modifier_key(key) || is_navigation_key(key) {
+        return false;
+    }
+
     // Send CHAR for printable characters
-    if unicode != 0 && !is_modifier_key(key) {
+    if unicode != 0 {
         return true;
     }
 
-    // Also send CHAR for control characters that text fields need
+    false
+}
+
+/// Checks if a key is a navigation key (arrows, home, end, page up/down)
+fn is_navigation_key(key: Key) -> bool {
     matches!(
         key,
-        Key::BACKSPACE | Key::TAB | Key::ENTER | Key::KP_ENTER | Key::DELETE
+        Key::UP
+            | Key::DOWN
+            | Key::LEFT
+            | Key::RIGHT
+            | Key::HOME
+            | Key::END
+            | Key::PAGEUP
+            | Key::PAGEDOWN
     )
 }
 
@@ -321,11 +351,46 @@ pub fn ime_commit_text(host: &impl ImplBrowserHost, text: &str) {
     host.ime_commit_text(Some(&cef_text), None, 0);
 }
 
-/// Sets the current IME composition text
+/// Sets the current IME composition text with cursor position
+/// Call this during IME composition (before finalizing)
+/// `cursor_pos` is the cursor position within the composition text (0 = start)
+pub fn ime_set_composition_with_cursor(host: &impl ImplBrowserHost, text: &str, cursor_pos: u32) {
+    let cef_text: cef::CefString = text.into();
+    let text_len = text.chars().count() as u32;
+
+    // Create an underline for the entire composition text
+    let underline = cef::CompositionUnderline {
+        size: std::mem::size_of::<cef::CompositionUnderline>(),
+        range: cef::Range {
+            from: 0,
+            to: text_len,
+        },
+        color: 0xFF000000_u32, // Black
+        background_color: 0,
+        thick: 0, // thin underline
+        style: cef::CompositionUnderlineStyle::SOLID,
+    };
+    let underlines = [underline];
+
+    // Selection range is at the cursor position
+    let selection_range = cef::Range {
+        from: cursor_pos,
+        to: cursor_pos,
+    };
+
+    host.ime_set_composition(
+        Some(&cef_text),
+        Some(&underlines),
+        None, // replacement_range
+        Some(&selection_range),
+    );
+}
+
+/// Sets the current IME composition text (legacy, cursor at end)
 /// Call this during IME composition (before finalizing)
 pub fn ime_set_composition(host: &impl ImplBrowserHost, text: &str) {
-    let cef_text: cef::CefString = text.into();
-    host.ime_set_composition(Some(&cef_text), None, None, None);
+    let text_len = text.chars().count() as u32;
+    ime_set_composition_with_cursor(host, text, text_len);
 }
 
 /// Cancels the current IME composition

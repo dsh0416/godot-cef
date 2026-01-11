@@ -40,6 +40,21 @@ pub enum LoadingStateEvent {
 /// Queue for loading state events from the browser to Godot.
 pub type LoadingStateQueue = Arc<Mutex<VecDeque<LoadingStateEvent>>>;
 
+/// IME composition range info for caret positioning.
+#[derive(Clone, Copy, Debug)]
+pub struct ImeCompositionRange {
+    /// Caret X position in view coordinates.
+    pub caret_x: i32,
+    /// Caret Y position in view coordinates.
+    pub caret_y: i32,
+    /// Caret height in pixels.
+    pub caret_height: i32,
+}
+
+pub type ImeEnableQueue = Arc<Mutex<VecDeque<bool>>>;
+/// Shared state for IME composition range.
+pub type ImeCompositionQueue = Arc<Mutex<Option<ImeCompositionRange>>>
+
 /// Rendering mode for the CEF browser.
 ///
 /// Determines whether the browser uses software (CPU) rendering or
@@ -93,6 +108,10 @@ pub struct App {
     pub title_change_queue: Option<TitleChangeQueue>,
     /// Queue for loading state events from the browser.
     pub loading_state_queue: Option<LoadingStateQueue>,
+    /// Queue for IME enable/disable requests.
+    pub ime_enable_queue: Option<ImeEnableQueue>,
+    /// Shared IME composition range for caret positioning.
+    pub ime_composition_range: Option<ImeCompositionQueue>,
     /// Last known logical size for change detection.
     pub last_size: Vector2,
     /// Last known DPI for change detection.
@@ -101,6 +120,12 @@ pub struct App {
     pub last_cursor: CursorType,
     /// Last known max FPS for change detection.
     pub last_max_fps: i32,
+    /// Whether IME is currently active (Godot's DisplayServer IME).
+    pub ime_active: bool,
+    /// Last IME composition text (to detect commits vs updates).
+    pub last_ime_text: String,
+    /// Last mouse click position in local coordinates (for initial IME positioning).
+    pub last_click_position: Vector2,
 }
 
 impl Default for App {
@@ -115,10 +140,15 @@ impl Default for App {
             url_change_queue: None,
             title_change_queue: None,
             loading_state_queue: None,
+            ime_enable_queue: None,
+            ime_composition_range: None,
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
             last_cursor: CursorType::Arrow,
             last_max_fps: 0,
+            ime_active: false,
+            last_ime_text: String::new(),
+            last_click_position: Vector2::ZERO,
         }
     }
 }

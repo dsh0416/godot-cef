@@ -465,9 +465,43 @@ func _on_load_error(url: String, error_code: int, error_text: String):
     # Show error page or retry
 ```
 
-### IME Methods
+### IME Support
 
-For input method editor (IME) support in text fields:
+CefTexture provides automatic Input Method Editor (IME) support for text input in web content. When you click on an input field in the browser, the system IME is automatically activated, allowing you to input text in languages like Chinese, Japanese, Korean, etc.
+
+**How it works:**
+- When an input field gains focus in CEF, Godot's native IME is automatically activated
+- The IME candidate window is positioned near the text cursor in the browser
+- Composition text is forwarded to CEF in real-time
+- When the input field loses focus, IME is automatically deactivated
+
+This works out of the box with no additional configuration required.
+
+#### IME Signals (Advanced)
+
+For advanced use cases, you can listen to these signals:
+
+##### `virtual_keyboard_requested(input_mode: int)`
+
+Emitted when an input field gains or loses focus in the browser.
+
+| input_mode | Description |
+|------------|-------------|
+| 0 | DEFAULT |
+| 1 | NONE (input field blurred) |
+| 2 | TEXT (general text input) |
+| 3 | TEL (telephone number) |
+| 4 | URL (URL input) |
+| 5 | EMAIL (email input) |
+| 6 | NUMERIC (numeric input) |
+
+##### `ime_caret_position_changed(x: int, y: int, height: int)`
+
+Emitted when the IME caret position changes during text composition. Coordinates are in view (pixel) space.
+
+#### IME Methods (Advanced)
+
+For custom IME handling, you can use these methods directly:
 
 ```gdscript
 cef_texture.ime_commit_text("文字")        # Commit composed text
@@ -482,7 +516,7 @@ cef_texture.ime_finish_composing_text(false) # Finish composing
 - [x] CI/CD Configuration
 - [x] Custom Scheme Support (`res://` protocol)
 - [x] IPC Support
-- [ ] Better IME Support
+- [x] Better IME Support
 - [ ] Gamepad Support
 - [x] Access to Godot Filesystem
 
