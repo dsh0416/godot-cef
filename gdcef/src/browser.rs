@@ -53,7 +53,7 @@ pub struct ImeCompositionRange {
 
 pub type ImeEnableQueue = Arc<Mutex<VecDeque<bool>>>;
 /// Shared state for IME composition range.
-pub type ImeCompositionQueue = Arc<Mutex<Option<ImeCompositionRange>>>
+pub type ImeCompositionQueue = Arc<Mutex<Option<ImeCompositionRange>>>;
 
 /// Rendering mode for the CEF browser.
 ///
