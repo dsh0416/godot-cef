@@ -100,6 +100,8 @@ impl CefTexture {
     #[func]
     fn on_ready(&mut self) {
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
+        // Must explicitly enable processing when using on_notification instead of fn process()
+        self.base_mut().set_process(true);
 
         cef_init::cef_retain();
 
