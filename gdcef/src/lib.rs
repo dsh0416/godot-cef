@@ -835,9 +835,6 @@ impl CefTexture {
         };
 
         if let Ok(mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
-            if mouse_button.is_pressed() {
-                self.app.last_click_position = mouse_button.get_position();
-            }
             input::handle_mouse_button(
                 &host,
                 &mouse_button,

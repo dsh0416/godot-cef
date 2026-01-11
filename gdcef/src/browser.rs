@@ -124,8 +124,6 @@ pub struct App {
     pub ime_active: bool,
     /// Last IME composition text (to detect commits vs updates).
     pub last_ime_text: String,
-    /// Last mouse click position in local coordinates (for initial IME positioning).
-    pub last_click_position: Vector2,
 }
 
 impl Default for App {
@@ -148,7 +146,6 @@ impl Default for App {
             last_max_fps: 0,
             ime_active: false,
             last_ime_text: String::new(),
-            last_click_position: Vector2::ZERO,
         }
     }
 }
