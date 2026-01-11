@@ -85,12 +85,6 @@ impl ITextureRect for CefTexture {
                 self.on_focus_exit();
             }
             ControlNotification::OS_IME_UPDATE => {
-                // #region agent log
-                use std::io::Write;
-                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/Users/deltonding/Projects/git.workspace.yetanother.ai/cef-godot/.cursor/debug.log") {
-                    let _ = writeln!(f, r#"{{"hypothesisId":"D","location":"lib.rs:on_notification","message":"OS_IME_UPDATE notification received","data":{{}},"sessionId":"debug-session"}}"#);
-                }
-                // #endregion
                 self.handle_ime_update();
             }
             _ => {}
@@ -801,12 +795,9 @@ impl CefTexture {
         };
 
         for req in &requests {
-            godot::global::godot_print!("process_ime_enable_queue: request: {}", *req);
             if *req {
-                // IME enabled - activate IME
                 self.activate_ime();
-            } else if !*req {
-                // IME disabled - deactivate IME
+            } else {
                 self.deactivate_ime();
             }
         }
@@ -824,11 +815,10 @@ impl CefTexture {
             q.take()
         };
 
-        if let Some(range) = range {
-            // Update Godot's IME position if IME is active
-            if self.app.ime_active {
-                self.update_ime_position(range.caret_x, range.caret_y, range.caret_height);
-            }
+        if let Some(range) = range
+            && self.app.ime_active
+        {
+            self.update_ime_position(range.caret_x, range.caret_y, range.caret_height);
         }
     }
 
@@ -841,7 +831,6 @@ impl CefTexture {
         };
 
         if let Ok(mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
-            // Track last click position for initial IME positioning
             if mouse_button.is_pressed() {
                 self.app.last_click_position = mouse_button.get_position();
             }
@@ -868,50 +857,6 @@ impl CefTexture {
         } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
             input::handle_key_event(&host, &key_event, self.app.ime_active);
         }
-    }
-
-    #[func]
-    pub fn ime_commit_text(&mut self, text: GString) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-        input::ime_commit_text(&host, &text.to_string());
-    }
-
-    #[func]
-    pub fn ime_set_composition(&mut self, text: GString) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-        input::ime_set_composition(&host, &text.to_string());
-    }
-
-    #[func]
-    pub fn ime_cancel_composition(&mut self) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-        input::ime_cancel_composition(&host);
-    }
-
-    #[func]
-    pub fn ime_finish_composing_text(&mut self, keep_selection: bool) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-        input::ime_finish_composing_text(&host, keep_selection);
     }
 
     #[func]
@@ -1132,8 +1077,11 @@ impl CefTexture {
     }
 
     /// Updates the IME candidate window position.
-    fn update_ime_position(&self, _caret_x: i32, _caret_y: i32, _caret_height: i32) {
-        // DisplayServer::singleton().window_set_ime_position_ex(ime_pos).done();
+    fn update_ime_position(&self, caret_x: i32, caret_y: i32, caret_height: i32) {
+        DisplayServer::singleton().window_set_ime_position(Vector2i {
+            x: caret_x,
+            y: caret_y + caret_height,
+        });
     }
 
     /// Handles IME composition updates from the OS.

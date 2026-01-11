@@ -132,6 +132,7 @@ wrap_app! {
             command_line.append_switch(Some(&"transparent-painting-enabled".into()));
             command_line.append_switch(Some(&"enable-zero-copy".into()));
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
+            command_line.append_switch(Some(&"use-views".into()));
 
             // Only enable remote debugging in debug builds or when running from the editor
             // for security purposes. In production builds, this should be disabled.

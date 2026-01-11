@@ -386,19 +386,7 @@ pub fn ime_set_composition_with_cursor(host: &impl ImplBrowserHost, text: &str, 
     );
 }
 
-/// Sets the current IME composition text (legacy, cursor at end)
-/// Call this during IME composition (before finalizing)
-pub fn ime_set_composition(host: &impl ImplBrowserHost, text: &str) {
-    let text_len = text.chars().count() as u32;
-    ime_set_composition_with_cursor(host, text, text_len);
-}
-
 /// Cancels the current IME composition
 pub fn ime_cancel_composition(host: &impl ImplBrowserHost) {
     host.ime_cancel_composition();
-}
-
-/// Finishes the current IME composition, committing the text
-pub fn ime_finish_composing_text(host: &impl ImplBrowserHost, keep_selection: bool) {
-    host.ime_finish_composing_text(keep_selection as i32);
 }

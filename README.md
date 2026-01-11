@@ -477,39 +477,6 @@ CefTexture provides automatic Input Method Editor (IME) support for text input i
 
 This works out of the box with no additional configuration required.
 
-#### IME Signals (Advanced)
-
-For advanced use cases, you can listen to these signals:
-
-##### `virtual_keyboard_requested(input_mode: int)`
-
-Emitted when an input field gains or loses focus in the browser.
-
-| input_mode | Description |
-|------------|-------------|
-| 0 | DEFAULT |
-| 1 | NONE (input field blurred) |
-| 2 | TEXT (general text input) |
-| 3 | TEL (telephone number) |
-| 4 | URL (URL input) |
-| 5 | EMAIL (email input) |
-| 6 | NUMERIC (numeric input) |
-
-##### `ime_caret_position_changed(x: int, y: int, height: int)`
-
-Emitted when the IME caret position changes during text composition. Coordinates are in view (pixel) space.
-
-#### IME Methods (Advanced)
-
-For custom IME handling, you can use these methods directly:
-
-```gdscript
-cef_texture.ime_commit_text("文字")        # Commit composed text
-cef_texture.ime_set_composition("入力中")   # Set composition string
-cef_texture.ime_cancel_composition()        # Cancel composition
-cef_texture.ime_finish_composing_text(false) # Finish composing
-```
-
 ## 🛣️ Roadmap
 
 - [x] Automatic Building Support
