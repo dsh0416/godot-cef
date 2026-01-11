@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use cef::{CefString, ImplCommandLine, api_hash, args::Args, execute_process};
 
 mod utils;
