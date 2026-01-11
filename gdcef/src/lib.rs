@@ -795,7 +795,7 @@ impl CefTexture {
             let Ok(mut q) = queue.lock() else {
                 return;
             };
-            q.drain(..).last()
+            q.drain(..).next_back()
         };
 
         if let Some(enable) = final_req {
@@ -1079,12 +1079,11 @@ impl CefTexture {
 
     /// Updates the IME candidate window position.
     fn update_ime_position(&self, caret_x: i32, caret_y: i32, caret_height: i32) {
-        let ds = DisplayServer::singleton();
+        let mut ds = DisplayServer::singleton();
 
         // Convert caret position from view coordinates to screen coordinates.
         // 1. Apply screen scale so logical/view coordinates become physical pixels.
-        let current_screen = ds.window_get_current_screen();
-        let screen_scale = ds.screen_get_scale(current_screen);
+        let screen_scale = ds.screen_get_scale();
 
         let scaled_x = (caret_x as f32 * screen_scale) as i32;
         let scaled_y = ((caret_y + caret_height) as f32 * screen_scale) as i32;
