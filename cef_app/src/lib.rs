@@ -132,6 +132,7 @@ wrap_app! {
             command_line.append_switch(Some(&"transparent-painting-enabled".into()));
             command_line.append_switch(Some(&"enable-zero-copy".into()));
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
+            command_line.append_switch(Some(&"use-views".into()));
 
             // Only enable remote debugging in debug builds or when running from the editor
             // for security purposes. In production builds, this should be disabled.
@@ -309,6 +310,38 @@ wrap_render_process_handler! {
                         let mut func = v8_value_create_function(Some(&"sendIpcMessage".into()), Some(&mut handler)).unwrap();
                         global.set_value_bykey(Some(&key), Some(&mut func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
                     }
+            }
+        }
+
+        fn on_focused_node_changed(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, node: Option<&mut Domnode>) {
+            if let Some(node) = node
+                && node.is_editable() == 1 {
+                    // send to the browser process to activate IME
+                    let route = CefStringUtf16::from("triggerIme");
+                    let process_message = process_message_create(Some(&route));
+                    if let Some(mut process_message) = process_message {
+                        if let Some(argument_list) = process_message.argument_list() {
+                            argument_list.set_bool(0, true as _);
+                        }
+
+                        if let Some(frame) = frame {
+                            frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+                            return;
+                        }
+                    }
+                }
+
+            // send to the browser process to deactivate IME
+            let route = CefStringUtf16::from("triggerIme");
+            let process_message = process_message_create(Some(&route));
+            if let Some(mut process_message) = process_message {
+                if let Some(argument_list) = process_message.argument_list() {
+                    argument_list.set_bool(0, false as _);
+                }
+
+                if let Some(frame) = frame {
+                    frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+                }
             }
         }
     }

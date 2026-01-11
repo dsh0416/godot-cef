@@ -31,8 +31,8 @@ use crate::accelerated_osr::{
     GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler, TextureImporterTrait,
 };
 use crate::browser::{
-    App, LoadingStateEvent, LoadingStateQueue, MessageQueue, RenderMode, TitleChangeQueue,
-    UrlChangeQueue,
+    App, ImeCompositionQueue, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue,
+    RenderMode, TitleChangeQueue, UrlChangeQueue,
 };
 
 pub use texture::TextureRectRd;
@@ -84,6 +84,9 @@ impl ITextureRect for CefTexture {
             ControlNotification::FOCUS_EXIT => {
                 self.on_focus_exit();
             }
+            ControlNotification::OS_IME_UPDATE => {
+                self.handle_ime_update();
+            }
             _ => {}
         }
     }
@@ -115,9 +118,12 @@ impl CefTexture {
 
     #[func]
     fn on_ready(&mut self) {
+        use godot::classes::control::FocusMode;
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
         // Must explicitly enable processing when using on_notification instead of fn process()
         self.base_mut().set_process(true);
+        // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF
+        self.base_mut().set_focus_mode(FocusMode::CLICK);
 
         cef_init::cef_retain();
 
@@ -138,6 +144,8 @@ impl CefTexture {
         self.process_url_change_queue();
         self.process_title_change_queue();
         self.process_loading_state_queue();
+        self.process_ime_enable_queue();
+        self.process_ime_composition_queue();
     }
 
     fn cleanup_instance(&mut self) {
@@ -177,6 +185,11 @@ impl CefTexture {
         self.app.url_change_queue = None;
         self.app.title_change_queue = None;
         self.app.loading_state_queue = None;
+        self.app.ime_enable_queue = None;
+        self.app.ime_composition_range = None;
+
+        // Deactivate IME on cleanup
+        self.deactivate_ime();
 
         cef_init::cef_release();
     }
@@ -284,6 +297,8 @@ impl CefTexture {
         let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
         let title_change_queue: TitleChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
         let loading_state_queue: LoadingStateQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let ime_enable_queue: ImeEnableQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
 
         let texture = ImageTexture::new_gd();
         self.base_mut().set_texture(&texture);
@@ -299,6 +314,8 @@ impl CefTexture {
         self.app.url_change_queue = Some(url_change_queue.clone());
         self.app.title_change_queue = Some(title_change_queue.clone());
         self.app.loading_state_queue = Some(loading_state_queue.clone());
+        self.app.ime_enable_queue = Some(ime_enable_queue.clone());
+        self.app.ime_composition_range = Some(ime_composition_queue.clone());
 
         let mut client = webrender::SoftwareClientImpl::build(
             render_handler,
@@ -306,6 +323,8 @@ impl CefTexture {
             url_change_queue,
             title_change_queue,
             loading_state_queue,
+            ime_enable_queue,
+            ime_composition_queue,
         );
 
         cef::browser_host_create_browser_sync(
@@ -358,6 +377,8 @@ impl CefTexture {
         let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
         let title_change_queue: TitleChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
         let loading_state_queue: LoadingStateQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let ime_enable_queue: ImeEnableQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
 
         let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height);
         self.base_mut().set_texture(&texture_2d_rd);
@@ -377,6 +398,8 @@ impl CefTexture {
         self.app.url_change_queue = Some(url_change_queue.clone());
         self.app.title_change_queue = Some(title_change_queue.clone());
         self.app.loading_state_queue = Some(loading_state_queue.clone());
+        self.app.ime_enable_queue = Some(ime_enable_queue.clone());
+        self.app.ime_composition_range = Some(ime_composition_queue.clone());
 
         let mut client = webrender::AcceleratedClientImpl::build(
             render_handler,
@@ -385,6 +408,8 @@ impl CefTexture {
             url_change_queue,
             title_change_queue,
             loading_state_queue,
+            ime_enable_queue,
+            ime_composition_queue,
         );
 
         cef::browser_host_create_browser_sync(
@@ -757,6 +782,46 @@ impl CefTexture {
         }
     }
 
+    fn process_ime_enable_queue(&mut self) {
+        let Some(queue) = &self.app.ime_enable_queue else {
+            return;
+        };
+
+        let requests: Vec<bool> = {
+            let Ok(mut q) = queue.lock() else {
+                return;
+            };
+            q.drain(..).collect()
+        };
+
+        for req in &requests {
+            if *req {
+                self.activate_ime();
+            } else {
+                self.deactivate_ime();
+            }
+        }
+    }
+
+    fn process_ime_composition_queue(&mut self) {
+        let Some(queue) = &self.app.ime_composition_range else {
+            return;
+        };
+
+        let range = {
+            let Ok(mut q) = queue.lock() else {
+                return;
+            };
+            q.take()
+        };
+
+        if let Some(range) = range
+            && self.app.ime_active
+        {
+            self.update_ime_position(range.caret_x, range.caret_y, range.caret_height);
+        }
+    }
+
     fn handle_input_event(&mut self, event: Gd<InputEvent>) {
         let Some(browser) = self.app.browser.as_mut() else {
             return;
@@ -766,6 +831,9 @@ impl CefTexture {
         };
 
         if let Ok(mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
+            if mouse_button.is_pressed() {
+                self.app.last_click_position = mouse_button.get_position();
+            }
             input::handle_mouse_button(
                 &host,
                 &mouse_button,
@@ -787,52 +855,8 @@ impl CefTexture {
                 self.get_device_scale_factor(),
             );
         } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
-            input::handle_key_event(&host, &key_event);
+            input::handle_key_event(&host, &key_event, self.app.ime_active);
         }
-    }
-
-    #[func]
-    pub fn ime_commit_text(&mut self, text: GString) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-        input::ime_commit_text(&host, &text.to_string());
-    }
-
-    #[func]
-    pub fn ime_set_composition(&mut self, text: GString) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-        input::ime_set_composition(&host, &text.to_string());
-    }
-
-    #[func]
-    pub fn ime_cancel_composition(&mut self) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-        input::ime_cancel_composition(&host);
-    }
-
-    #[func]
-    pub fn ime_finish_composing_text(&mut self, keep_selection: bool) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-        input::ime_finish_composing_text(&host, keep_selection);
     }
 
     #[func]
@@ -1029,5 +1053,69 @@ impl CefTexture {
             return;
         };
         host.set_focus(false as _);
+    }
+
+    /// Activates Godot's IME for text input.
+    fn activate_ime(&mut self) {
+        if self.app.ime_active {
+            return;
+        }
+        DisplayServer::singleton().window_set_ime_active(true);
+        self.app.ime_active = true;
+        self.app.last_ime_text.clear();
+    }
+
+    /// Deactivates Godot's IME.
+    fn deactivate_ime(&mut self) {
+        if !self.app.ime_active {
+            return;
+        }
+
+        DisplayServer::singleton().window_set_ime_active(false);
+        self.app.ime_active = false;
+        self.app.last_ime_text.clear();
+    }
+
+    /// Updates the IME candidate window position.
+    fn update_ime_position(&self, caret_x: i32, caret_y: i32, caret_height: i32) {
+        DisplayServer::singleton().window_set_ime_position(Vector2i {
+            x: caret_x,
+            y: caret_y + caret_height,
+        });
+    }
+
+    /// Handles IME composition updates from the OS.
+    fn handle_ime_update(&mut self) {
+        if !self.app.ime_active {
+            return;
+        }
+
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+
+        let ds = DisplayServer::singleton();
+        let ime_text = ds.ime_get_text().to_string();
+        let ime_selection = ds.ime_get_selection();
+        // ime_selection is Vector2i where x=start, y=end of selection
+        // We use x (start) as the cursor position
+        let cursor_pos = ime_selection.x.max(0) as u32;
+
+        if ime_text.is_empty() {
+            // IME was committed or cancelled
+            if !self.app.last_ime_text.is_empty() {
+                // The last composition text was committed
+                input::ime_commit_text(&host, &self.app.last_ime_text);
+            }
+            input::ime_cancel_composition(&host);
+        } else {
+            // Update composition with cursor position
+            input::ime_set_composition_with_cursor(&host, &ime_text, cursor_pos);
+        }
+
+        self.app.last_ime_text = ime_text;
     }
 }
