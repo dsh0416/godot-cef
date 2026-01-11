@@ -5,7 +5,9 @@ use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
-use crate::browser::{MessageQueue, UrlChangeQueue};
+use crate::browser::{
+    LoadingStateEvent, LoadingStateQueue, MessageQueue, TitleChangeQueue, UrlChangeQueue,
+};
 use crate::utils::get_display_scale_factor;
 
 /// Swizzle indices for BGRA -> RGBA conversion.
@@ -229,6 +231,7 @@ wrap_display_handler! {
     pub(crate) struct DisplayHandlerImpl {
         cursor_type: Arc<Mutex<CursorType>>,
         url_change_queue: UrlChangeQueue,
+        title_change_queue: TitleChangeQueue,
     }
 
     impl DisplayHandler {
@@ -278,6 +281,19 @@ wrap_display_handler! {
                 }
             }
         }
+
+        fn on_title_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            title: Option<&CefString>,
+        ) {
+            if let Some(title) = title {
+                let title_str = title.to_string();
+                if let Ok(mut queue) = self.title_change_queue.lock() {
+                    queue.push_back(title_str);
+                }
+            }
+        }
     }
 }
 
@@ -285,8 +301,9 @@ impl DisplayHandlerImpl {
     pub fn build(
         cursor_type: Arc<Mutex<CursorType>>,
         url_change_queue: UrlChangeQueue,
+        title_change_queue: TitleChangeQueue,
     ) -> cef::DisplayHandler {
-        Self::new(cursor_type, url_change_queue)
+        Self::new(cursor_type, url_change_queue, title_change_queue)
     }
 }
 
@@ -346,6 +363,85 @@ impl LifeSpanHandlerImpl {
     }
 }
 
+wrap_load_handler! {
+    pub(crate) struct LoadHandlerImpl {
+        loading_state_queue: LoadingStateQueue,
+    }
+
+    impl LoadHandler {
+        fn on_load_start(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _transition_type: TransitionType,
+        ) {
+            if let Some(frame) = frame
+                && frame.is_main() != 0
+            {
+                let url = CefStringUtf16::from(&frame.url()).to_string();
+                if let Ok(mut queue) = self.loading_state_queue.lock() {
+                    queue.push_back(LoadingStateEvent::Started { url });
+                }
+            }
+        }
+
+        fn on_load_end(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            http_status_code: ::std::os::raw::c_int,
+        ) {
+            if let Some(frame) = frame
+                && frame.is_main() != 0
+            {
+                let url = CefStringUtf16::from(&frame.url()).to_string();
+                if let Ok(mut queue) = self.loading_state_queue.lock() {
+                    queue.push_back(LoadingStateEvent::Finished {
+                        url,
+                        http_status_code,
+                    });
+                }
+            }
+        }
+
+        fn on_load_error(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            error_code: Errorcode,
+            error_string: Option<&CefString>,
+            failed_url: Option<&CefString>,
+        ) {
+            if let Some(frame) = frame
+                && frame.is_main() != 0
+            {
+                let url = failed_url
+                    .map(|u| u.to_string())
+                    .unwrap_or_default();
+                let error_text = error_string
+                    .map(|e| e.to_string())
+                    .unwrap_or_default();
+                // Use unsafe to access the raw error code value since the struct field is private
+                // Errorcode is a repr(transparent) wrapper around cef_errorcode_t
+                let error_code_i32: i32 = unsafe { std::mem::transmute(error_code) };
+                if let Ok(mut queue) = self.loading_state_queue.lock() {
+                    queue.push_back(LoadingStateEvent::Error {
+                        url,
+                        error_code: error_code_i32,
+                        error_text,
+                    });
+                }
+            }
+        }
+    }
+}
+
+impl LoadHandlerImpl {
+    pub fn build(loading_state_queue: LoadingStateQueue) -> cef::LoadHandler {
+        Self::new(loading_state_queue)
+    }
+}
+
 fn on_process_message_received(
     _browser: Option<&mut cef::Browser>,
     _frame: Option<&mut cef::Frame>,
@@ -377,6 +473,7 @@ wrap_client! {
         display_handler: cef::DisplayHandler,
         context_menu_handler: cef::ContextMenuHandler,
         life_span_handler: cef::LifeSpanHandler,
+        load_handler: cef::LoadHandler,
         message_queue: MessageQueue,
     }
 
@@ -395,6 +492,10 @@ wrap_client! {
 
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
             Some(self.life_span_handler.clone())
+        }
+
+        fn load_handler(&self) -> Option<cef::LoadHandler> {
+            Some(self.load_handler.clone())
         }
 
         fn on_process_message_received(
@@ -414,13 +515,16 @@ impl SoftwareClientImpl {
         render_handler: cef_app::OsrRenderHandler,
         message_queue: MessageQueue,
         url_change_queue: UrlChangeQueue,
+        title_change_queue: TitleChangeQueue,
+        loading_state_queue: LoadingStateQueue,
     ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
         Self::new(
             SoftwareOsrHandler::build(render_handler),
-            DisplayHandlerImpl::build(cursor_type, url_change_queue),
+            DisplayHandlerImpl::build(cursor_type, url_change_queue, title_change_queue),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
+            LoadHandlerImpl::build(loading_state_queue),
             message_queue,
         )
     }
@@ -432,6 +536,7 @@ wrap_client! {
         display_handler: cef::DisplayHandler,
         context_menu_handler: cef::ContextMenuHandler,
         life_span_handler: cef::LifeSpanHandler,
+        load_handler: cef::LoadHandler,
         message_queue: MessageQueue,
     }
 
@@ -450,6 +555,10 @@ wrap_client! {
 
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
             Some(self.life_span_handler.clone())
+        }
+
+        fn load_handler(&self) -> Option<cef::LoadHandler> {
+            Some(self.load_handler.clone())
         }
 
         fn on_process_message_received(
@@ -470,12 +579,15 @@ impl AcceleratedClientImpl {
         cursor_type: Arc<Mutex<CursorType>>,
         message_queue: MessageQueue,
         url_change_queue: UrlChangeQueue,
+        title_change_queue: TitleChangeQueue,
+        loading_state_queue: LoadingStateQueue,
     ) -> cef::Client {
         Self::new(
             AcceleratedOsrHandler::build(render_handler),
-            DisplayHandlerImpl::build(cursor_type, url_change_queue),
+            DisplayHandlerImpl::build(cursor_type, url_change_queue, title_change_queue),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
+            LoadHandlerImpl::build(loading_state_queue),
             message_queue,
         )
     }

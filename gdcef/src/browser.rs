@@ -19,6 +19,27 @@ pub type MessageQueue = Arc<Mutex<VecDeque<String>>>;
 /// Queue for URL change notifications from the browser to Godot.
 pub type UrlChangeQueue = Arc<Mutex<VecDeque<String>>>;
 
+/// Queue for title change notifications from the browser to Godot.
+pub type TitleChangeQueue = Arc<Mutex<VecDeque<String>>>;
+
+/// Represents a loading state event from the browser.
+#[derive(Debug, Clone)]
+pub enum LoadingStateEvent {
+    /// Page started loading.
+    Started { url: String },
+    /// Page finished loading.
+    Finished { url: String, http_status_code: i32 },
+    /// Page load error.
+    Error {
+        url: String,
+        error_code: i32,
+        error_text: String,
+    },
+}
+
+/// Queue for loading state events from the browser to Godot.
+pub type LoadingStateQueue = Arc<Mutex<VecDeque<LoadingStateEvent>>>;
+
 /// Rendering mode for the CEF browser.
 ///
 /// Determines whether the browser uses software (CPU) rendering or
@@ -68,6 +89,10 @@ pub struct App {
     pub message_queue: Option<MessageQueue>,
     /// Queue for URL change notifications from the browser.
     pub url_change_queue: Option<UrlChangeQueue>,
+    /// Queue for title change notifications from the browser.
+    pub title_change_queue: Option<TitleChangeQueue>,
+    /// Queue for loading state events from the browser.
+    pub loading_state_queue: Option<LoadingStateQueue>,
     /// Last known logical size for change detection.
     pub last_size: Vector2,
     /// Last known DPI for change detection.
@@ -88,6 +113,8 @@ impl Default for App {
             cursor_type: None,
             message_queue: None,
             url_change_queue: None,
+            title_change_queue: None,
+            loading_state_queue: None,
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
             last_cursor: CursorType::Arrow,

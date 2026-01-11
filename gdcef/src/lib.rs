@@ -30,7 +30,10 @@ use winit::dpi::PhysicalSize;
 use crate::accelerated_osr::{
     GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler, TextureImporterTrait,
 };
-use crate::browser::{App, MessageQueue, RenderMode, UrlChangeQueue};
+use crate::browser::{
+    App, LoadingStateEvent, LoadingStateQueue, MessageQueue, RenderMode, TitleChangeQueue,
+    UrlChangeQueue,
+};
 
 pub use texture::TextureRectRd;
 
@@ -46,6 +49,7 @@ struct CefTexture {
     app: App,
 
     #[export]
+    #[var(get = get_url_property, set = set_url_property)]
     url: GString,
 
     #[export]
@@ -97,6 +101,18 @@ impl CefTexture {
     #[signal]
     fn url_changed(url: GString);
 
+    #[signal]
+    fn title_changed(title: GString);
+
+    #[signal]
+    fn load_started(url: GString);
+
+    #[signal]
+    fn load_finished(url: GString, http_status_code: i32);
+
+    #[signal]
+    fn load_error(url: GString, error_code: i32, error_text: GString);
+
     #[func]
     fn on_ready(&mut self) {
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
@@ -120,6 +136,8 @@ impl CefTexture {
         self.update_cursor();
         self.process_message_queue();
         self.process_url_change_queue();
+        self.process_title_change_queue();
+        self.process_loading_state_queue();
     }
 
     fn cleanup_instance(&mut self) {
@@ -157,6 +175,8 @@ impl CefTexture {
         self.app.cursor_type = None;
         self.app.message_queue = None;
         self.app.url_change_queue = None;
+        self.app.title_change_queue = None;
+        self.app.loading_state_queue = None;
 
         cef_init::cef_release();
     }
@@ -262,6 +282,8 @@ impl CefTexture {
         let cursor_type = render_handler.get_cursor_type();
         let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
         let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let title_change_queue: TitleChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let loading_state_queue: LoadingStateQueue = Arc::new(Mutex::new(VecDeque::new()));
 
         let texture = ImageTexture::new_gd();
         self.base_mut().set_texture(&texture);
@@ -275,9 +297,16 @@ impl CefTexture {
         self.app.cursor_type = Some(cursor_type);
         self.app.message_queue = Some(message_queue.clone());
         self.app.url_change_queue = Some(url_change_queue.clone());
+        self.app.title_change_queue = Some(title_change_queue.clone());
+        self.app.loading_state_queue = Some(loading_state_queue.clone());
 
-        let mut client =
-            webrender::SoftwareClientImpl::build(render_handler, message_queue, url_change_queue);
+        let mut client = webrender::SoftwareClientImpl::build(
+            render_handler,
+            message_queue,
+            url_change_queue,
+            title_change_queue,
+            loading_state_queue,
+        );
 
         cef::browser_host_create_browser_sync(
             Some(&window_info),
@@ -327,6 +356,8 @@ impl CefTexture {
         let cursor_type = render_handler.get_cursor_type();
         let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
         let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let title_change_queue: TitleChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let loading_state_queue: LoadingStateQueue = Arc::new(Mutex::new(VecDeque::new()));
 
         let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height);
         self.base_mut().set_texture(&texture_2d_rd);
@@ -344,12 +375,16 @@ impl CefTexture {
         self.app.cursor_type = Some(cursor_type);
         self.app.message_queue = Some(message_queue.clone());
         self.app.url_change_queue = Some(url_change_queue.clone());
+        self.app.title_change_queue = Some(title_change_queue.clone());
+        self.app.loading_state_queue = Some(loading_state_queue.clone());
 
         let mut client = webrender::AcceleratedClientImpl::build(
             render_handler,
             self.app.cursor_type.clone().unwrap(),
             message_queue,
             url_change_queue,
+            title_change_queue,
+            loading_state_queue,
         );
 
         cef::browser_host_create_browser_sync(
@@ -656,6 +691,72 @@ impl CefTexture {
         }
     }
 
+    fn process_title_change_queue(&mut self) {
+        let Some(queue) = &self.app.title_change_queue else {
+            return;
+        };
+
+        let titles: Vec<String> = {
+            let Ok(mut q) = queue.lock() else {
+                return;
+            };
+            q.drain(..).collect()
+        };
+
+        for title in titles {
+            self.base_mut()
+                .emit_signal("title_changed", &[GString::from(&title).to_variant()]);
+        }
+    }
+
+    fn process_loading_state_queue(&mut self) {
+        let Some(queue) = &self.app.loading_state_queue else {
+            return;
+        };
+
+        let events: Vec<LoadingStateEvent> = {
+            let Ok(mut q) = queue.lock() else {
+                return;
+            };
+            q.drain(..).collect()
+        };
+
+        for event in events {
+            match event {
+                LoadingStateEvent::Started { url } => {
+                    self.base_mut()
+                        .emit_signal("load_started", &[GString::from(&url).to_variant()]);
+                }
+                LoadingStateEvent::Finished {
+                    url,
+                    http_status_code,
+                } => {
+                    self.base_mut().emit_signal(
+                        "load_finished",
+                        &[
+                            GString::from(&url).to_variant(),
+                            http_status_code.to_variant(),
+                        ],
+                    );
+                }
+                LoadingStateEvent::Error {
+                    url,
+                    error_code,
+                    error_text,
+                } => {
+                    self.base_mut().emit_signal(
+                        "load_error",
+                        &[
+                            GString::from(&url).to_variant(),
+                            error_code.to_variant(),
+                            GString::from(&error_text).to_variant(),
+                        ],
+                    );
+                }
+            }
+        }
+    }
+
     fn handle_input_event(&mut self, event: Gd<InputEvent>) {
         let Some(browser) = self.app.browser.as_mut() else {
             return;
@@ -750,18 +851,15 @@ impl CefTexture {
     }
 
     #[func]
-    pub fn load_url(&mut self, url: GString) {
-        let Some(browser) = self.app.browser.as_ref() else {
-            godot::global::godot_warn!("[CefTexture] Cannot load URL: no browser");
-            return;
-        };
-        let Some(frame) = browser.main_frame() else {
-            godot::global::godot_warn!("[CefTexture] Cannot load URL: no main frame");
-            return;
-        };
+    fn set_url_property(&mut self, url: GString) {
+        self.url = url.clone();
 
-        let url_str: cef::CefStringUtf16 = url.to_string().as_str().into();
-        frame.load_url(Some(&url_str));
+        if let Some(browser) = self.app.browser.as_ref()
+            && let Some(frame) = browser.main_frame()
+        {
+            let url_str: cef::CefStringUtf16 = url.to_string().as_str().into();
+            frame.load_url(Some(&url_str));
+        }
     }
 
     #[func]
@@ -799,6 +897,118 @@ impl CefTexture {
         );
         let js_code_str: cef::CefStringUtf16 = js_code.as_str().into();
         frame.execute_java_script(Some(&js_code_str), None, 0);
+    }
+
+    #[func]
+    pub fn go_back(&mut self) {
+        if let Some(browser) = self.app.browser.as_mut() {
+            browser.go_back();
+        }
+    }
+
+    #[func]
+    pub fn go_forward(&mut self) {
+        if let Some(browser) = self.app.browser.as_mut() {
+            browser.go_forward();
+        }
+    }
+
+    #[func]
+    pub fn can_go_back(&self) -> bool {
+        self.app
+            .browser
+            .as_ref()
+            .map(|b| b.can_go_back() != 0)
+            .unwrap_or(false)
+    }
+
+    #[func]
+    pub fn can_go_forward(&self) -> bool {
+        self.app
+            .browser
+            .as_ref()
+            .map(|b| b.can_go_forward() != 0)
+            .unwrap_or(false)
+    }
+
+    #[func]
+    pub fn reload(&mut self) {
+        if let Some(browser) = self.app.browser.as_mut() {
+            browser.reload();
+        }
+    }
+
+    #[func]
+    pub fn reload_ignore_cache(&mut self) {
+        if let Some(browser) = self.app.browser.as_mut() {
+            browser.reload_ignore_cache();
+        }
+    }
+
+    #[func]
+    pub fn stop_loading(&mut self) {
+        if let Some(browser) = self.app.browser.as_mut() {
+            browser.stop_load();
+        }
+    }
+
+    #[func]
+    pub fn is_loading(&self) -> bool {
+        self.app
+            .browser
+            .as_ref()
+            .map(|b| b.is_loading() != 0)
+            .unwrap_or(false)
+    }
+
+    #[func]
+    fn get_url_property(&self) -> GString {
+        if let Some(browser) = self.app.browser.as_ref()
+            && let Some(frame) = browser.main_frame()
+        {
+            let frame_url = frame.url();
+            let url_string = cef::CefStringUtf16::from(&frame_url).to_string();
+            return GString::from(url_string.as_str());
+        }
+        self.url.clone()
+    }
+
+    #[func]
+    pub fn set_zoom_level(&mut self, level: f64) {
+        if let Some(browser) = self.app.browser.as_mut()
+            && let Some(host) = browser.host()
+        {
+            host.set_zoom_level(level);
+        }
+    }
+
+    #[func]
+    pub fn get_zoom_level(&self) -> f64 {
+        self.app
+            .browser
+            .as_ref()
+            .and_then(|b| b.host())
+            .map(|h| h.zoom_level())
+            .unwrap_or(0.0)
+    }
+
+    #[func]
+    pub fn set_audio_muted(&mut self, muted: bool) {
+        if let Some(browser) = self.app.browser.as_mut()
+            && let Some(host) = browser.host()
+        {
+            host.set_audio_muted(muted as i32);
+        }
+    }
+
+    #[func]
+    pub fn is_audio_muted(&self) -> bool {
+        self.app
+            .browser
+            .as_ref()
+            .and_then(|b| b.host())
+            .map(|h| h.is_audio_muted() != 0)
+            .unwrap_or(false)
     }
 
     fn on_focus_enter(&mut self) {

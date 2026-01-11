@@ -201,24 +201,93 @@ func _ready():
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `url` | `String` | `"https://google.com"` | The initial URL to load |
+| `url` | `String` | `"https://google.com"` | The URL to display. Setting this property navigates the browser to the new URL. Reading it returns the current URL from the browser. |
 | `enable_accelerated_osr` | `bool` | `true` | Enable GPU-accelerated rendering |
+
+The `url` property is reactive: when you set it from GDScript, the browser automatically navigates to the new URL:
+
+```gdscript
+# Navigate to a new page by setting the property
+cef_texture.url = "https://example.com/game-ui"
+
+# Read the current URL (reflects user navigation, redirects, etc.)
+print("Currently at: ", cef_texture.url)
+```
 
 ### Methods
 
-#### `load_url(url: String)`
+#### Navigation
 
-Loads a new URL in the browser at runtime. Use this to navigate to different pages during gameplay.
+##### `go_back()`
+
+Navigates back in the browser history.
 
 ```gdscript
-# Navigate to a different page
-cef_texture.load_url("https://example.com/game-ui")
-
-# Load a local file
-cef_texture.load_url("file:///path/to/local.html")
+cef_texture.go_back()
 ```
 
-#### `eval(code: String)`
+##### `go_forward()`
+
+Navigates forward in the browser history.
+
+```gdscript
+cef_texture.go_forward()
+```
+
+##### `can_go_back() -> bool`
+
+Returns `true` if the browser can navigate back.
+
+```gdscript
+if cef_texture.can_go_back():
+    cef_texture.go_back()
+```
+
+##### `can_go_forward() -> bool`
+
+Returns `true` if the browser can navigate forward.
+
+```gdscript
+if cef_texture.can_go_forward():
+    cef_texture.go_forward()
+```
+
+##### `reload()`
+
+Reloads the current page.
+
+```gdscript
+cef_texture.reload()
+```
+
+##### `reload_ignore_cache()`
+
+Reloads the current page, ignoring any cached data.
+
+```gdscript
+cef_texture.reload_ignore_cache()
+```
+
+##### `stop_loading()`
+
+Stops loading the current page.
+
+```gdscript
+cef_texture.stop_loading()
+```
+
+##### `is_loading() -> bool`
+
+Returns `true` if the browser is currently loading a page.
+
+```gdscript
+if cef_texture.is_loading():
+    print("Page is still loading...")
+```
+
+#### JavaScript Execution
+
+##### `eval(code: String)`
 
 Executes JavaScript code in the browser's main frame.
 
@@ -233,7 +302,9 @@ cef_texture.eval("updateScore(100)")
 cef_texture.eval("document.getElementById('player-name').innerText = 'Player1'")
 ```
 
-#### `send_ipc_message(message: String)`
+#### IPC (Inter-Process Communication)
+
+##### `send_ipc_message(message: String)`
 
 Sends a message from Godot to JavaScript. The message will be delivered via `window.onIpcMessage(msg)` callback if it is registered.
 
@@ -255,6 +326,47 @@ window.onIpcMessage = function(msg) {
     var data = JSON.parse(msg);
     // Handle the message...
 };
+```
+
+#### Zoom Control
+
+##### `set_zoom_level(level: float)`
+
+Sets the zoom level for the browser. A value of `0.0` is the default (100%). Positive values zoom in, negative values zoom out.
+
+```gdscript
+cef_texture.set_zoom_level(1.0)   # Zoom in
+cef_texture.set_zoom_level(-1.0)  # Zoom out
+cef_texture.set_zoom_level(0.0)   # Reset to default
+```
+
+##### `get_zoom_level() -> float`
+
+Returns the current zoom level.
+
+```gdscript
+var zoom = cef_texture.get_zoom_level()
+print("Current zoom: ", zoom)
+```
+
+#### Audio Control
+
+##### `set_audio_muted(muted: bool)`
+
+Mutes or unmutes the browser audio.
+
+```gdscript
+cef_texture.set_audio_muted(true)   # Mute
+cef_texture.set_audio_muted(false)  # Unmute
+```
+
+##### `is_audio_muted() -> bool`
+
+Returns `true` if the browser audio is muted.
+
+```gdscript
+if cef_texture.is_audio_muted():
+    print("Audio is muted")
 ```
 
 ### Signals
@@ -296,6 +408,61 @@ func _on_url_changed(url: String):
     # Inject data based on the current page
     if "game-ui" in url:
         cef_texture.eval("window.playerData = %s" % JSON.stringify(player_data))
+```
+
+#### `title_changed(title: String)`
+
+Emitted when the page title changes. Useful for updating window titles or UI elements.
+
+```gdscript
+func _ready():
+    cef_texture.title_changed.connect(_on_title_changed)
+
+func _on_title_changed(title: String):
+    print("Page title: ", title)
+    $TitleLabel.text = title
+```
+
+#### `load_started(url: String)`
+
+Emitted when the browser starts loading a page.
+
+```gdscript
+func _ready():
+    cef_texture.load_started.connect(_on_load_started)
+
+func _on_load_started(url: String):
+    print("Loading: ", url)
+    $LoadingSpinner.visible = true
+```
+
+#### `load_finished(url: String, http_status_code: int)`
+
+Emitted when the browser finishes loading a page. The `http_status_code` contains the HTTP response status (e.g., 200 for success, 404 for not found).
+
+```gdscript
+func _ready():
+    cef_texture.load_finished.connect(_on_load_finished)
+
+func _on_load_finished(url: String, http_status_code: int):
+    print("Loaded: ", url, " (status: ", http_status_code, ")")
+    $LoadingSpinner.visible = false
+    if http_status_code != 200:
+        print("Warning: Page returned status ", http_status_code)
+```
+
+#### `load_error(url: String, error_code: int, error_text: String)`
+
+Emitted when a page load error occurs (e.g., network error, invalid URL).
+
+```gdscript
+func _ready():
+    cef_texture.load_error.connect(_on_load_error)
+
+func _on_load_error(url: String, error_code: int, error_text: String):
+    print("Failed to load: ", url)
+    print("Error ", error_code, ": ", error_text)
+    # Show error page or retry
 ```
 
 ### IME Methods
