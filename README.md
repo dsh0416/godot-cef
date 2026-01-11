@@ -475,8 +475,13 @@ CefTexture provides automatic Input Method Editor (IME) support for text input i
 - Composition text is forwarded to CEF in real-time
 - When the input field loses focus, IME is automatically deactivated
 
-This works out of the box with no additional configuration required.
+**Platform and configuration notes:**
+- IME behavior depends on the underlying operating system and Godot's own IME support on that platform
+- You must have a system IME / input source configured and enabled for the languages you want to type
+- IME appearance and candidate window positioning may vary between platforms and window managers
+- On platforms where Godot does not expose native IME support, IME behavior in CefTexture may be limited or unavailable
 
+On platforms where Godot provides native IME integration, CefTexture works without additional configuration in this plugin. Refer to the platform support matrix above and the Godot documentation for details on per-platform IME support and any OS-level setup that may be required.
 ## 🛣️ Roadmap
 
 - [x] Automatic Building Support

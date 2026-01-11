@@ -207,7 +207,7 @@ pub fn handle_key_event(
         get_control_char_code(keycode)
     };
 
-    let focus_on_editable_field = focus_on_editable_field as i32;
+    let focus_on_editable_field = i32::from(focus_on_editable_field);
 
     // For key press events, send RAWKEYDOWN for initial press, KEYDOWN for repeat
     if is_pressed {
@@ -365,7 +365,8 @@ pub fn ime_set_composition_with_cursor(host: &impl ImplBrowserHost, text: &str, 
             from: 0,
             to: text_len,
         },
-        color: 0xFF000000_u32, // Black
+        // Use default/system IME underline color (0 lets CEF choose an appropriate color)
+        color: 0,
         background_color: 0,
         thick: 0, // thin underline
         style: cef::CompositionUnderlineStyle::SOLID,

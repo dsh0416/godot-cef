@@ -791,17 +791,17 @@ impl CefTexture {
             return;
         };
 
-        let requests: Vec<bool> = {
+        let final_req: Option<bool> = {
             let Ok(mut q) = queue.lock() else {
                 return;
             };
-            q.drain(..).collect()
+            q.drain(..).last()
         };
 
-        for req in &requests {
-            if *req {
+        if let Some(enable) = final_req {
+            if enable && !self.app.ime_active {
                 self.activate_ime();
-            } else {
+            } else if !enable && self.app.ime_active {
                 self.deactivate_ime();
             }
         }
@@ -1079,9 +1079,22 @@ impl CefTexture {
 
     /// Updates the IME candidate window position.
     fn update_ime_position(&self, caret_x: i32, caret_y: i32, caret_height: i32) {
-        DisplayServer::singleton().window_set_ime_position(Vector2i {
-            x: caret_x,
-            y: caret_y + caret_height,
+        let ds = DisplayServer::singleton();
+
+        // Convert caret position from view coordinates to screen coordinates.
+        // 1. Apply screen scale so logical/view coordinates become physical pixels.
+        let current_screen = ds.window_get_current_screen();
+        let screen_scale = ds.screen_get_scale(current_screen);
+
+        let scaled_x = (caret_x as f32 * screen_scale) as i32;
+        let scaled_y = ((caret_y + caret_height) as f32 * screen_scale) as i32;
+
+        // 2. Offset by the window's position on the screen.
+        let window_pos = ds.window_get_position();
+
+        ds.window_set_ime_position(Vector2i {
+            x: window_pos.x + scaled_x,
+            y: window_pos.y + scaled_y,
         });
     }
 
@@ -1102,16 +1115,25 @@ impl CefTexture {
         let ime_text = ds.ime_get_text().to_string();
         let ime_selection = ds.ime_get_selection();
         // ime_selection is Vector2i where x=start, y=end of selection
-        // We use x (start) as the cursor position
-        let cursor_pos = ime_selection.x.max(0) as u32;
+        // Derive a cursor position from the selection range, clamped to the IME text length
+        let text_len = ime_text.chars().count() as u32;
+        let start = ime_selection.x.max(0) as u32;
+        let end = ime_selection.y.max(0) as u32;
+        // Use the end of the selection as the caret, and clamp it to a valid position
+        let mut cursor_pos = end.min(text_len);
+        if cursor_pos < start {
+            cursor_pos = start.min(text_len);
+        }
 
         if ime_text.is_empty() {
             // IME was committed or cancelled
             if !self.app.last_ime_text.is_empty() {
                 // The last composition text was committed
                 input::ime_commit_text(&host, &self.app.last_ime_text);
+            } else {
+                // No composition to commit; treat as cancellation
+                input::ime_cancel_composition(&host);
             }
-            input::ime_cancel_composition(&host);
         } else {
             // Update composition with cursor position
             input::ime_set_composition_with_cursor(&host, &ime_text, cursor_pos);

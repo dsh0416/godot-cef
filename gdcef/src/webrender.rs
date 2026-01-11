@@ -531,12 +531,9 @@ fn on_process_message_received(
         "triggerIme" => {
             if let Some(args) = message.argument_list() {
                 let arg = args.bool(0);
-                if arg == 1 {
-                    if let Ok(mut queue) = ime_enable_queue.lock() {
-                        queue.push_back(true);
-                    }
-                } else if let Ok(mut queue) = ime_enable_queue.lock() {
-                    queue.push_back(false);
+                let enabled = arg != 0;
+                if let Ok(mut queue) = ime_enable_queue.lock() {
+                    queue.push_back(enabled);
                 }
             }
         }
