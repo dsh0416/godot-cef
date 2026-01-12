@@ -234,8 +234,9 @@ pub fn handle_key_event(
             let char_event = KeyEvent {
                 type_: KeyEventType::CHAR,
                 modifiers,
-                // undocumented, don't know why,
-                // maybe because of the similar behaviour to WM_CHAR?
+                // For CHAR events, use the character code (not the virtual key code)
+                // for windows_key_code and native_key_code, matching Windows WM_CHAR
+                // behavior where wParam contains the character value.
                 windows_key_code: character as i32,
                 native_key_code: character as i32,
                 is_system_key: 0,
