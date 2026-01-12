@@ -895,10 +895,8 @@ impl CefTexture {
             let pixel_scale = self.get_pixel_scale_factor();
 
             let rect = self.base().get_viewport_rect();
-            let viewport_scaled = Vector2::new(
-                rect.size.x * pixel_scale,
-                rect.size.y * pixel_scale,
-            );
+            let viewport_scaled =
+                Vector2::new(rect.size.x * pixel_scale, rect.size.y * pixel_scale);
             let window_size = self.base().get_window().unwrap().get_size();
             let viewport_offset = Vector2::new(
                 (window_size.x as f32 - viewport_scaled.x) / 2.0 / pixel_scale,
@@ -1145,9 +1143,10 @@ impl CefTexture {
         }
 
         if let Some(browser) = self.app.browser.as_mut()
-            && let Some(host) = browser.host() {
-                host.set_focus(true as _);
-            }
+            && let Some(host) = browser.host()
+        {
+            host.set_focus(true as _);
+        }
 
         self.app.ime_active = true;
     }
@@ -1181,8 +1180,9 @@ impl CefTexture {
 
         // Update the IME composition text
         if let Some(browser) = self.app.browser.as_mut()
-            && let Some(host) = browser.host() {
-                input::ime_set_composition(&host, &ime_text, start, end);
-            }
+            && let Some(host) = browser.host()
+        {
+            input::ime_set_composition(&host, &ime_text, start, end);
+        }
     }
 }
