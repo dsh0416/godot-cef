@@ -89,6 +89,7 @@ pub enum RenderMode {
 ///
 /// Contains the browser handle and resources shared with CEF handlers via Arc<Mutex>.
 /// Local Godot state (change detection, IME widgets) lives on CefTexture directly.
+#[derive(Default)]
 pub struct App {
     /// The CEF browser instance.
     pub browser: Option<cef::Browser>,
@@ -114,20 +115,3 @@ pub struct App {
     pub ime_composition_range: Option<ImeCompositionQueue>,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        Self {
-            browser: None,
-            render_mode: None,
-            render_size: None,
-            device_scale_factor: None,
-            cursor_type: None,
-            message_queue: None,
-            url_change_queue: None,
-            title_change_queue: None,
-            loading_state_queue: None,
-            ime_enable_queue: None,
-            ime_composition_range: None,
-        }
-    }
-}
