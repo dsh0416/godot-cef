@@ -281,8 +281,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: godot_cef-addon
-          path: godot_cef.tar.gz
+          path: .
 
+      - name: Rename addon with version
+        run: mv godot_cef.tar.gz godot_cef-${{ github.ref_name }}.tar.gz
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
