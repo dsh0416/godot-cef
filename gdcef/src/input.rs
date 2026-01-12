@@ -197,7 +197,7 @@ pub fn handle_key_event(
         return;
     }
 
-    // Handle select-all / copy / paste.
+    // Handle select-all / copy / cut / paste.
     if is_pressed && !is_echo {
         let accel_down = if cfg!(target_os = "macos") {
             event.is_meta_pressed()
@@ -213,6 +213,10 @@ pub fn handle_key_event(
                 }
                 Key::C => {
                     frame.copy();
+                    return;
+                }
+                Key::X => {
+                    frame.cut();
                     return;
                 }
                 Key::V => {
