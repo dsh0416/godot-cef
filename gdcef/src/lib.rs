@@ -60,6 +60,16 @@ struct CefTexture {
     /// Stores the IME cursor position in local coordinates (relative to this `CefTexture` node),
     /// automatically updated from the browser's caret position.
     ime_position: Vector2i,
+
+    // Change detection state
+    last_size: Vector2,
+    last_dpi: f32,
+    last_cursor: cef_app::CursorType,
+    last_max_fps: i32,
+
+    // IME state
+    ime_active: bool,
+    ime_proxy: Option<Gd<LineEdit>>,
 }
 
 #[godot_api]
@@ -71,6 +81,12 @@ impl ITextureRect for CefTexture {
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
             ime_position: Vector2i::new(0, 0),
+            last_size: Vector2::ZERO,
+            last_dpi: 1.0,
+            last_cursor: cef_app::CursorType::Arrow,
+            last_max_fps: 0,
+            ime_active: false,
+            ime_proxy: None,
         }
     }
 
@@ -152,7 +168,7 @@ impl CefTexture {
         line_edit.connect("focus_exited", &callable_focus_exited);
 
         self.base_mut().add_child(&line_edit);
-        self.app.ime_proxy = Some(line_edit);
+        self.ime_proxy = Some(line_edit);
     }
 
     #[func]
@@ -214,8 +230,8 @@ impl CefTexture {
         self.app.ime_enable_queue = None;
         self.app.ime_composition_range = None;
 
-        self.app.ime_active = false;
-        self.app.ime_proxy = None;
+        self.ime_active = false;
+        self.ime_proxy = None;
 
         cef_init::cef_release();
     }
@@ -280,8 +296,8 @@ impl CefTexture {
 
         assert!(browser.is_some(), "failed to create browser");
         self.app.browser = browser;
-        self.app.last_size = logical_size;
-        self.app.last_dpi = dpi;
+        self.last_size = logical_size;
+        self.last_dpi = dpi;
     }
 
     fn should_use_accelerated_osr(&self) -> bool {
@@ -499,11 +515,11 @@ impl CefTexture {
 
     fn handle_max_fps_change(&mut self) {
         let max_fps = self.get_max_fps();
-        if max_fps == self.app.last_max_fps {
+        if max_fps == self.last_max_fps {
             return;
         }
 
-        self.app.last_max_fps = max_fps;
+        self.last_max_fps = max_fps;
         if let Some(browser) = self.app.browser.as_mut()
             && let Some(host) = browser.host()
         {
@@ -518,8 +534,8 @@ impl CefTexture {
             return false;
         }
 
-        let size_diff = (logical_size - self.app.last_size).abs();
-        let dpi_diff = (current_dpi - self.app.last_dpi).abs();
+        let size_diff = (logical_size - self.last_size).abs();
+        let dpi_diff = (current_dpi - self.last_dpi).abs();
         if size_diff.x < 1e-6 && size_diff.y < 1e-6 && dpi_diff < 1e-6 {
             return false;
         }
@@ -547,8 +563,8 @@ impl CefTexture {
             host.was_resized();
         }
 
-        self.app.last_size = logical_size;
-        self.app.last_dpi = current_dpi;
+        self.last_size = logical_size;
+        self.last_dpi = current_dpi;
         true
     }
 
@@ -691,9 +707,8 @@ impl CefTexture {
     }
 
     fn update_cursor(&mut self) {
-        let cursor_type_arc = match &self.app.cursor_type {
-            Some(arc) => arc.clone(),
-            None => return,
+        let Some(cursor_type_arc) = &self.app.cursor_type else {
+            return;
         };
 
         let current_cursor = match cursor_type_arc.lock() {
@@ -701,11 +716,11 @@ impl CefTexture {
             Err(_) => return,
         };
 
-        if current_cursor == self.app.last_cursor {
+        if current_cursor == self.last_cursor {
             return;
         }
 
-        self.app.last_cursor = current_cursor;
+        self.last_cursor = current_cursor;
         let shape = cursor::cursor_type_to_shape(current_cursor);
         self.base_mut().set_default_cursor_shape(shape);
     }
@@ -825,9 +840,9 @@ impl CefTexture {
         };
 
         if let Some(enable) = final_req {
-            if enable && !self.app.ime_active {
+            if enable && !self.ime_active {
                 self.activate_ime();
-            } else if !enable && self.app.ime_active {
+            } else if !enable && self.ime_active {
                 self.deactivate_ime();
             }
         }
@@ -846,7 +861,7 @@ impl CefTexture {
         };
 
         if let Some(range) = range
-            && self.app.ime_active
+            && self.ime_active
         {
             self.set_ime_position(Vector2i::new(
                 range.caret_x,
@@ -886,12 +901,12 @@ impl CefTexture {
                 self.get_device_scale_factor(),
             );
         } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
-            input::handle_key_event(&host, &key_event, self.app.ime_active);
+            input::handle_key_event(&host, &key_event, self.ime_active);
         }
     }
 
     fn process_ime_position(&mut self) {
-        if self.app.ime_active {
+        if self.ime_active {
             let mut ds: Gd<DisplayServer> = DisplayServer::singleton();
             let display_scale = get_display_scale_factor();
             let pixel_scale = self.get_pixel_scale_factor();
@@ -1124,7 +1139,7 @@ impl CefTexture {
 
         input::ime_commit_text(&host, &new_text.to_string());
 
-        if let Some(proxy) = self.app.ime_proxy.as_mut() {
+        if let Some(proxy) = self.ime_proxy.as_mut() {
             proxy.set_text("");
         }
     }
@@ -1136,13 +1151,13 @@ impl CefTexture {
 
     /// Activates IME by focusing the hidden LineEdit proxy.
     fn activate_ime(&mut self) {
-        if self.app.ime_active {
+        if self.ime_active {
             return;
         }
 
         self.base_mut().release_focus();
 
-        if let Some(proxy) = self.app.ime_proxy.as_mut() {
+        if let Some(proxy) = self.ime_proxy.as_mut() {
             proxy.set_text("");
             proxy.grab_focus();
         }
@@ -1153,28 +1168,28 @@ impl CefTexture {
             host.set_focus(true as _);
         }
 
-        self.app.ime_active = true;
+        self.ime_active = true;
     }
 
     /// Deactivates IME and commits any pending text.
     fn deactivate_ime(&mut self) {
-        if !self.app.ime_active {
+        if !self.ime_active {
             return;
         }
 
         // Clear the proxy
-        if let Some(proxy) = self.app.ime_proxy.as_mut() {
+        if let Some(proxy) = self.ime_proxy.as_mut() {
             proxy.set_text("");
         }
 
-        self.app.ime_active = false;
+        self.ime_active = false;
 
         // Return focus to CefTexture
         self.base_mut().grab_focus();
     }
 
     fn handle_os_ime_update(&mut self) {
-        if !self.app.ime_active {
+        if !self.ime_active {
             return;
         }
 

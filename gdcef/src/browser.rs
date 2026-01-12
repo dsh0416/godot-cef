@@ -4,7 +4,7 @@
 //! the browser instance and rendering mode.
 
 use cef_app::{CursorType, FrameBuffer};
-use godot::classes::{ImageTexture, LineEdit, Texture2Drd};
+use godot::classes::{ImageTexture, Texture2Drd};
 use godot::prelude::*;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -85,10 +85,10 @@ pub enum RenderMode {
     },
 }
 
-/// Application state for the CEF browser instance.
+/// CEF browser state and shared resources.
 ///
-/// Contains all the shared state needed for browser operation, including
-/// the browser handle, rendering resources, and input state.
+/// Contains the browser handle and resources shared with CEF handlers via Arc<Mutex>.
+/// Local Godot state (change detection, IME widgets) lives on CefTexture directly.
 pub struct App {
     /// The CEF browser instance.
     pub browser: Option<cef::Browser>,
@@ -112,18 +112,6 @@ pub struct App {
     pub ime_enable_queue: Option<ImeEnableQueue>,
     /// Shared IME composition range for caret positioning.
     pub ime_composition_range: Option<ImeCompositionQueue>,
-    /// Last known logical size for change detection.
-    pub last_size: Vector2,
-    /// Last known DPI for change detection.
-    pub last_dpi: f32,
-    /// Last known cursor type for change detection.
-    pub last_cursor: CursorType,
-    /// Last known max FPS for change detection.
-    pub last_max_fps: i32,
-    /// Whether IME is currently active (using LineEdit proxy).
-    pub ime_active: bool,
-    /// Hidden LineEdit used as IME input proxy.
-    pub ime_proxy: Option<Gd<LineEdit>>,
 }
 
 impl Default for App {
@@ -140,12 +128,6 @@ impl Default for App {
             loading_state_queue: None,
             ime_enable_queue: None,
             ime_composition_range: None,
-            last_size: Vector2::ZERO,
-            last_dpi: 1.0,
-            last_cursor: CursorType::Arrow,
-            last_max_fps: 0,
-            ime_active: false,
-            ime_proxy: None,
         }
     }
 }
