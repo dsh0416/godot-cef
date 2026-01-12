@@ -1,5 +1,5 @@
 use cef::sys::cef_event_flags_t;
-use cef::{ImplBrowserHost, KeyEvent, KeyEventType, MouseButtonType, MouseEvent};
+use cef::{ImplBrowserHost, ImplFrame, KeyEvent, KeyEventType, MouseButtonType, MouseEvent};
 use godot::classes::{
     InputEventKey, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
 };
@@ -173,6 +173,7 @@ pub fn handle_pan_gesture(
 /// Handles keyboard events and sends them to CEF browser host
 pub fn handle_key_event(
     host: &impl ImplBrowserHost,
+    frame: Option<&impl ImplFrame>,
     event: &Gd<InputEventKey>,
     focus_on_editable_field: bool,
 ) {
@@ -194,6 +195,35 @@ pub fn handle_key_event(
     // Godot also sends a KEY event for the NONE key for characters, which we don't want to process.
     if keycode == Key::NONE {
         return;
+    }
+
+    // Handle select-all / copy / paste.
+    if is_pressed && !is_echo {
+        let accel_down = if cfg!(target_os = "macos") {
+            event.is_meta_pressed()
+        } else {
+            event.is_ctrl_pressed()
+        };
+
+        if accel_down {
+            if let Some(frame) = frame {
+                match keycode {
+                    Key::A => {
+                        frame.select_all();
+                        return;
+                    }
+                    Key::C => {
+                        frame.copy();
+                        return;
+                    }
+                    Key::V => {
+                        frame.paste();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     // Get the Windows virtual key code from Godot key (CEF expects this on all platforms)

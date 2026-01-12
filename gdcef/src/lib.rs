@@ -901,7 +901,12 @@ impl CefTexture {
                 self.get_device_scale_factor(),
             );
         } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
-            input::handle_key_event(&host, &key_event, self.ime_active);
+            input::handle_key_event(
+                &host,
+                browser.main_frame().as_ref(),
+                &key_event,
+                self.ime_active,
+            );
         }
     }
 
