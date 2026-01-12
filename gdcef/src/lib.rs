@@ -19,7 +19,7 @@ use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
     DisplayServer, Engine, ITextureRect, Image, ImageTexture, InputEvent, InputEventKey,
-    InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, TextureRect,
+    InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, LineEdit, TextureRect,
 };
 use godot::init::*;
 use godot::prelude::*;
@@ -34,6 +34,7 @@ use crate::browser::{
     App, ImeCompositionQueue, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue,
     RenderMode, TitleChangeQueue, UrlChangeQueue,
 };
+use crate::utils::get_display_scale_factor;
 
 pub use texture::TextureRectRd;
 
@@ -54,6 +55,9 @@ struct CefTexture {
 
     #[export]
     enable_accelerated_osr: bool,
+
+    #[var]
+    ime_position: Vector2i,
 }
 
 #[godot_api]
@@ -64,6 +68,7 @@ impl ITextureRect for CefTexture {
             app: App::default(),
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
+            ime_position: Vector2i::new(0, 0),
         }
     }
 
@@ -81,11 +86,8 @@ impl ITextureRect for CefTexture {
             ControlNotification::FOCUS_ENTER => {
                 self.on_focus_enter();
             }
-            ControlNotification::FOCUS_EXIT => {
-                self.on_focus_exit();
-            }
             ControlNotification::OS_IME_UPDATE => {
-                self.handle_ime_update();
+                self.handle_os_ime_update();
             }
             _ => {}
         }
@@ -127,7 +129,36 @@ impl CefTexture {
 
         cef_init::cef_retain();
 
+        // Create hidden LineEdit for IME proxy
+        self.create_ime_proxy();
         self.create_browser();
+    }
+
+    /// Creates a hidden LineEdit to act as an IME input proxy.
+    fn create_ime_proxy(&mut self) {
+        use godot::classes::control::{FocusMode, MouseFilter};
+
+        let mut line_edit = LineEdit::new_alloc();
+
+        // Position off-screen so it's not visible but can still receive focus
+        line_edit.set_position(Vector2::new(-10000.0, -10000.0));
+        line_edit.set_size(Vector2::new(200.0, 30.0));
+
+        // Ignore mouse events so clicks pass through - focus is only set programmatically
+        line_edit.set_mouse_filter(MouseFilter::IGNORE);
+
+        // Enable focus mode so it can receive keyboard focus
+        line_edit.set_focus_mode(FocusMode::ALL);
+
+        // Connect signals for IME handling
+        let callable_changed = self.base().callable("on_ime_proxy_text_changed");
+        line_edit.connect("text_changed", &callable_changed);
+
+        let callable_focus_exited = self.base().callable("on_ime_proxy_focus_exited");
+        line_edit.connect("focus_exited", &callable_focus_exited);
+
+        self.base_mut().add_child(&line_edit);
+        self.app.ime_proxy = Some(line_edit);
     }
 
     #[func]
@@ -146,6 +177,7 @@ impl CefTexture {
         self.process_loading_state_queue();
         self.process_ime_enable_queue();
         self.process_ime_composition_queue();
+        self.process_ime_position();
     }
 
     fn cleanup_instance(&mut self) {
@@ -189,7 +221,9 @@ impl CefTexture {
         self.app.ime_composition_range = None;
 
         // Deactivate IME on cleanup
-        self.deactivate_ime();
+        self.app.ime_active = false;
+        // Clear the proxy reference (Godot will free the child node automatically)
+        self.app.ime_proxy = None;
 
         cef_init::cef_release();
     }
@@ -822,7 +856,11 @@ impl CefTexture {
         if let Some(range) = range
             && self.app.ime_active
         {
-            self.update_ime_position(range.caret_x, range.caret_y, range.caret_height);
+            self.set_ime_position(Vector2i::new(
+                range.caret_x,
+                range.caret_y + range.caret_height,
+            ));
+            self.process_ime_position();
         }
     }
 
@@ -857,6 +895,39 @@ impl CefTexture {
             );
         } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
             input::handle_key_event(&host, &key_event, self.app.ime_active);
+        }
+    }
+
+    fn process_ime_position(&mut self) {
+        if self.app.ime_active {
+            let mut ds: Gd<DisplayServer> = DisplayServer::singleton();
+            let display_scale = get_display_scale_factor();
+            let pixel_scale = self.get_pixel_scale_factor();
+
+            let rect = self.base().get_viewport_rect();
+            let viewport_scaled = Vector2::new(
+                rect.size.x * pixel_scale,
+                rect.size.y * pixel_scale,
+            );
+            let window_size = self.base().get_window().unwrap().get_size();
+            let viewport_offset = Vector2::new(
+                (window_size.x as f32 - viewport_scaled.x) / 2.0 / pixel_scale,
+                (window_size.y as f32 - viewport_scaled.y) / 2.0 / pixel_scale,
+            );
+
+            let node_offset = Vector2::new(
+                self.base().get_global_position().x,
+                self.base().get_global_position().y,
+            );
+
+            let ime_position = Vector2i::new(
+                (self.ime_position.x as f32 * display_scale
+                    + (viewport_offset.x + node_offset.x) * pixel_scale) as i32,
+                (self.ime_position.y as f32 * display_scale
+                    + (viewport_offset.y + node_offset.y) * pixel_scale) as i32,
+            );
+
+            ds.window_set_ime_position(ime_position);
         }
     }
 
@@ -1043,101 +1114,86 @@ impl CefTexture {
         let Some(host) = browser.host() else {
             return;
         };
+
         host.set_focus(true as _);
     }
 
-    fn on_focus_exit(&mut self) {
+    /// Called when the IME proxy LineEdit text changes during composition.
+    #[func]
+    fn on_ime_proxy_text_changed(&mut self, new_text: GString) {
         let Some(browser) = self.app.browser.as_mut() else {
             return;
         };
+
         let Some(host) = browser.host() else {
             return;
         };
-        host.set_focus(false as _);
+
+        input::ime_commit_text(&host, &new_text.to_string());
+
+        if let Some(proxy) = self.app.ime_proxy.as_mut() {
+            proxy.set_text("");
+        }
     }
 
-    /// Activates Godot's IME for text input.
+    #[func]
+    fn on_ime_proxy_focus_exited(&mut self) {
+        self.deactivate_ime();
+    }
+
+    /// Activates IME by focusing the hidden LineEdit proxy.
     fn activate_ime(&mut self) {
         if self.app.ime_active {
             return;
         }
-        DisplayServer::singleton().window_set_ime_active(true);
+
+        self.base_mut().release_focus();
+
+        // Focus the LineEdit proxy to capture IME input
+        if let Some(proxy) = self.app.ime_proxy.as_mut() {
+            proxy.set_text("");
+            proxy.grab_focus();
+        }
+
+        if let Some(browser) = self.app.browser.as_mut()
+            && let Some(host) = browser.host() {
+                host.set_focus(true as _);
+            }
+
         self.app.ime_active = true;
-        self.app.last_ime_text.clear();
     }
 
-    /// Deactivates Godot's IME.
+    /// Deactivates IME and commits any pending text.
     fn deactivate_ime(&mut self) {
         if !self.app.ime_active {
             return;
         }
 
-        DisplayServer::singleton().window_set_ime_active(false);
+        // Clear the proxy
+        if let Some(proxy) = self.app.ime_proxy.as_mut() {
+            proxy.set_text("");
+        }
+
         self.app.ime_active = false;
-        self.app.last_ime_text.clear();
+
+        // Return focus to CefTexture
+        self.base_mut().grab_focus();
     }
 
-    /// Updates the IME candidate window position.
-    fn update_ime_position(&self, caret_x: i32, caret_y: i32, caret_height: i32) {
-        let mut ds = DisplayServer::singleton();
-
-        // Convert caret position from view coordinates to screen coordinates.
-        // 1. Apply screen scale so logical/view coordinates become physical pixels.
-        let screen_scale = ds.screen_get_scale();
-
-        let scaled_x = (caret_x as f32 * screen_scale) as i32;
-        let scaled_y = ((caret_y + caret_height) as f32 * screen_scale) as i32;
-
-        // 2. Offset by the window's position on the screen.
-        let window_pos = ds.window_get_position();
-
-        ds.window_set_ime_position(Vector2i {
-            x: window_pos.x + scaled_x,
-            y: window_pos.y + scaled_y,
-        });
-    }
-
-    /// Handles IME composition updates from the OS.
-    fn handle_ime_update(&mut self) {
+    fn handle_os_ime_update(&mut self) {
         if !self.app.ime_active {
             return;
         }
 
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-
-        let ds = DisplayServer::singleton();
-        let ime_text = ds.ime_get_text().to_string();
-        let ime_selection = ds.ime_get_selection();
-        // ime_selection is Vector2i where x=start, y=end of selection
-        // Derive a cursor position from the selection range, clamped to the IME text length
-        let text_len = ime_text.chars().count() as u32;
+        let ime_text = DisplayServer::singleton().ime_get_text().to_string();
+        let ime_selection = DisplayServer::singleton().ime_get_selection();
         let start = ime_selection.x.max(0) as u32;
         let end = ime_selection.y.max(0) as u32;
-        // Use the end of the selection as the caret, and clamp it to a valid position
-        let mut cursor_pos = end.min(text_len);
-        if cursor_pos < start {
-            cursor_pos = start.min(text_len);
-        }
 
-        if ime_text.is_empty() {
-            // IME was committed or cancelled
-            if !self.app.last_ime_text.is_empty() {
-                // The last composition text was committed
-                input::ime_commit_text(&host, &self.app.last_ime_text);
-            } else {
-                // No composition to commit; treat as cancellation
-                input::ime_cancel_composition(&host);
+        // Update the IME composition text
+        if let Some(browser) = self.app.browser.as_mut()
+            && let Some(host) = browser.host() {
+                input::ime_set_composition(&host, &ime_text, start, end);
             }
-        } else {
-            // Update composition with cursor position
-            input::ime_set_composition_with_cursor(&host, &ime_text, cursor_pos);
-        }
-
-        self.app.last_ime_text = ime_text;
     }
 }

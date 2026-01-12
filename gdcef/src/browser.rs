@@ -4,7 +4,7 @@
 //! the browser instance and rendering mode.
 
 use cef_app::{CursorType, FrameBuffer};
-use godot::classes::{ImageTexture, Texture2Drd};
+use godot::classes::{ImageTexture, LineEdit, Texture2Drd};
 use godot::prelude::*;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -120,10 +120,10 @@ pub struct App {
     pub last_cursor: CursorType,
     /// Last known max FPS for change detection.
     pub last_max_fps: i32,
-    /// Whether IME is currently active (Godot's DisplayServer IME).
+    /// Whether IME is currently active (using LineEdit proxy).
     pub ime_active: bool,
-    /// Last IME composition text (to detect commits vs updates).
-    pub last_ime_text: String,
+    /// Hidden LineEdit used as IME input proxy.
+    pub ime_proxy: Option<Gd<LineEdit>>,
 }
 
 impl Default for App {
@@ -145,7 +145,7 @@ impl Default for App {
             last_cursor: CursorType::Arrow,
             last_max_fps: 0,
             ime_active: false,
-            last_ime_text: String::new(),
+            ime_proxy: None,
         }
     }
 }

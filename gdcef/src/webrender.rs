@@ -1,5 +1,6 @@
 use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::CursorType;
+use godot::global::godot_print;
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 use winit::dpi::PhysicalSize;
@@ -237,6 +238,7 @@ wrap_render_handler! {
         ) {
             if let Some(bounds) = character_bounds.and_then(|b| b.last())
                 && let Ok(mut queue) = self.ime_composition_queue.lock() {
+                    godot_print!("on_ime_composition_range_changed, {:?}", bounds);
                     *queue = Some(ImeCompositionRange {
                         caret_x: bounds.x,
                         caret_y: bounds.y,
