@@ -205,23 +205,21 @@ pub fn handle_key_event(
             event.is_ctrl_pressed()
         };
 
-        if accel_down {
-            if let Some(frame) = frame {
-                match keycode {
-                    Key::A => {
-                        frame.select_all();
-                        return;
-                    }
-                    Key::C => {
-                        frame.copy();
-                        return;
-                    }
-                    Key::V => {
-                        frame.paste();
-                        return;
-                    }
-                    _ => {}
+        if accel_down && let Some(frame) = frame {
+            match keycode {
+                Key::A => {
+                    frame.select_all();
+                    return;
                 }
+                Key::C => {
+                    frame.copy();
+                    return;
+                }
+                Key::V => {
+                    frame.paste();
+                    return;
+                }
+                _ => {}
             }
         }
     }
