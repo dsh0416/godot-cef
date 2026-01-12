@@ -387,7 +387,6 @@ pub fn ime_set_composition(
     };
     let underlines = [underline];
 
-    // CefRange::Invalid
     let invalid_range = cef::Range {
         from: u32::MAX,
         to: u32::MAX,

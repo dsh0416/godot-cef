@@ -139,18 +139,10 @@ impl CefTexture {
         use godot::classes::control::{FocusMode, MouseFilter};
 
         let mut line_edit = LineEdit::new_alloc();
-
-        // Position off-screen so it's not visible but can still receive focus
         line_edit.set_position(Vector2::new(-10000.0, -10000.0));
         line_edit.set_size(Vector2::new(200.0, 30.0));
-
-        // Ignore mouse events so clicks pass through - focus is only set programmatically
         line_edit.set_mouse_filter(MouseFilter::IGNORE);
-
-        // Enable focus mode so it can receive keyboard focus
         line_edit.set_focus_mode(FocusMode::ALL);
-
-        // Connect signals for IME handling
         let callable_changed = self.base().callable("on_ime_proxy_text_changed");
         line_edit.connect("text_changed", &callable_changed);
 
@@ -220,9 +212,7 @@ impl CefTexture {
         self.app.ime_enable_queue = None;
         self.app.ime_composition_range = None;
 
-        // Deactivate IME on cleanup
         self.app.ime_active = false;
-        // Clear the proxy reference (Godot will free the child node automatically)
         self.app.ime_proxy = None;
 
         cef_init::cef_release();
@@ -1149,7 +1139,6 @@ impl CefTexture {
 
         self.base_mut().release_focus();
 
-        // Focus the LineEdit proxy to capture IME input
         if let Some(proxy) = self.app.ime_proxy.as_mut() {
             proxy.set_text("");
             proxy.grab_focus();
