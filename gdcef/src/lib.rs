@@ -57,6 +57,8 @@ struct CefTexture {
     enable_accelerated_osr: bool,
 
     #[var]
+    /// Stores the IME cursor position in local coordinates (relative to this `CefTexture` node),
+    /// automatically updated from the browser's caret position.
     ime_position: Vector2i,
 }
 
@@ -897,7 +899,10 @@ impl CefTexture {
             let rect = self.base().get_viewport_rect();
             let viewport_scaled =
                 Vector2::new(rect.size.x * pixel_scale, rect.size.y * pixel_scale);
-            let window_size = self.base().get_window().unwrap().get_size();
+            let Some(window) = self.base().get_window() else {
+                return;
+            };
+            let window_size = window.get_size();
             let viewport_offset = Vector2::new(
                 (window_size.x as f32 - viewport_scaled.x) / 2.0 / pixel_scale,
                 (window_size.y as f32 - viewport_scaled.y) / 2.0 / pixel_scale,
@@ -908,14 +913,14 @@ impl CefTexture {
                 self.base().get_global_position().y,
             );
 
-            let ime_position = Vector2i::new(
+            let final_ime_position = Vector2i::new(
                 (self.ime_position.x as f32 * display_scale
                     + (viewport_offset.x + node_offset.x) * pixel_scale) as i32,
                 (self.ime_position.y as f32 * display_scale
                     + (viewport_offset.y + node_offset.y) * pixel_scale) as i32,
             );
 
-            ds.window_set_ime_position(ime_position);
+            ds.window_set_ime_position(final_ime_position);
         }
     }
 
