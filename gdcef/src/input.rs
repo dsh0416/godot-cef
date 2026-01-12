@@ -205,7 +205,20 @@ pub fn handle_key_event(
             event.is_ctrl_pressed()
         };
 
-        if accel_down && let Some(frame) = frame {
+        let no_extra_modifiers = !event.is_shift_pressed()
+            && !event.is_alt_pressed()
+            && if cfg!(target_os = "macos") {
+                // Accelerator is Cmd (Meta). Disallow Ctrl as an "extra" modifier.
+                !event.is_ctrl_pressed()
+            } else {
+                // Accelerator is Ctrl. Disallow Meta/Win/Super as an "extra" modifier.
+                !event.is_meta_pressed()
+            };
+
+        if accel_down
+            && no_extra_modifiers
+            && let Some(frame) = frame
+        {
             match keycode {
                 Key::A => {
                     frame.select_all();
