@@ -114,4 +114,3 @@ pub struct App {
     /// Shared IME composition range for caret positioning.
     pub ime_composition_range: Option<ImeCompositionQueue>,
 }
-
