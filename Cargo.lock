@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "cef_app"
-version = "0.6.0"
+version = "0.6.2"
 dependencies = [
  "cef",
  "libloading 0.9.0",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef"
-version = "0.6.0"
+version = "0.6.2"
 dependencies = [
  "cef",
  "cef-dll-sys",
@@ -845,7 +845,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef_helper"
-version = "0.6.0"
+version = "0.6.2"
 dependencies = [
  "cef",
  "cef-dll-sys",
@@ -3652,7 +3652,7 @@ checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
 
 [[package]]
 name = "xtask"
-version = "0.6.0"
+version = "0.6.2"
 dependencies = [
  "clap",
  "plist",

@@ -293,4 +293,4 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |
-            godot_cef.tar.gz
+            godot_cef-${{ github.ref_name }}.tar.gz

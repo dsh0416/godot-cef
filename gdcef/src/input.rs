@@ -1,5 +1,5 @@
 use cef::sys::cef_event_flags_t;
-use cef::{ImplBrowserHost, KeyEvent, KeyEventType, MouseButtonType, MouseEvent};
+use cef::{ImplBrowserHost, ImplFrame, KeyEvent, KeyEventType, MouseButtonType, MouseEvent};
 use godot::classes::{
     InputEventKey, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
 };
@@ -173,6 +173,7 @@ pub fn handle_pan_gesture(
 /// Handles keyboard events and sends them to CEF browser host
 pub fn handle_key_event(
     host: &impl ImplBrowserHost,
+    frame: Option<&impl ImplFrame>,
     event: &Gd<InputEventKey>,
     focus_on_editable_field: bool,
 ) {
@@ -191,6 +192,55 @@ pub fn handle_key_event(
     let is_echo = event.is_echo();
     let keycode = event.get_keycode();
 
+    // Godot also sends a KEY event for the NONE key for characters, which we don't want to process.
+    if keycode == Key::NONE {
+        return;
+    }
+
+    // Handle select-all / copy / cut / paste.
+    if is_pressed && !is_echo {
+        let accel_down = if cfg!(target_os = "macos") {
+            event.is_meta_pressed()
+        } else {
+            event.is_ctrl_pressed()
+        };
+
+        let no_extra_modifiers = !event.is_shift_pressed()
+            && !event.is_alt_pressed()
+            && if cfg!(target_os = "macos") {
+                // Accelerator is Cmd (Meta). Disallow Ctrl as an "extra" modifier.
+                !event.is_ctrl_pressed()
+            } else {
+                // Accelerator is Ctrl. Disallow Meta/Win/Super as an "extra" modifier.
+                !event.is_meta_pressed()
+            };
+
+        if accel_down
+            && no_extra_modifiers
+            && let Some(frame) = frame
+        {
+            match keycode {
+                Key::A => {
+                    frame.select_all();
+                    return;
+                }
+                Key::C => {
+                    frame.copy();
+                    return;
+                }
+                Key::X => {
+                    frame.cut();
+                    return;
+                }
+                Key::V => {
+                    frame.paste();
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
+
     // Get the Windows virtual key code from Godot key (CEF expects this on all platforms)
     let windows_key_code = keycode::godot_key_to_windows_keycode(keycode);
 
@@ -200,14 +250,13 @@ pub fn handle_key_event(
     // Get the character code - for printable keys use unicode,
     // for control characters use their ASCII codes
     let unicode = event.get_unicode();
+
     let character = if unicode != 0 {
         unicode as u16
     } else {
         // Use ASCII codes for control characters
         get_control_char_code(keycode)
     };
-
-    let focus_on_editable_field = i32::from(focus_on_editable_field);
 
     // For key press events, send RAWKEYDOWN for initial press, KEYDOWN for repeat
     if is_pressed {
@@ -223,14 +272,15 @@ pub fn handle_key_event(
             is_system_key: 0,
             character,
             unmodified_character: character,
-            focus_on_editable_field,
+            focus_on_editable_field: focus_on_editable_field as _,
             ..Default::default()
         };
         host.send_key_event(Some(&key_event));
 
         // Send a CHAR event for printable characters AND control characters that need it
         // (Backspace, Tab, Enter need CHAR events for text input to work)
-        if should_send_char_event(keycode, unicode) {
+        // When focus is on an editable field, we don't need to send CHAR events.
+        if should_send_char_event(keycode, unicode) && !focus_on_editable_field {
             let char_event = KeyEvent {
                 type_: KeyEventType::CHAR,
                 modifiers,
@@ -242,7 +292,7 @@ pub fn handle_key_event(
                 is_system_key: 0,
                 character,
                 unmodified_character: character,
-                focus_on_editable_field,
+                focus_on_editable_field: focus_on_editable_field as _,
                 ..Default::default()
             };
             host.send_key_event(Some(&char_event));
@@ -260,7 +310,7 @@ pub fn handle_key_event(
                 is_system_key: 0,
                 character,
                 unmodified_character: character,
-                focus_on_editable_field,
+                focus_on_editable_field: focus_on_editable_field as _,
                 ..Default::default()
             };
             host.send_key_event(Some(&key_event));
@@ -351,13 +401,19 @@ fn is_keypad_key(key: Key) -> bool {
 /// Call this when an IME composition is finalized
 pub fn ime_commit_text(host: &impl ImplBrowserHost, text: &str) {
     let cef_text: cef::CefString = text.into();
-    host.ime_commit_text(Some(&cef_text), None, 0);
+    let invalid_range = cef::Range {
+        from: u32::MAX,
+        to: u32::MAX,
+    };
+    host.ime_commit_text(Some(&cef_text), Some(&invalid_range), 0);
 }
 
-/// Sets the current IME composition text with cursor position
-/// Call this during IME composition (before finalizing)
-/// `cursor_pos` is the cursor position within the composition text (0 = start)
-pub fn ime_set_composition_with_cursor(host: &impl ImplBrowserHost, text: &str, cursor_pos: u32) {
+pub fn ime_set_composition(
+    host: &impl ImplBrowserHost,
+    text: &str,
+    selection_start: u32,
+    selection_end: u32,
+) {
     let cef_text: cef::CefString = text.into();
     let text_len = text.chars().count() as u32;
 
@@ -376,21 +432,21 @@ pub fn ime_set_composition_with_cursor(host: &impl ImplBrowserHost, text: &str, 
     };
     let underlines = [underline];
 
+    let invalid_range = cef::Range {
+        from: u32::MAX,
+        to: u32::MAX,
+    };
+
     // Selection range is at the cursor position
     let selection_range = cef::Range {
-        from: cursor_pos,
-        to: cursor_pos,
+        from: selection_start,
+        to: selection_end,
     };
 
     host.ime_set_composition(
         Some(&cef_text),
         Some(&underlines),
-        None, // replacement_range
+        Some(&invalid_range),
         Some(&selection_range),
     );
-}
-
-/// Cancels the current IME composition
-pub fn ime_cancel_composition(host: &impl ImplBrowserHost) {
-    host.ime_cancel_composition();
 }

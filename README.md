@@ -15,16 +15,13 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 
 | Platform | DirectX 12 | Metal | Vulkan | Software Rendering |
 |----------|---------------|-----------------|-------------------|--------|
-| **Windows** | ✅ (Note 1) | n.a. | ❌ (Note 2)| ✅ |
-| **macOS** | n.a. | ✅ | ❌ (Note 3) | ✅ |
-| **Linux** | n.a. | n.a. | ❌ (Note 4) | ✅ |
+| **Windows** | ✅ (Note 1) | n.a. | ❌ [[#4]](https://github.com/dsh0416/godot-cef/issues/4) | ✅ |
+| **macOS** | n.a. | ✅ | ❌ [[#4]](https://github.com/dsh0416/godot-cef/issues/4) | ✅ |
+| **Linux** | n.a. | n.a. | ❌ [[#4]](https://github.com/dsh0416/godot-cef/issues/4) | ✅ |
 
 ### Note
 1. For Windows DirectX 12 backend, it requires at least Godot 4.6 beta 2 to work. Since Godot 4.5.1 contains a bug when calling `RenderingDevice.get_driver_resource` on DirectX 12 textures ALWAYS returns 0.
-2. Vulkan on Windows requires `VK_KHR_external_memory_win32` to import Windows Handle into VKImage.  Godot's vulkan device doesn't start with such extensions enabled.
-3. Vulkan on macOS requires `VK_EXT_metal_objects` to import IOSurface into VKImage. Godot's vulkan device doesn't start with such extensions enabled.
-4. Vulkan on Linux requires `VK_EXT_external_memory_dma_buf` to import DMABuf into VKImage. Godot's vulkan device doesn't start with such extensions enabled.
-5. On platforms where accelerated rendering is not yet implemented, the extension automatically falls back to software rendering using CPU-based frame buffers.
+2. On platforms where accelerated rendering is not yet implemented, the extension automatically falls back to software rendering using CPU-based frame buffers.
 
 ## 📦 Installation
 
