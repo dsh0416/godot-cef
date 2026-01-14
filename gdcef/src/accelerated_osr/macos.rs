@@ -231,9 +231,11 @@ impl NativeTextureImporter {
             );
         }
 
+        // Using sRGB formats to ensure correct gamma handling for web content
         let mtl_pixel_format = match format {
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => MTLPixelFormat::RGBA8Unorm,
-            _ => MTLPixelFormat::BGRA8Unorm,
+            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => MTLPixelFormat::RGBA8Unorm_sRGB,
+            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888 => MTLPixelFormat::BGRA8Unorm_sRGB,
+            _ => MTLPixelFormat::BGRA8Unorm_sRGB,
         };
 
         unsafe {
