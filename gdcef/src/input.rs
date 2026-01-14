@@ -6,7 +6,6 @@ use godot::classes::{
 };
 use godot::global::{Key, MouseButton, MouseButtonMask};
 use godot::prelude::*;
-use std::cell::RefCell;
 
 mod keycode;
 
@@ -31,7 +30,6 @@ impl EditorShortcuts {
         }
     }
 }
-
 
 fn with_shortcuts<F, R>(f: F) -> R
 where
