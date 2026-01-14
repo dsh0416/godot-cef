@@ -6,7 +6,48 @@ use godot::classes::{
 };
 use godot::global::{Key, MouseButton, MouseButtonMask};
 use godot::prelude::*;
+use std::cell::RefCell;
+
 mod keycode;
+
+/// Pre-defined shortcuts for editor commands.
+/// Initialized once per thread using thread_local.
+struct EditorShortcuts {
+    select_all: Gd<Shortcut>,            // Ctrl/Cmd+A
+    copy: Gd<Shortcut>,                  // Ctrl/Cmd+C
+    cut: Gd<Shortcut>,                   // Ctrl/Cmd+X
+    paste: Gd<Shortcut>,                 // Ctrl/Cmd+V
+    paste_and_match_style: Gd<Shortcut>, // Ctrl/Cmd+Shift+V
+}
+
+impl EditorShortcuts {
+    fn new() -> Self {
+        Self {
+            select_all: create_shortcut(Key::A, true, false),
+            copy: create_shortcut(Key::C, true, false),
+            cut: create_shortcut(Key::X, true, false),
+            paste: create_shortcut(Key::V, true, false),
+            paste_and_match_style: create_shortcut(Key::V, true, true),
+        }
+    }
+}
+
+thread_local! {
+    static EDITOR_SHORTCUTS: RefCell<Option<EditorShortcuts>> = const { RefCell::new(None) };
+}
+
+fn with_shortcuts<F, R>(f: F) -> R
+where
+    F: FnOnce(&EditorShortcuts) -> R,
+{
+    EDITOR_SHORTCUTS.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if borrow.is_none() {
+            *borrow = Some(EditorShortcuts::new());
+        }
+        f(borrow.as_ref().unwrap())
+    })
+}
 
 fn create_shortcut(key: Key, with_ctrl: bool, with_shift: bool) -> Gd<Shortcut> {
     let mut key_event = InputEventKey::new_gd();
@@ -24,18 +65,6 @@ fn create_shortcut(key: Key, with_ctrl: bool, with_shift: bool) -> Gd<Shortcut> 
     events.push(&key_event.to_variant());
     shortcut.set_events(&events);
     shortcut
-}
-
-/// Checks if the input event matches a shortcut for the given key and modifiers.
-fn matches_shortcut(
-    event: &Gd<InputEventKey>,
-    key: Key,
-    with_ctrl: bool,
-    with_shift: bool,
-) -> bool {
-    let shortcut = create_shortcut(key, with_ctrl, with_shift);
-    let input_event: Gd<InputEvent> = event.clone().upcast();
-    shortcut.matches_event(&input_event)
 }
 
 /// Macro to extract keyboard modifier flags from any event with modifier methods
@@ -227,29 +256,37 @@ pub fn handle_key_event(
         return;
     }
 
-    // Handle shortcuts
+    // Handle shortcuts using pre-cached Shortcut objects
     if is_pressed
         && !is_echo
         && let Some(frame) = frame
     {
-        if matches_shortcut(event, Key::A, true, false) {
-            frame.select_all();
-            return;
-        }
-        if matches_shortcut(event, Key::C, true, false) {
-            frame.copy();
-            return;
-        }
-        if matches_shortcut(event, Key::X, true, false) {
-            frame.cut();
-            return;
-        }
-        if matches_shortcut(event, Key::V, true, false) {
-            frame.paste();
-            return;
-        }
-        if matches_shortcut(event, Key::V, true, true) {
-            frame.paste_and_match_style();
+        let input_event: Gd<InputEvent> = event.clone().upcast();
+        let handled = with_shortcuts(|shortcuts| {
+            if shortcuts.select_all.matches_event(&input_event) {
+                frame.select_all();
+                return true;
+            }
+            if shortcuts.copy.matches_event(&input_event) {
+                frame.copy();
+                return true;
+            }
+            if shortcuts.cut.matches_event(&input_event) {
+                frame.cut();
+                return true;
+            }
+            // Check paste_and_match_style before paste (more specific shortcut first)
+            if shortcuts.paste_and_match_style.matches_event(&input_event) {
+                frame.paste_and_match_style();
+                return true;
+            }
+            if shortcuts.paste.matches_event(&input_event) {
+                frame.paste();
+                return true;
+            }
+            false
+        });
+        if handled {
             return;
         }
     }
