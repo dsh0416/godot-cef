@@ -266,13 +266,6 @@ impl NativeTextureImporter {
             return Err("Shared handle is invalid".into());
         }
 
-        // Determine expected DXGI format based on CEF color type
-        let expected_format = match format {
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888 => DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-            _ => DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-        };
-
         // Open the shared handle to get the D3D12 resource
         let mut resource: Option<ID3D12Resource> = None;
         unsafe { self.device.OpenSharedHandle(handle, &mut resource) }
@@ -288,17 +281,6 @@ impl NativeTextureImporter {
                 "Expected 2D texture, got dimension {:?}",
                 desc.Dimension
             ));
-        }
-
-        // Validate format compatibility (UNORM and SRGB variants are copy-compatible)
-        let format_base = desc.Format.0 & !1; // Strip SRGB bit for comparison
-        let expected_base = expected_format.0 & !1;
-        if format_base != expected_base {
-            godot_warn!(
-                "[AcceleratedOSR/Windows] Format mismatch: resource has {:?}, expected {:?}",
-                desc.Format,
-                expected_format
-            );
         }
 
         Ok(resource)
