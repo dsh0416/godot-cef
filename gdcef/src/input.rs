@@ -32,28 +32,19 @@ impl EditorShortcuts {
     }
 }
 
-thread_local! {
-    static EDITOR_SHORTCUTS: RefCell<Option<EditorShortcuts>> = const { RefCell::new(None) };
-}
 
 fn with_shortcuts<F, R>(f: F) -> R
 where
     F: FnOnce(&EditorShortcuts) -> R,
 {
-    EDITOR_SHORTCUTS.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        if borrow.is_none() {
-            *borrow = Some(EditorShortcuts::new());
-        }
-        f(borrow.as_ref().unwrap())
-    })
+    let shortcuts = EditorShortcuts::new();
+    f(&shortcuts)
 }
-
-fn create_shortcut(key: Key, with_ctrl: bool, with_shift: bool) -> Gd<Shortcut> {
+fn create_shortcut(key: Key, with_command_or_ctrl: bool, with_shift: bool) -> Gd<Shortcut> {
     let mut key_event = InputEventKey::new_gd();
     key_event.set_keycode(key);
     key_event.set_command_or_control_autoremap(true);
-    if with_ctrl {
+    if with_command_or_ctrl {
         key_event.set_ctrl_pressed(true);
     }
     if with_shift {
@@ -261,7 +252,7 @@ pub fn handle_key_event(
         && !is_echo
         && let Some(frame) = frame
     {
-        let input_event: Gd<InputEvent> = event.clone().upcast();
+        let input_event: Gd<InputEvent> = event.to_variant().to();
         let handled = with_shortcuts(|shortcuts| {
             if shortcuts.select_all.matches_event(&input_event) {
                 frame.select_all();
