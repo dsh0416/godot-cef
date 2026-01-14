@@ -1,12 +1,42 @@
 use cef::sys::cef_event_flags_t;
 use cef::{ImplBrowserHost, ImplFrame, KeyEvent, KeyEventType, MouseButtonType, MouseEvent};
 use godot::classes::{
-    InputEventKey, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
+    InputEvent, InputEventKey, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
+    Shortcut,
 };
 use godot::global::{Key, MouseButton, MouseButtonMask};
 use godot::prelude::*;
-
 mod keycode;
+
+fn create_shortcut(key: Key, with_ctrl: bool, with_shift: bool) -> Gd<Shortcut> {
+    let mut key_event = InputEventKey::new_gd();
+    key_event.set_keycode(key);
+    key_event.set_command_or_control_autoremap(true);
+    if with_ctrl {
+        key_event.set_ctrl_pressed(true);
+    }
+    if with_shift {
+        key_event.set_shift_pressed(true);
+    }
+
+    let mut shortcut = Shortcut::new_gd();
+    let mut events = VarArray::new();
+    events.push(&key_event.to_variant());
+    shortcut.set_events(&events);
+    shortcut
+}
+
+/// Checks if the input event matches a shortcut for the given key and modifiers.
+fn matches_shortcut(
+    event: &Gd<InputEventKey>,
+    key: Key,
+    with_ctrl: bool,
+    with_shift: bool,
+) -> bool {
+    let shortcut = create_shortcut(key, with_ctrl, with_shift);
+    let input_event: Gd<InputEvent> = event.clone().upcast();
+    shortcut.matches_event(&input_event)
+}
 
 /// Macro to extract keyboard modifier flags from any event with modifier methods
 macro_rules! keyboard_modifiers {
@@ -197,49 +227,30 @@ pub fn handle_key_event(
         return;
     }
 
-    // Handle select-all / copy / cut / paste.
-    if is_pressed && !is_echo {
-        let accel_down = if cfg!(target_os = "macos") {
-            event.is_meta_pressed()
-        } else {
-            event.is_ctrl_pressed()
-        };
-
-        let no_extra_modifiers = !event.is_shift_pressed()
-            && !event.is_alt_pressed()
-            && if cfg!(target_os = "macos") {
-                // Accelerator is Cmd (Meta). Disallow Ctrl as an "extra" modifier.
-                !event.is_ctrl_pressed()
-            } else {
-                // Accelerator is Ctrl. Disallow Meta/Win/Super as an "extra" modifier.
-                !event.is_meta_pressed()
-            };
-
-        if accel_down
-            && no_extra_modifiers
-            && let Some(frame) = frame
-        {
-            match keycode {
-                Key::A => {
-                    frame.select_all();
-                    return;
-                }
-                Key::C => {
-                    frame.copy();
-                    return;
-                }
-                Key::X => {
-                    frame.cut();
-                    return;
-                }
-                Key::V => {
-                    frame.paste();
-                    return;
-                }
-                _ => {}
+    // Handle shortcuts
+    if is_pressed && !is_echo
+        && let Some(frame) = frame {
+            if matches_shortcut(event, Key::A, true, false) {
+                frame.select_all();
+                return;
+            }
+            if matches_shortcut(event, Key::C, true, false) {
+                frame.copy();
+                return;
+            }
+            if matches_shortcut(event, Key::X, true, false) {
+                frame.cut();
+                return;
+            }
+            if matches_shortcut(event, Key::V, true, false) {
+                frame.paste();
+                return;
+            }
+            if matches_shortcut(event, Key::V, true, true) {
+                frame.paste_and_match_style();
+                return;
             }
         }
-    }
 
     // Get the Windows virtual key code from Godot key (CEF expects this on all platforms)
     let windows_key_code = keycode::godot_key_to_windows_keycode(keycode);
