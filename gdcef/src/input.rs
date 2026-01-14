@@ -228,29 +228,31 @@ pub fn handle_key_event(
     }
 
     // Handle shortcuts
-    if is_pressed && !is_echo
-        && let Some(frame) = frame {
-            if matches_shortcut(event, Key::A, true, false) {
-                frame.select_all();
-                return;
-            }
-            if matches_shortcut(event, Key::C, true, false) {
-                frame.copy();
-                return;
-            }
-            if matches_shortcut(event, Key::X, true, false) {
-                frame.cut();
-                return;
-            }
-            if matches_shortcut(event, Key::V, true, false) {
-                frame.paste();
-                return;
-            }
-            if matches_shortcut(event, Key::V, true, true) {
-                frame.paste_and_match_style();
-                return;
-            }
+    if is_pressed
+        && !is_echo
+        && let Some(frame) = frame
+    {
+        if matches_shortcut(event, Key::A, true, false) {
+            frame.select_all();
+            return;
         }
+        if matches_shortcut(event, Key::C, true, false) {
+            frame.copy();
+            return;
+        }
+        if matches_shortcut(event, Key::X, true, false) {
+            frame.cut();
+            return;
+        }
+        if matches_shortcut(event, Key::V, true, false) {
+            frame.paste();
+            return;
+        }
+        if matches_shortcut(event, Key::V, true, true) {
+            frame.paste_and_match_style();
+            return;
+        }
+    }
 
     // Get the Windows virtual key code from Godot key (CEF expects this on all platforms)
     let windows_key_code = keycode::godot_key_to_windows_keycode(keycode);
