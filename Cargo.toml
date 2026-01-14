@@ -10,8 +10,8 @@ repository = "https://github.com/dsh0416/godot-cef"
 
 [workspace.dependencies]
 godot = { version = "0.4.5", features = ["api-4-5", "experimental-threads"] }
-cef = { version = "=143.7.0+143.0.14", features = ["sandbox", "accelerated_osr"] }
-cef-dll-sys = { version = "=143.7.0+143.0.14", features = ["sandbox"] }
+cef = { version = "=143.7.1+143.0.14", features = ["sandbox", "accelerated_osr"] }
+cef-dll-sys = { version = "=143.7.1+143.0.14", features = ["sandbox"] }
 process_path = "0.1.4"
 winit = "0.30.12"
 plist = { version = "1" }
