@@ -6,7 +6,6 @@ mod error;
 mod input;
 mod render;
 mod res_protocol;
-mod texture;
 mod utils;
 mod webrender;
 
@@ -35,8 +34,6 @@ use crate::browser::{
     RenderMode, TitleChangeQueue, UrlChangeQueue,
 };
 use crate::utils::get_display_scale_factor;
-
-pub use texture::TextureRectRd;
 
 struct GodotCef;
 

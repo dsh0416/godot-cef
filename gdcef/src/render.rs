@@ -11,8 +11,9 @@ use godot::prelude::*;
 
 /// Creates a RenderingDevice texture with the specified dimensions.
 ///
-/// The texture is created with BGRA8 format and appropriate usage flags for
-/// sampling and GPU copy operations.
+/// The texture is created with BGRA8 sRGB format and appropriate usage flags for
+/// sampling and GPU copy operations. sRGB format is used because web content
+/// rendered by CEF is in sRGB color space, ensuring correct gamma handling.
 ///
 /// # Arguments
 /// * `width` - Width in pixels (minimum 1)
@@ -32,7 +33,9 @@ pub fn create_rd_texture(width: i32, height: i32) -> (Rid, Gd<Texture2Drd>) {
         .expect("Failed to get RenderingDevice");
 
     let mut format = godot::classes::RdTextureFormat::new_gd();
-    format.set_format(DataFormat::B8G8R8A8_UNORM);
+    format.add_shareable_format(DataFormat::B8G8R8A8_SRGB);
+    format.add_shareable_format(DataFormat::B8G8R8A8_UNORM);
+    format.set_format(DataFormat::B8G8R8A8_SRGB);
     format.set_width(width as u32);
     format.set_height(height as u32);
     format.set_depth(1);

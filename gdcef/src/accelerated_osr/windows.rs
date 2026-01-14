@@ -16,9 +16,6 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator, ID3D12CommandQueue, ID3D12Device,
     ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
 };
-use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM,
-};
 use windows::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, INFINITE, WaitForSingleObject,
 };
@@ -265,12 +262,6 @@ impl NativeTextureImporter {
         if handle.is_invalid() {
             return Err("Shared handle is invalid".into());
         }
-
-        // Determine expected DXGI format based on CEF color type
-        let _expected_format = match format {
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => DXGI_FORMAT_R8G8B8A8_UNORM,
-            _ => DXGI_FORMAT_B8G8R8A8_UNORM,
-        };
 
         // Open the shared handle to get the D3D12 resource
         let mut resource: Option<ID3D12Resource> = None;
