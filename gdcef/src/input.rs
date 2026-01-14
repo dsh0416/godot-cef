@@ -1,7 +1,7 @@
 use cef::sys::cef_event_flags_t;
 use cef::{ImplBrowserHost, ImplFrame, KeyEvent, KeyEventType, MouseButtonType, MouseEvent};
 use godot::classes::{
-    InputEvent, InputEventKey, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture
+    InputEvent, InputEventKey, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
 };
 use godot::global::{Key, MouseButton, MouseButtonMask};
 use godot::prelude::*;
@@ -249,16 +249,13 @@ pub fn handle_key_event(
             if shortcuts.select_all.is_match(&input_event) {
                 frame.select_all();
                 return true;
-            }
-            else if shortcuts.copy.is_match(&input_event) {
+            } else if shortcuts.copy.is_match(&input_event) {
                 frame.copy();
                 return true;
-            } 
-            else if shortcuts.cut.is_match(&input_event) {
+            } else if shortcuts.cut.is_match(&input_event) {
                 frame.cut();
                 return true;
-            }
-            else if shortcuts.paste_and_match_style.is_match(&input_event) {
+            } else if shortcuts.paste_and_match_style.is_match(&input_event) {
                 frame.paste_and_match_style();
                 return true;
             }
