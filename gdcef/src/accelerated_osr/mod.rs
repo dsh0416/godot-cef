@@ -67,110 +67,67 @@ impl RenderBackend {
     }
 }
 
-pub struct SharedTextureInfo<H: NativeHandleTrait> {
-    native_handle: H,
-    pub width: u32,
-    pub height: u32,
-    pub format: cef::sys::cef_color_type_t,
-    pub dirty: bool,
-    pub frame_count: u64,
+/// State for pending GPU copy operations.
+#[derive(Default)]
+pub struct PendingCopyState {
+    /// The fence value/copy ID to check for completion.
+    pub copy_id: Option<u64>,
+    /// Whether a new frame arrived that needs processing.
+    pub frame_pending: bool,
 }
 
-impl<H: NativeHandleTrait> SharedTextureInfo<H> {
-    pub fn native_handle(&self) -> &H {
-        &self.native_handle
-    }
-
-    pub fn set_native_handle(&mut self, new_handle: H) {
-        self.native_handle = new_handle;
-    }
+/// Shared state between render handler and main texture management.
+/// This allows the on_accelerated_paint callback to perform immediate GPU operations.
+pub struct AcceleratedRenderState {
+    /// The texture importer for GPU copy operations.
+    pub importer: GodotTextureImporter,
+    /// The destination RenderingDevice texture RID.
+    pub dst_rd_rid: Rid,
+    /// Current destination texture dimensions.
+    pub dst_width: u32,
+    pub dst_height: u32,
+    /// State for pending GPU copy operations.
+    pub pending_copy: PendingCopyState,
+    /// Whether a texture resize is needed (detected in callback, handled in main loop).
+    pub needs_resize: Option<(u32, u32)>,
 }
 
-impl<H: NativeHandleTrait + Default> Default for SharedTextureInfo<H> {
-    fn default() -> Self {
+impl AcceleratedRenderState {
+    pub fn new(importer: GodotTextureImporter, dst_rd_rid: Rid, width: u32, height: u32) -> Self {
         Self {
-            native_handle: H::default(),
-            width: 0,
-            height: 0,
-            format: cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888,
-            dirty: false,
-            frame_count: 0,
+            importer,
+            dst_rd_rid,
+            dst_width: width,
+            dst_height: height,
+            pending_copy: PendingCopyState::default(),
+            needs_resize: None,
         }
     }
 }
 
-impl<H: NativeHandleTrait + Clone> Clone for SharedTextureInfo<H> {
-    fn clone(&self) -> Self {
-        Self {
-            native_handle: self.native_handle.clone(),
-            width: self.width,
-            height: self.height,
-            format: self.format,
-            dirty: self.dirty,
-            frame_count: self.frame_count,
-        }
-    }
-}
-
-unsafe impl<H: NativeHandleTrait + Send> Send for SharedTextureInfo<H> {}
-unsafe impl<H: NativeHandleTrait + Sync> Sync for SharedTextureInfo<H> {}
-
-pub trait NativeHandleTrait: Sized {
-    fn is_valid(&self) -> bool;
-    fn from_accelerated_paint_info(info: &AcceleratedPaintInfo) -> Self;
-}
-
-pub trait TextureImporterTrait {
-    type Handle: NativeHandleTrait;
-
-    fn new() -> Option<Self>
-    where
-        Self: Sized;
-
-    /// Copies the CEF shared texture to a Godot-owned texture via GPU-to-GPU copy.
-    ///
-    /// # Arguments
-    /// * `src_info` - The source texture info from CEF
-    /// * `dst_rd_rid` - The RenderingDevice RID of the destination Godot texture (obtained via RenderingServer::texture_get_rd_texture)
-    ///
-    /// # Returns
-    /// * `Ok(())` on successful copy
-    /// * `Err(String)` with error description on failure
-    fn copy_texture(
-        &mut self,
-        src_info: &SharedTextureInfo<Self::Handle>,
-        dst_rd_rid: Rid,
-    ) -> Result<(), String>;
-}
-
-pub struct AcceleratedRenderHandler<H: NativeHandleTrait + Default + Send + Sync + 'static> {
-    pub texture_info: Arc<Mutex<SharedTextureInfo<H>>>,
+#[derive(Clone)]
+pub struct AcceleratedRenderHandler {
     pub device_scale_factor: Arc<Mutex<f32>>,
     pub size: Arc<Mutex<winit::dpi::PhysicalSize<f32>>>,
     pub cursor_type: Arc<Mutex<cef_app::CursorType>>,
+    /// Shared state for immediate GPU copy in on_accelerated_paint.
+    render_state: Option<Arc<Mutex<AcceleratedRenderState>>>,
 }
 
-impl<H: NativeHandleTrait + Default + Clone + Send + Sync + 'static> Clone
-    for AcceleratedRenderHandler<H>
-{
-    fn clone(&self) -> Self {
-        Self {
-            texture_info: self.texture_info.clone(),
-            device_scale_factor: self.device_scale_factor.clone(),
-            size: self.size.clone(),
-            cursor_type: self.cursor_type.clone(),
-        }
-    }
-}
-
-impl<H: NativeHandleTrait + Default + Clone + Send + Sync + 'static> AcceleratedRenderHandler<H> {
+impl AcceleratedRenderHandler {
     pub fn new(device_scale_factor: f32, size: winit::dpi::PhysicalSize<f32>) -> Self {
         Self {
-            texture_info: Arc::new(Mutex::new(SharedTextureInfo::default())),
             device_scale_factor: Arc::new(Mutex::new(device_scale_factor)),
             size: Arc::new(Mutex::new(size)),
             cursor_type: Arc::new(Mutex::new(cef_app::CursorType::default())),
+            render_state: None,
         }
+    }
+
+    /// Sets the render state for immediate GPU copy operations.
+    /// Must be called before the browser is created.
+    pub fn set_render_state(&mut self, state: Arc<Mutex<AcceleratedRenderState>>) {
+        self.render_state = Some(state);
     }
 
     pub fn on_accelerated_paint(
@@ -183,20 +140,54 @@ impl<H: NativeHandleTrait + Default + Clone + Send + Sync + 'static> Accelerated
             return;
         }
 
-        if let Ok(mut tex_info) = self.texture_info.lock() {
-            tex_info.frame_count += 1;
-            tex_info.set_native_handle(H::from_accelerated_paint_info(info));
-            tex_info.width = info.extra.coded_size.width as u32;
-            tex_info.height = info.extra.coded_size.height as u32;
-            tex_info.format = *info.format.as_ref();
-            tex_info.dirty = true;
-        } else {
-            godot::global::godot_error!("[AcceleratedOSR] Failed to lock texture_info");
-        }
-    }
+        let src_width = info.extra.coded_size.width as u32;
+        let src_height = info.extra.coded_size.height as u32;
 
-    pub fn get_texture_info(&self) -> Arc<Mutex<SharedTextureInfo<H>>> {
-        self.texture_info.clone()
+        // Perform immediate GPU copy while handle is valid
+        let Some(render_state_arc) = &self.render_state else {
+            return;
+        };
+
+        let Ok(mut state) = render_state_arc.lock() else {
+            godot::global::godot_error!("[AcceleratedOSR] Failed to lock render state");
+            return;
+        };
+
+        // Check if texture dimensions changed - defer resize to main loop
+        if src_width != state.dst_width || src_height != state.dst_height {
+            state.needs_resize = Some((src_width, src_height));
+            state.pending_copy.frame_pending = true;
+            // Can't copy to mismatched texture, skip this frame
+            return;
+        }
+
+        // Check if previous copy is still in progress
+        if let Some(copy_id) = state.pending_copy.copy_id {
+            if !state.importer.is_copy_complete(copy_id) {
+                // Previous copy still running, skip this frame to avoid backing up
+                return;
+            }
+            state.pending_copy.copy_id = None;
+        }
+
+        // Perform immediate import and copy while handle is guaranteed valid
+        let dst_rid = state.dst_rd_rid;
+        match state.importer.import_and_copy(info, dst_rid) {
+            Ok(copy_id) => {
+                state.pending_copy.copy_id = Some(copy_id);
+                state.pending_copy.frame_pending = false;
+            }
+            Err(e) => {
+                // Don't spam the log for device removed/suspended errors
+                // (these are logged once by check_device_state)
+                if !e.contains("D3D12 device removed") {
+                    godot::global::godot_error!(
+                        "[AcceleratedOSR] Failed to import and copy texture: {}",
+                        e
+                    );
+                }
+            }
+        }
     }
 
     pub fn get_size(&self) -> Arc<Mutex<winit::dpi::PhysicalSize<f32>>> {
@@ -212,23 +203,8 @@ impl<H: NativeHandleTrait + Default + Clone + Send + Sync + 'static> Accelerated
     }
 }
 
-#[cfg(target_os = "macos")]
-pub type PlatformSharedTextureInfo = SharedTextureInfo<macos::NativeHandle>;
-#[cfg(target_os = "windows")]
-pub type PlatformSharedTextureInfo = SharedTextureInfo<windows::NativeHandle>;
-#[cfg(target_os = "linux")]
-pub type PlatformSharedTextureInfo = SharedTextureInfo<linux::NativeHandle>;
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-pub type PlatformSharedTextureInfo = SharedTextureInfo<()>;
-
-#[cfg(target_os = "macos")]
-pub type PlatformAcceleratedRenderHandler = AcceleratedRenderHandler<macos::NativeHandle>;
-#[cfg(target_os = "windows")]
-pub type PlatformAcceleratedRenderHandler = AcceleratedRenderHandler<windows::NativeHandle>;
-#[cfg(target_os = "linux")]
-pub type PlatformAcceleratedRenderHandler = AcceleratedRenderHandler<linux::NativeHandle>;
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-pub type PlatformAcceleratedRenderHandler = AcceleratedRenderHandler<()>;
+/// Type alias for platform compatibility (now just AcceleratedRenderHandler)
+pub type PlatformAcceleratedRenderHandler = AcceleratedRenderHandler;
 
 pub fn is_accelerated_osr_supported() -> bool {
     #[cfg(target_os = "macos")]
@@ -249,31 +225,27 @@ pub fn is_accelerated_osr_supported() -> bool {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-impl NativeHandleTrait for () {
-    fn is_valid(&self) -> bool {
-        false
-    }
-
-    fn from_accelerated_paint_info(_info: &AcceleratedPaintInfo) -> Self {}
-}
-
+/// Fallback stub for unsupported platforms
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub struct GodotTextureImporter;
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-impl TextureImporterTrait for GodotTextureImporter {
-    type Handle = ();
-
-    fn new() -> Option<Self> {
+impl GodotTextureImporter {
+    pub fn new() -> Option<Self> {
         None
     }
 
-    fn copy_texture(
+    pub fn import_and_copy(
         &mut self,
-        _src_info: &SharedTextureInfo<Self::Handle>,
+        _info: &AcceleratedPaintInfo,
         _dst_rd_rid: Rid,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         Err("Accelerated OSR not supported on this platform".to_string())
     }
+
+    pub fn is_copy_complete(&self, _copy_id: u64) -> bool {
+        true
+    }
+
+    pub fn wait_for_all_copies(&self) {}
 }

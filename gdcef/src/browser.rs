@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use winit::dpi::PhysicalSize;
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-use crate::accelerated_osr::{GodotTextureImporter, PlatformSharedTextureInfo};
+use crate::accelerated_osr::AcceleratedRenderState;
 
 /// Queue for IPC messages from the browser to Godot.
 pub type MessageQueue = Arc<Mutex<VecDeque<String>>>;
@@ -70,18 +70,11 @@ pub enum RenderMode {
     /// GPU-accelerated rendering using platform-specific shared textures.
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     Accelerated {
-        /// Shared texture info from CEF's accelerated paint callback.
-        texture_info: Arc<Mutex<PlatformSharedTextureInfo>>,
-        /// Platform-specific texture importer for GPU-to-GPU copy.
-        importer: GodotTextureImporter,
-        /// The RenderingDevice texture RID (for native handle access).
-        rd_texture_rid: Rid,
+        /// Shared render state containing importer and pending copy tracking.
+        /// This is shared with the render handler for immediate GPU copy in on_accelerated_paint.
+        render_state: Arc<Mutex<AcceleratedRenderState>>,
         /// The Texture2DRD wrapper for display in TextureRect.
         texture_2d_rd: Gd<Texture2Drd>,
-        /// Current texture width.
-        texture_width: u32,
-        /// Current texture height.
-        texture_height: u32,
     },
 }
 

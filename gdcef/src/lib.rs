@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::{
-    GodotTextureImporter, NativeHandleTrait, PlatformAcceleratedRenderHandler, TextureImporterTrait,
+    AcceleratedRenderState, GodotTextureImporter, PlatformAcceleratedRenderHandler,
 };
 use crate::browser::{
     App, ImeCompositionQueue, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue,
@@ -199,15 +199,16 @@ impl CefTexture {
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         if let Some(RenderMode::Accelerated {
-            rd_texture_rid,
+            render_state,
             texture_2d_rd,
-            ..
         }) = &mut self.app.render_mode
         {
             // Clear the RD texture RID from the Texture2Drd to break the reference
             // before we free the underlying RD texture.
             texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
-            render::free_rd_texture(*rd_texture_rid);
+            if let Ok(state) = render_state.lock() {
+                render::free_rd_texture(state.dst_rd_rid);
+            }
         }
 
         if let Some(browser) = self.app.browser.take()
@@ -405,12 +406,24 @@ impl CefTexture {
             }
         };
 
-        let render_handler = PlatformAcceleratedRenderHandler::new(
+        // Create the RD texture first
+        let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height);
+
+        // Create shared render state with the importer and destination texture
+        let render_state = Arc::new(Mutex::new(AcceleratedRenderState::new(
+            importer,
+            rd_texture_rid,
+            pixel_width as u32,
+            pixel_height as u32,
+        )));
+
+        // Create render handler and give it the shared state
+        let mut render_handler = PlatformAcceleratedRenderHandler::new(
             dpi,
             PhysicalSize::new(pixel_width as f32, pixel_height as f32),
         );
+        render_handler.set_render_state(render_state.clone());
 
-        let texture_info = render_handler.get_texture_info();
         let render_size = render_handler.get_size();
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
@@ -421,16 +434,11 @@ impl CefTexture {
         let ime_enable_queue: ImeEnableQueue = Arc::new(Mutex::new(VecDeque::new()));
         let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
 
-        let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height);
         self.base_mut().set_texture(&texture_2d_rd);
 
         self.app.render_mode = Some(RenderMode::Accelerated {
-            texture_info,
-            importer,
-            rd_texture_rid,
+            render_state,
             texture_2d_rd,
-            texture_width: pixel_width as u32,
-            texture_height: pixel_height as u32,
         });
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
@@ -593,105 +601,47 @@ impl CefTexture {
         }
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+        if let Some(RenderMode::Accelerated {
+            render_state,
+            texture_2d_rd,
+        }) = &mut self.app.render_mode
         {
-            let needs_resize = if let Some(RenderMode::Accelerated {
-                texture_info,
-                texture_width,
-                texture_height,
-                ..
-            }) = &self.app.render_mode
-            {
-                if let Ok(tex_info) = texture_info.lock() {
-                    tex_info.width != *texture_width || tex_info.height != *texture_height
-                } else {
-                    false
-                }
-            } else {
-                false
+            // The GPU copy now happens directly in on_accelerated_paint.
+            // Here we only need to handle texture resize when the source size changes.
+
+            let Ok(mut state) = render_state.lock() else {
+                return;
             };
 
-            if needs_resize {
-                let old_rd_rid = if let Some(RenderMode::Accelerated { rd_texture_rid, .. }) =
-                    &self.app.render_mode
-                {
-                    Some(*rd_texture_rid)
-                } else {
-                    None
-                };
+            // Check if a resize is needed (detected in on_accelerated_paint)
+            if let Some((new_w, new_h)) = state.needs_resize.take() {
+                if new_w > 0 && new_h > 0 {
+                    // CRITICAL: Wait for all pending GPU copies to complete before freeing the texture!
+                    // The GPU might still be copying to the old texture asynchronously.
+                    state.importer.wait_for_all_copies();
+                    state.pending_copy.copy_id = None; // Clear pending copy after wait
 
-                let new_texture_clone = if let Some(RenderMode::Accelerated {
-                    texture_info,
-                    texture_width,
-                    texture_height,
-                    rd_texture_rid,
-                    texture_2d_rd,
-                    ..
-                }) = &mut self.app.render_mode
-                {
-                    if let Ok(tex_info) = texture_info.lock() {
-                        let new_w = tex_info.width;
-                        let new_h = tex_info.height;
-                        drop(tex_info);
-
-                        let (new_rd_rid, new_texture_2d_rd) =
-                            render::create_rd_texture(new_w as i32, new_h as i32);
-                        let texture_clone = new_texture_2d_rd.clone();
-                        *rd_texture_rid = new_rd_rid;
-                        *texture_2d_rd = new_texture_2d_rd;
-                        *texture_width = new_w;
-                        *texture_height = new_h;
-                        Some(texture_clone)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if let Some(old_rid) = old_rd_rid {
+                    // Free the old texture
+                    let old_rid = state.dst_rd_rid;
                     render::free_rd_texture(old_rid);
-                }
 
-                if let Some(texture) = new_texture_clone {
-                    self.base_mut().set_texture(&texture);
+                    // Create new texture with new dimensions
+                    let (new_rd_rid, new_texture_2d_rd) =
+                        render::create_rd_texture(new_w as i32, new_h as i32);
+
+                    // Update the shared state with new texture info
+                    state.dst_rd_rid = new_rd_rid;
+                    state.dst_width = new_w;
+                    state.dst_height = new_h;
+
+                    // Update the Texture2DRD wrapper
+                    *texture_2d_rd = new_texture_2d_rd.clone();
+                    drop(state); // Release lock before calling Godot API
+
+                    self.base_mut().set_texture(&new_texture_2d_rd);
                 }
             }
-
-            if let Some(RenderMode::Accelerated {
-                texture_info,
-                importer,
-                rd_texture_rid,
-                ..
-            }) = &mut self.app.render_mode
-            {
-                let Ok(mut tex_info) = texture_info.lock() else {
-                    return;
-                };
-
-                if !tex_info.dirty
-                    || !tex_info.native_handle().is_valid()
-                    || tex_info.width == 0
-                    || tex_info.height == 0
-                {
-                    tex_info.dirty = false;
-                    return;
-                }
-
-                if !rd_texture_rid.is_valid() {
-                    godot::global::godot_warn!("[CefTexture] RD texture RID is invalid for copy");
-                    tex_info.dirty = false;
-                    return;
-                }
-
-                match importer.copy_texture(&tex_info, *rd_texture_rid) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        godot::global::godot_error!("[CefTexture] GPU texture copy failed: {}", e);
-                    }
-                }
-
-                tex_info.dirty = false;
-            }
+            // No need to do anything else - copy happens in on_accelerated_paint
         }
     }
 

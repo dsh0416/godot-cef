@@ -1,4 +1,4 @@
-use super::{NativeHandleTrait, RenderBackend, SharedTextureInfo, TextureImporterTrait};
+use super::RenderBackend;
 use cef::AcceleratedPaintInfo;
 use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
@@ -24,91 +24,10 @@ unsafe impl Encode for IOSurfaceRef {
     const ENCODING: Encoding = Encoding::Pointer(&Encoding::Struct("__IOSurface", &[]));
 }
 
-#[link(name = "CoreFoundation", kind = "framework")]
-unsafe extern "C" {
-    fn CFRetain(cf: *mut c_void) -> *mut c_void;
-    fn CFRelease(cf: *mut c_void);
-}
-
 #[link(name = "IOSurface", kind = "framework")]
 unsafe extern "C" {
     fn IOSurfaceGetWidth(buffer: *mut c_void) -> usize;
     fn IOSurfaceGetHeight(buffer: *mut c_void) -> usize;
-}
-
-fn io_surface_retain(io_surface: *mut c_void) -> *mut c_void {
-    if io_surface.is_null() {
-        return std::ptr::null_mut();
-    }
-    unsafe { CFRetain(io_surface) }
-}
-
-fn io_surface_release(io_surface: *mut c_void) {
-    if !io_surface.is_null() {
-        unsafe { CFRelease(io_surface) };
-    }
-}
-
-pub struct NativeHandle {
-    io_surface: *mut c_void,
-}
-
-impl NativeHandle {
-    pub fn as_ptr(&self) -> *mut c_void {
-        self.io_surface
-    }
-
-    pub fn from_io_surface(io_surface: *mut c_void) -> Self {
-        Self {
-            io_surface: if io_surface.is_null() {
-                std::ptr::null_mut()
-            } else {
-                io_surface_retain(io_surface)
-            },
-        }
-    }
-}
-
-impl Default for NativeHandle {
-    fn default() -> Self {
-        Self {
-            io_surface: std::ptr::null_mut(),
-        }
-    }
-}
-
-impl Clone for NativeHandle {
-    fn clone(&self) -> Self {
-        Self {
-            io_surface: if self.io_surface.is_null() {
-                std::ptr::null_mut()
-            } else {
-                io_surface_retain(self.io_surface)
-            },
-        }
-    }
-}
-
-impl Drop for NativeHandle {
-    fn drop(&mut self) {
-        if !self.io_surface.is_null() {
-            io_surface_release(self.io_surface);
-            self.io_surface = std::ptr::null_mut();
-        }
-    }
-}
-
-unsafe impl Send for NativeHandle {}
-unsafe impl Sync for NativeHandle {}
-
-impl NativeHandleTrait for NativeHandle {
-    fn is_valid(&self) -> bool {
-        !self.io_surface.is_null()
-    }
-
-    fn from_accelerated_paint_info(info: &AcceleratedPaintInfo) -> Self {
-        Self::from_io_surface(info.shared_texture_io_surface)
-    }
 }
 
 pub struct NativeTextureImporter {
@@ -266,10 +185,8 @@ pub struct GodotTextureImporter {
     current_texture_rid: Option<Rid>,
 }
 
-impl TextureImporterTrait for GodotTextureImporter {
-    type Handle = NativeHandle;
-
-    fn new() -> Option<Self> {
+impl GodotTextureImporter {
+    pub fn new() -> Option<Self> {
         let metal_importer = NativeTextureImporter::new()?;
         let render_backend = RenderBackend::detect();
 
@@ -289,20 +206,31 @@ impl TextureImporterTrait for GodotTextureImporter {
         })
     }
 
-    fn copy_texture(
+    /// Imports a CEF shared texture and immediately performs a GPU copy.
+    /// This should be called during on_accelerated_paint while the handle is guaranteed valid.
+    ///
+    /// # Arguments
+    /// * `info` - The accelerated paint info from CEF containing the IOSurface handle
+    /// * `dst_rd_rid` - The RenderingDevice RID of the destination Godot texture
+    ///
+    /// # Returns
+    /// * `Ok(copy_id)` - Copy completed successfully (always 0 for synchronous Metal copy)
+    /// * `Err(String)` - Error description on failure
+    pub fn import_and_copy(
         &mut self,
-        src_info: &SharedTextureInfo<Self::Handle>,
+        info: &AcceleratedPaintInfo,
         dst_rd_rid: Rid,
-    ) -> Result<(), String> {
-        let io_surface = src_info.native_handle().as_ptr();
+    ) -> Result<u64, String> {
+        let io_surface = info.shared_texture_io_surface;
         if io_surface.is_null() {
             return Err("Source IOSurface is null".into());
         }
-        if src_info.width == 0 || src_info.height == 0 {
-            return Err(format!(
-                "Invalid source dimensions: {}x{}",
-                src_info.width, src_info.height
-            ));
+
+        let width = info.extra.coded_size.width as u32;
+        let height = info.extra.coded_size.height as u32;
+
+        if width == 0 || height == 0 {
+            return Err(format!("Invalid source dimensions: {}x{}", width, height));
         }
         if !dst_rd_rid.is_valid() {
             return Err("Destination RID is invalid".into());
@@ -311,9 +239,9 @@ impl TextureImporterTrait for GodotTextureImporter {
         // Create Metal texture from IOSurface (source)
         let src_metal_texture = self.metal_importer.import_io_surface(
             io_surface,
-            src_info.width,
-            src_info.height,
-            src_info.format,
+            width,
+            height,
+            *info.format.as_ref(),
         )?;
 
         // Get destination Metal texture from Godot's RenderingDevice
@@ -337,22 +265,32 @@ impl TextureImporterTrait for GodotTextureImporter {
             return Err("Destination Metal texture handle is misaligned for AnyObject".into());
         }
 
-        let dst_texture_ref = unsafe {
-            // SAFETY:
-            // - `dst_texture_ptr` originates from Godot's RenderingDevice via
-            //   `get_driver_resource(DriverResource::TEXTURE, ...)`, which on the Metal backend
-            //   is expected to return a valid pointer to a Metal texture object when non-zero.
-            // - We have checked that the raw handle is non-zero and suitably aligned for
-            //   `AnyObject` above.
-            // - Therefore, dereferencing `dst_texture_ptr` as `&AnyObject` is assumed to be valid.
-            &*dst_texture_ptr
-        };
+        let dst_texture_ref = unsafe { &*dst_texture_ptr };
+
+        // Metal copy is synchronous for now (waitUntilCompleted)
+        // TODO: Make this async like the D3D12 version
         self.metal_importer.copy_texture(
             &src_metal_texture,
             dst_texture_ref,
-            src_info.width,
-            src_info.height,
-        )
+            width,
+            height,
+        )?;
+
+        // Return 0 as copy_id since Metal copy is currently synchronous
+        Ok(0)
+    }
+
+    /// Checks if an async copy operation has completed.
+    /// Returns true if completed, false if still in progress.
+    pub fn is_copy_complete(&self, _copy_id: u64) -> bool {
+        // Metal copy is currently synchronous, so always complete
+        true
+    }
+
+    /// Waits for all pending GPU copies to complete.
+    /// MUST be called before freeing any destination textures to avoid use-after-free.
+    pub fn wait_for_all_copies(&self) {
+        // No-op:  Metal copy is currently synchronous, so nothing to wait for
     }
 }
 
