@@ -302,7 +302,7 @@ impl GodotTextureImporter {
         &mut self,
         info: &cef::AcceleratedPaintInfo,
         dst_rd_rid: Rid,
-    ) -> Result<u64, String> {
+    ) -> Result<(), String> {
         self.d3d12_importer.check_device_state()?;
 
         let handle = HANDLE(info.shared_texture_handle);
@@ -346,7 +346,7 @@ impl GodotTextureImporter {
             .copy_texture(&src_resource, &dst_resource)?;
 
         std::mem::forget(dst_resource);
-        Ok(0)
+        Ok(())
     }
 }
 
