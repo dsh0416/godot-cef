@@ -606,42 +606,31 @@ impl CefTexture {
             texture_2d_rd,
         }) = &mut self.app.render_mode
         {
-            // The GPU copy now happens directly in on_accelerated_paint.
-            // Here we only need to handle texture resize when the source size changes.
-
             let Ok(mut state) = render_state.lock() else {
                 return;
             };
 
-            // Check if a resize is needed (detected in on_accelerated_paint)
-            if let Some((new_w, new_h)) = state.needs_resize.take() {
-                if new_w > 0 && new_h > 0 {
-                    // CRITICAL: Wait for all pending GPU copies to complete before freeing the texture!
-                    // The GPU might still be copying to the old texture asynchronously.
-                    state.importer.wait_for_all_copies();
-                    state.pending_copy.copy_id = None; // Clear pending copy after wait
+            if let Some((new_w, new_h)) = state.needs_resize.take()
+                && new_w > 0
+                && new_h > 0
+            {
+                state.importer.wait_for_all_copies();
+                state.pending_copy.copy_id = None;
 
-                    // Free the old texture
-                    let old_rid = state.dst_rd_rid;
-                    render::free_rd_texture(old_rid);
+                render::free_rd_texture(state.dst_rd_rid);
 
-                    // Create new texture with new dimensions
-                    let (new_rd_rid, new_texture_2d_rd) =
-                        render::create_rd_texture(new_w as i32, new_h as i32);
+                let (new_rd_rid, new_texture_2d_rd) =
+                    render::create_rd_texture(new_w as i32, new_h as i32);
 
-                    // Update the shared state with new texture info
-                    state.dst_rd_rid = new_rd_rid;
-                    state.dst_width = new_w;
-                    state.dst_height = new_h;
+                state.dst_rd_rid = new_rd_rid;
+                state.dst_width = new_w;
+                state.dst_height = new_h;
 
-                    // Update the Texture2DRD wrapper
-                    *texture_2d_rd = new_texture_2d_rd.clone();
-                    drop(state); // Release lock before calling Godot API
+                *texture_2d_rd = new_texture_2d_rd.clone();
+                drop(state);
 
-                    self.base_mut().set_texture(&new_texture_2d_rd);
-                }
+                self.base_mut().set_texture(&new_texture_2d_rd);
             }
-            // No need to do anything else - copy happens in on_accelerated_paint
         }
     }
 

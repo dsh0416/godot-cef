@@ -206,16 +206,6 @@ impl GodotTextureImporter {
         })
     }
 
-    /// Imports a CEF shared texture and immediately performs a GPU copy.
-    /// This should be called during on_accelerated_paint while the handle is guaranteed valid.
-    ///
-    /// # Arguments
-    /// * `info` - The accelerated paint info from CEF containing the IOSurface handle
-    /// * `dst_rd_rid` - The RenderingDevice RID of the destination Godot texture
-    ///
-    /// # Returns
-    /// * `Ok(copy_id)` - Copy completed successfully (always 0 for synchronous Metal copy)
-    /// * `Err(String)` - Error description on failure
     pub fn import_and_copy(
         &mut self,
         info: &AcceleratedPaintInfo,
@@ -269,29 +259,17 @@ impl GodotTextureImporter {
 
         // Metal copy is synchronous for now (waitUntilCompleted)
         // TODO: Make this async like the D3D12 version
-        self.metal_importer.copy_texture(
-            &src_metal_texture,
-            dst_texture_ref,
-            width,
-            height,
-        )?;
+        self.metal_importer
+            .copy_texture(&src_metal_texture, dst_texture_ref, width, height)?;
 
-        // Return 0 as copy_id since Metal copy is currently synchronous
         Ok(0)
     }
 
-    /// Checks if an async copy operation has completed.
-    /// Returns true if completed, false if still in progress.
     pub fn is_copy_complete(&self, _copy_id: u64) -> bool {
-        // Metal copy is currently synchronous, so always complete
         true
     }
 
-    /// Waits for all pending GPU copies to complete.
-    /// MUST be called before freeing any destination textures to avoid use-after-free.
-    pub fn wait_for_all_copies(&self) {
-        // No-op:  Metal copy is currently synchronous, so nothing to wait for
-    }
+    pub fn wait_for_all_copies(&self) {}
 }
 
 impl Drop for GodotTextureImporter {
@@ -307,3 +285,6 @@ impl Drop for GodotTextureImporter {
 pub fn is_supported() -> bool {
     NativeTextureImporter::new().is_some() && RenderBackend::detect().supports_accelerated_osr()
 }
+
+unsafe impl Send for GodotTextureImporter {}
+unsafe impl Sync for GodotTextureImporter {}

@@ -9,21 +9,7 @@ use godot::classes::rendering_device::{
 use godot::classes::{RenderingServer, Texture2Drd};
 use godot::prelude::*;
 
-/// Creates a RenderingDevice texture with the specified dimensions.
-///
-/// The texture is created with BGRA8 UNORM format to match CEF's output format.
-/// D3D12's CopyResource requires identical formats between source and destination.
-/// CEF outputs B8G8R8A8_UNORM (format 87), so we must use the same format.
-///
-/// # Arguments
-/// * `width` - Width in pixels (minimum 1)
-/// * `height` - Height in pixels (minimum 1)
-///
-/// # Returns
-/// A tuple of (RenderingDevice texture RID, Texture2Drd wrapper for display)
-///
-/// # Panics
-/// Panics if the RenderingDevice texture creation fails.
+/// Creates a RenderingDevice texture for CEF rendering.
 pub fn create_rd_texture(width: i32, height: i32) -> (Rid, Gd<Texture2Drd>) {
     let width = width.max(1) as i64;
     let height = height.max(1) as i64;
@@ -33,11 +19,9 @@ pub fn create_rd_texture(width: i32, height: i32) -> (Rid, Gd<Texture2Drd>) {
         .expect("Failed to get RenderingDevice");
 
     let mut format = godot::classes::RdTextureFormat::new_gd();
-    // CRITICAL: Must use B8G8R8A8_UNORM to match CEF's output format (DXGI_FORMAT 87)
-    // CopyResource requires identical formats - using SRGB (format 90) would cause DEVICE_HUNG
     format.add_shareable_format(DataFormat::B8G8R8A8_UNORM);
     format.add_shareable_format(DataFormat::B8G8R8A8_SRGB);
-    format.set_format(DataFormat::B8G8R8A8_UNORM);
+    format.set_format(DataFormat::B8G8R8A8_SRGB);
     format.set_width(width as u32);
     format.set_height(height as u32);
     format.set_depth(1);
@@ -62,12 +46,6 @@ pub fn create_rd_texture(width: i32, height: i32) -> (Rid, Gd<Texture2Drd>) {
     (rd_texture_rid, texture_2d_rd)
 }
 
-/// Frees a RenderingDevice texture.
-///
-/// This function safely handles invalid RIDs and missing RenderingDevice.
-///
-/// # Arguments
-/// * `rd_texture_rid` - The RID of the texture to free
 pub fn free_rd_texture(rd_texture_rid: Rid) {
     if rd_texture_rid.is_valid()
         && let Some(mut rd) = RenderingServer::singleton().get_rendering_device()

@@ -3,7 +3,6 @@ use cef::AcceleratedPaintInfo;
 use godot::global::godot_warn;
 use godot::prelude::*;
 
-/// Stub for Linux accelerated OSR (not yet implemented).
 pub struct GodotTextureImporter;
 
 impl GodotTextureImporter {
@@ -36,11 +35,12 @@ impl GodotTextureImporter {
         true
     }
 
-    pub fn wait_for_all_copies(&self) {
-        // No-op: Linux accelerated OSR not implemented
-    }
+    pub fn wait_for_all_copies(&self) {}
 }
 
 pub fn is_supported() -> bool {
     false
 }
+
+unsafe impl Send for GodotTextureImporter {}
+unsafe impl Sync for GodotTextureImporter {}

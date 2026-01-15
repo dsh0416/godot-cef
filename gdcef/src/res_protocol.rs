@@ -492,12 +492,6 @@ impl ResSchemeHandlerFactory {
     }
 }
 
-#[allow(dead_code)]
-pub fn register_res_scheme_handler() {
-    let mut factory = ResSchemeHandlerFactory::build(ResSchemeHandler::new());
-    cef::register_scheme_handler_factory(Some(&"res".into()), Some(&"".into()), Some(&mut factory));
-}
-
 pub fn register_res_scheme_handler_on_context(context: &mut cef::RequestContext) {
     use cef::ImplRequestContext;
     let mut factory = ResSchemeHandlerFactory::build(ResSchemeHandler::new());

@@ -67,28 +67,18 @@ impl RenderBackend {
     }
 }
 
-/// State for pending GPU copy operations.
 #[derive(Default)]
 pub struct PendingCopyState {
-    /// The fence value/copy ID to check for completion.
     pub copy_id: Option<u64>,
-    /// Whether a new frame arrived that needs processing.
     pub frame_pending: bool,
 }
 
-/// Shared state between render handler and main texture management.
-/// This allows the on_accelerated_paint callback to perform immediate GPU operations.
 pub struct AcceleratedRenderState {
-    /// The texture importer for GPU copy operations.
     pub importer: GodotTextureImporter,
-    /// The destination RenderingDevice texture RID.
     pub dst_rd_rid: Rid,
-    /// Current destination texture dimensions.
     pub dst_width: u32,
     pub dst_height: u32,
-    /// State for pending GPU copy operations.
     pub pending_copy: PendingCopyState,
-    /// Whether a texture resize is needed (detected in callback, handled in main loop).
     pub needs_resize: Option<(u32, u32)>,
 }
 
@@ -110,7 +100,6 @@ pub struct AcceleratedRenderHandler {
     pub device_scale_factor: Arc<Mutex<f32>>,
     pub size: Arc<Mutex<winit::dpi::PhysicalSize<f32>>>,
     pub cursor_type: Arc<Mutex<cef_app::CursorType>>,
-    /// Shared state for immediate GPU copy in on_accelerated_paint.
     render_state: Option<Arc<Mutex<AcceleratedRenderState>>>,
 }
 
@@ -124,8 +113,6 @@ impl AcceleratedRenderHandler {
         }
     }
 
-    /// Sets the render state for immediate GPU copy operations.
-    /// Must be called before the browser is created.
     pub fn set_render_state(&mut self, state: Arc<Mutex<AcceleratedRenderState>>) {
         self.render_state = Some(state);
     }
@@ -203,7 +190,6 @@ impl AcceleratedRenderHandler {
     }
 }
 
-/// Type alias for platform compatibility (now just AcceleratedRenderHandler)
 pub type PlatformAcceleratedRenderHandler = AcceleratedRenderHandler;
 
 pub fn is_accelerated_osr_supported() -> bool {
@@ -225,7 +211,6 @@ pub fn is_accelerated_osr_supported() -> bool {
     }
 }
 
-/// Fallback stub for unsupported platforms
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub struct GodotTextureImporter;
 
