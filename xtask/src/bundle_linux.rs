@@ -87,18 +87,19 @@ fn strip_binary(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn strip_binaries(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Stripping debug symbols...");
-    strip_binary(&target_dir.join("libgdcef.so"))?;
-    strip_binary(&target_dir.join("gdcef_helper"))?;
+fn strip_cef_binaries(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Stripping CEF binaries...");
+    strip_binary(&target_dir.join("libcef.so"))?;
+    strip_binary(&target_dir.join("libEGL.so"))?;
+    strip_binary(&target_dir.join("libGLESv2.so"))?;
+    strip_binary(&target_dir.join("libvk_swiftshader.so"))?;
+    strip_binary(&target_dir.join("libvulkan.so.1"))?;
     Ok(())
 }
 
-fn bundle(target_dir: &Path, release: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     copy_cef_assets(target_dir)?;
-    if release {
-        strip_binaries(target_dir)?;
-    }
+    strip_cef_binaries(target_dir)?;
     println!("Linux bundle complete: {}", target_dir.display());
     Ok(())
 }
@@ -117,7 +118,7 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
     run_cargo(&cargo_args)?;
 
     let target_dir = get_target_dir(release, target_dir);
-    bundle(&target_dir, release)?;
+    bundle(&target_dir)?;
 
     Ok(())
 }
