@@ -260,8 +260,11 @@ impl NativeTextureImporter {
             .map_err(|e| format!("Failed to signal fence: {:?}", e))?;
 
         // Wait for the copy to complete
-        unsafe { self.fence.SetEventOnCompletion(self.fence_value, self.fence_event) }
-            .map_err(|e| format!("Failed to set event on completion: {:?}", e))?;
+        unsafe {
+            self.fence
+                .SetEventOnCompletion(self.fence_value, self.fence_event)
+        }
+        .map_err(|e| format!("Failed to set event on completion: {:?}", e))?;
         unsafe { WaitForSingleObject(self.fence_event, INFINITE) };
 
         Ok(())
