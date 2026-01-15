@@ -3,6 +3,7 @@
 use crate::bundle_common::{copy_directory, get_cef_dir, get_target_dir, run_cargo};
 use std::fs;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 /// CEF files that need to be copied to the target directory
 const CEF_FILES: &[&str] = &[
@@ -64,8 +65,40 @@ fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
-fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn strip_binary(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if !path.exists() {
+        println!("  Warning: {} not found, skipping strip", path.display());
+        return Ok(());
+    }
+
+    println!("  Stripping: {}", path.display());
+
+    let status = Command::new("strip")
+        .arg("--strip-debug")
+        .arg(path)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("strip failed for {}: {}", path.display(), status).into());
+    }
+
+    Ok(())
+}
+
+fn strip_binaries(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Stripping debug symbols...");
+    strip_binary(&target_dir.join("libgdcef.so"))?;
+    strip_binary(&target_dir.join("gdcef_helper"))?;
+    Ok(())
+}
+
+fn bundle(target_dir: &Path, release: bool) -> Result<(), Box<dyn std::error::Error>> {
     copy_cef_assets(target_dir)?;
+    if release {
+        strip_binaries(target_dir)?;
+    }
     println!("Linux bundle complete: {}", target_dir.display());
     Ok(())
 }
@@ -84,7 +117,7 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
     run_cargo(&cargo_args)?;
 
     let target_dir = get_target_dir(release, target_dir);
-    bundle(&target_dir)?;
+    bundle(&target_dir, release)?;
 
     Ok(())
 }
