@@ -67,18 +67,11 @@ impl RenderBackend {
     }
 }
 
-#[derive(Default)]
-pub struct PendingCopyState {
-    pub copy_id: Option<u64>,
-    pub frame_pending: bool,
-}
-
 pub struct AcceleratedRenderState {
     pub importer: GodotTextureImporter,
     pub dst_rd_rid: Rid,
     pub dst_width: u32,
     pub dst_height: u32,
-    pub pending_copy: PendingCopyState,
     pub needs_resize: Option<(u32, u32)>,
 }
 
@@ -89,7 +82,6 @@ impl AcceleratedRenderState {
             dst_rd_rid,
             dst_width: width,
             dst_height: height,
-            pending_copy: PendingCopyState::default(),
             needs_resize: None,
         }
     }
@@ -143,27 +135,14 @@ impl AcceleratedRenderHandler {
         // Check if texture dimensions changed - defer resize to main loop
         if src_width != state.dst_width || src_height != state.dst_height {
             state.needs_resize = Some((src_width, src_height));
-            state.pending_copy.frame_pending = true;
             // Can't copy to mismatched texture, skip this frame
             return;
-        }
-
-        // Check if previous copy is still in progress
-        if let Some(copy_id) = state.pending_copy.copy_id {
-            if !state.importer.is_copy_complete(copy_id) {
-                // Previous copy still running, skip this frame to avoid backing up
-                return;
-            }
-            state.pending_copy.copy_id = None;
         }
 
         // Perform immediate import and copy while handle is guaranteed valid
         let dst_rid = state.dst_rd_rid;
         match state.importer.import_and_copy(info, dst_rid) {
-            Ok(copy_id) => {
-                state.pending_copy.copy_id = Some(copy_id);
-                state.pending_copy.frame_pending = false;
-            }
+            Ok(_) => {}
             Err(e) => {
                 // Don't spam the log for device removed/suspended errors
                 // (these are logged once by check_device_state)
@@ -227,10 +206,4 @@ impl GodotTextureImporter {
     ) -> Result<u64, String> {
         Err("Accelerated OSR not supported on this platform".to_string())
     }
-
-    pub fn is_copy_complete(&self, _copy_id: u64) -> bool {
-        true
-    }
-
-    pub fn wait_for_all_copies(&self) {}
 }

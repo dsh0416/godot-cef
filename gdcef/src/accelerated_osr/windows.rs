@@ -23,7 +23,6 @@ pub struct NativeTextureImporter {
     fence: ID3D12Fence,
     fence_value: u64,
     fence_event: HANDLE,
-    pending_copies: std::collections::HashMap<u64, u64>,
     device_removed_logged: bool,
 }
 
@@ -102,7 +101,6 @@ impl NativeTextureImporter {
             fence,
             fence_value: 0,
             fence_event,
-            pending_copies: std::collections::HashMap::new(),
             device_removed_logged: false,
         })
     }
@@ -172,11 +170,12 @@ impl NativeTextureImporter {
         Ok(resource)
     }
 
-    pub fn queue_copy_texture(
+    /// Copies the source texture to the destination texture synchronously.
+    pub fn copy_texture(
         &mut self,
         src_resource: &ID3D12Resource,
         dst_resource: &ID3D12Resource,
-    ) -> Result<u64, String> {
+    ) -> Result<(), String> {
         // Wait for previous copy before reusing command allocator
         if self.fence_value > 0 {
             let completed = unsafe { self.fence.GetCompletedValue() };
@@ -260,44 +259,11 @@ impl NativeTextureImporter {
         unsafe { self.command_queue.Signal(&self.fence, self.fence_value) }
             .map_err(|e| format!("Failed to signal fence: {:?}", e))?;
 
-        let copy_id = self.fence_value;
-        self.pending_copies.insert(copy_id, self.fence_value);
-
-        Ok(copy_id)
-    }
-
-    pub fn is_copy_complete(&self, copy_id: u64) -> bool {
-        let completed_value = unsafe { self.fence.GetCompletedValue() };
-        copy_id <= completed_value
-    }
-
-    pub fn wait_for_all_copies(&self) {
-        if self.fence_value == 0 {
-            return;
-        }
-
-        let completed = unsafe { self.fence.GetCompletedValue() };
-        if completed < self.fence_value {
-            let result = unsafe {
-                self.fence
-                    .SetEventOnCompletion(self.fence_value, self.fence_event)
-            };
-            if result.is_ok() {
-                unsafe { WaitForSingleObject(self.fence_event, INFINITE) };
-            }
-        }
-    }
-
-    pub fn wait_for_copy(&self, copy_id: u64) -> Result<(), String> {
-        let completed = unsafe { self.fence.GetCompletedValue() };
-        if completed >= copy_id {
-            return Ok(());
-        }
-
-        unsafe { self.fence.SetEventOnCompletion(copy_id, self.fence_event) }
+        // Wait for the copy to complete
+        unsafe { self.fence.SetEventOnCompletion(self.fence_value, self.fence_event) }
             .map_err(|e| format!("Failed to set event on completion: {:?}", e))?;
-
         unsafe { WaitForSingleObject(self.fence_event, INFINITE) };
+
         Ok(())
     }
 }
@@ -373,22 +339,11 @@ impl GodotTextureImporter {
             unsafe { ID3D12Resource::from_raw(resource_ptr as *mut c_void) }
         };
 
-        // Must wait for copy - D3D12 command lists don't AddRef resources
-        let copy_id = self
-            .d3d12_importer
-            .queue_copy_texture(&src_resource, &dst_resource)?;
+        self.d3d12_importer
+            .copy_texture(&src_resource, &dst_resource)?;
 
-        self.d3d12_importer.wait_for_copy(copy_id)?;
         std::mem::forget(dst_resource);
-        Ok(copy_id)
-    }
-
-    pub fn is_copy_complete(&self, copy_id: u64) -> bool {
-        self.d3d12_importer.is_copy_complete(copy_id)
-    }
-
-    pub fn wait_for_all_copies(&self) {
-        self.d3d12_importer.wait_for_all_copies()
+        Ok(0)
     }
 }
 

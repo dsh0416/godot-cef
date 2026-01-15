@@ -614,9 +614,6 @@ impl CefTexture {
                 && new_w > 0
                 && new_h > 0
             {
-                state.importer.wait_for_all_copies();
-                state.pending_copy.copy_id = None;
-
                 render::free_rd_texture(state.dst_rd_rid);
 
                 let (new_rd_rid, new_texture_2d_rd) =

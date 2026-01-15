@@ -30,12 +30,6 @@ impl GodotTextureImporter {
         // TODO: Implement Vulkan texture import and copy
         Err("Accelerated OSR not yet implemented on Linux".to_string())
     }
-
-    pub fn is_copy_complete(&self, _copy_id: u64) -> bool {
-        true
-    }
-
-    pub fn wait_for_all_copies(&self) {}
 }
 
 pub fn is_supported() -> bool {
