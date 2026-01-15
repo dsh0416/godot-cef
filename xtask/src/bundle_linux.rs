@@ -3,6 +3,7 @@
 use crate::bundle_common::{copy_directory, get_cef_dir, get_target_dir, run_cargo};
 use std::fs;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 /// CEF files that need to be copied to the target directory
 const CEF_FILES: &[&str] = &[
@@ -64,8 +65,41 @@ fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+fn strip_binary(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if !path.exists() {
+        println!("  Warning: {} not found, skipping strip", path.display());
+        return Ok(());
+    }
+
+    println!("  Stripping: {}", path.display());
+
+    let status = Command::new("strip")
+        .arg("--strip-debug")
+        .arg(path)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("strip failed for {}: {}", path.display(), status).into());
+    }
+
+    Ok(())
+}
+
+fn strip_cef_binaries(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Stripping CEF binaries...");
+    strip_binary(&target_dir.join("libcef.so"))?;
+    strip_binary(&target_dir.join("libEGL.so"))?;
+    strip_binary(&target_dir.join("libGLESv2.so"))?;
+    strip_binary(&target_dir.join("libvk_swiftshader.so"))?;
+    strip_binary(&target_dir.join("libvulkan.so.1"))?;
+    Ok(())
+}
+
 fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     copy_cef_assets(target_dir)?;
+    strip_cef_binaries(target_dir)?;
     println!("Linux bundle complete: {}", target_dir.display());
     Ok(())
 }
