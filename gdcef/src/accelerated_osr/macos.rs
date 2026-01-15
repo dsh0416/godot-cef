@@ -257,8 +257,8 @@ impl GodotTextureImporter {
 
         let dst_texture_ref = unsafe { &*dst_texture_ptr };
 
-        // Metal copy is synchronous for now (waitUntilCompleted)
-        // TODO: Make this async like the D3D12 version
+        // Metal copy is synchronous for now (waitUntilCompleted).
+        // TODO: Consider making this async in the future (e.g., to match an async D3D12 implementation once available).
         self.metal_importer
             .copy_texture(&src_metal_texture, dst_texture_ref, width, height)?;
 

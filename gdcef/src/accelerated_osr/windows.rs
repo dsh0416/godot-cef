@@ -112,14 +112,14 @@ impl NativeTextureImporter {
         if reason.is_ok() {
             self.device_removed_logged = false;
             Ok(())
+        } else if !self.device_removed_logged {
+            godot_warn!(
+                "[AcceleratedOSR/Windows] D3D12 device removed: {:?}",
+                reason.err()
+            );
+            self.device_removed_logged = true;
+            Err("D3D12 device removed".into())
         } else {
-            if !self.device_removed_logged {
-                godot_warn!(
-                    "[AcceleratedOSR/Windows] D3D12 device removed: {:?}",
-                    reason.err()
-                );
-                self.device_removed_logged = true;
-            }
             Err("D3D12 device removed".into())
         }
     }
@@ -204,7 +204,15 @@ impl NativeTextureImporter {
         }
         .map_err(|e| format!("Failed to create command list: {:?}", e))?;
 
-        // Transition destination to COPY_DEST (source stays COMMON - owned by CEF)
+        // Transition only the destination to COPY_DEST.
+        //
+        // The source texture is created and fully managed by CEF. CEF keeps the
+        // resource in a state suitable for external consumers (typically COMMON)
+        // and expects clients not to perform their own state transitions on it.
+        // The previous implementation transitioned the source to COPY_SOURCE and
+        // back to COMMON, but that interfered with CEF's own resource state
+        // tracking. We now rely on CEF's guarantees and leave the source state
+        // untouched, transitioning just our destination resource for the copy.
         let dst_barrier = D3D12_RESOURCE_BARRIER {
             Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
             Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
