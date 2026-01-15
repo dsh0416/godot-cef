@@ -203,7 +203,7 @@ impl GodotTextureImporter {
         &mut self,
         _info: &AcceleratedPaintInfo,
         _dst_rd_rid: Rid,
-    ) -> Result<u64, String> {
+    ) -> Result<(), String> {
         Err("Accelerated OSR not supported on this platform".to_string())
     }
 }

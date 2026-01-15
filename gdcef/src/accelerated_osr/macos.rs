@@ -210,7 +210,7 @@ impl GodotTextureImporter {
         &mut self,
         info: &AcceleratedPaintInfo,
         dst_rd_rid: Rid,
-    ) -> Result<u64, String> {
+    ) -> Result<(), String> {
         let io_surface = info.shared_texture_io_surface;
         if io_surface.is_null() {
             return Err("Source IOSurface is null".into());
@@ -260,7 +260,7 @@ impl GodotTextureImporter {
         self.metal_importer
             .copy_texture(&src_metal_texture, dst_texture_ref, width, height)?;
 
-        Ok(0)
+        Ok(())
     }
 }
 
