@@ -136,7 +136,8 @@ wrap_app! {
 
             // for DirectX 12 backend, we need to enable D3D11On12 for better compatibility with Godot's DirectX 12 backend
             if self.app.godot_backend() == GodotRenderBackend::Direct3D12 {
-                command_line.append_switch(Some(&"d3d11on12".into()));
+                command_line
+                    .append_switch_with_value(Some(&"use-angle".into()), Some(&"d3d11on12".into()));
             }
 
             // Only enable remote debugging in debug builds or when running from the editor
