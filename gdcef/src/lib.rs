@@ -351,35 +351,21 @@ impl CefTexture {
         let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
 
         let texture = ImageTexture::new_gd();
-        self.base_mut().set_texture(&texture);
-
-        self.app.render_mode = Some(RenderMode::Software {
-            frame_buffer,
-            texture,
-        });
-        self.app.render_size = Some(render_size);
-        self.app.device_scale_factor = Some(device_scale_factor);
-        self.app.cursor_type = Some(cursor_type);
-        self.app.message_queue = Some(message_queue.clone());
-        self.app.url_change_queue = Some(url_change_queue.clone());
-        self.app.title_change_queue = Some(title_change_queue.clone());
-        self.app.loading_state_queue = Some(loading_state_queue.clone());
-        self.app.ime_enable_queue = Some(ime_enable_queue.clone());
-        self.app.ime_composition_range = Some(ime_composition_queue.clone());
 
         let mut client = webrender::SoftwareClientImpl::build(
             render_handler,
             webrender::ClientQueues {
-                message_queue,
-                url_change_queue,
-                title_change_queue,
-                loading_state_queue,
-                ime_enable_queue,
-                ime_composition_queue,
+                message_queue: message_queue.clone(),
+                url_change_queue: url_change_queue.clone(),
+                title_change_queue: title_change_queue.clone(),
+                loading_state_queue: loading_state_queue.clone(),
+                ime_enable_queue: ime_enable_queue.clone(),
+                ime_composition_queue: ime_composition_queue.clone(),
             },
         );
 
-        cef::browser_host_create_browser_sync(
+        // Attempt browser creation first, before updating any app state
+        let browser = cef::browser_host_create_browser_sync(
             Some(&window_info),
             Some(&mut client),
             Some(&self.url.to_string().as_str().into()),
@@ -389,7 +375,25 @@ impl CefTexture {
         )
         .ok_or_else(|| {
             CefError::BrowserCreationFailed("browser_host_create_browser_sync returned None".into())
-        })
+        })?;
+
+        // Browser created successfully - now update app state
+        self.base_mut().set_texture(&texture);
+        self.app.render_mode = Some(RenderMode::Software {
+            frame_buffer,
+            texture,
+        });
+        self.app.render_size = Some(render_size);
+        self.app.device_scale_factor = Some(device_scale_factor);
+        self.app.cursor_type = Some(cursor_type);
+        self.app.message_queue = Some(message_queue);
+        self.app.url_change_queue = Some(url_change_queue);
+        self.app.title_change_queue = Some(title_change_queue);
+        self.app.loading_state_queue = Some(loading_state_queue);
+        self.app.ime_enable_queue = Some(ime_enable_queue);
+        self.app.ime_composition_range = Some(ime_composition_queue);
+
+        Ok(browser)
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -447,8 +451,40 @@ impl CefTexture {
         let ime_enable_queue: ImeEnableQueue = Arc::new(Mutex::new(VecDeque::new()));
         let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
 
-        self.base_mut().set_texture(&texture_2d_rd);
+        let mut client = webrender::AcceleratedClientImpl::build(
+            render_handler,
+            cursor_type.clone(),
+            webrender::ClientQueues {
+                message_queue: message_queue.clone(),
+                url_change_queue: url_change_queue.clone(),
+                title_change_queue: title_change_queue.clone(),
+                loading_state_queue: loading_state_queue.clone(),
+                ime_enable_queue: ime_enable_queue.clone(),
+                ime_composition_queue: ime_composition_queue.clone(),
+            },
+        );
 
+        // Attempt browser creation first, before updating any app state
+        let browser = match cef::browser_host_create_browser_sync(
+            Some(window_info),
+            Some(&mut client),
+            Some(&self.url.to_string().as_str().into()),
+            Some(browser_settings),
+            None,
+            context,
+        ) {
+            Some(browser) => browser,
+            None => {
+                // Browser creation failed - clean up the RD texture to prevent leak
+                render::free_rd_texture(rd_texture_rid);
+                return Err(CefError::BrowserCreationFailed(
+                    "browser_host_create_browser_sync returned None (accelerated)".into(),
+                ));
+            }
+        };
+
+        // Browser created successfully - now update app state
+        self.base_mut().set_texture(&texture_2d_rd);
         self.app.render_mode = Some(RenderMode::Accelerated {
             render_state,
             texture_2d_rd,
@@ -456,39 +492,14 @@ impl CefTexture {
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
-        self.app.message_queue = Some(message_queue.clone());
-        self.app.url_change_queue = Some(url_change_queue.clone());
-        self.app.title_change_queue = Some(title_change_queue.clone());
-        self.app.loading_state_queue = Some(loading_state_queue.clone());
-        self.app.ime_enable_queue = Some(ime_enable_queue.clone());
-        self.app.ime_composition_range = Some(ime_composition_queue.clone());
+        self.app.message_queue = Some(message_queue);
+        self.app.url_change_queue = Some(url_change_queue);
+        self.app.title_change_queue = Some(title_change_queue);
+        self.app.loading_state_queue = Some(loading_state_queue);
+        self.app.ime_enable_queue = Some(ime_enable_queue);
+        self.app.ime_composition_range = Some(ime_composition_queue);
 
-        let mut client = webrender::AcceleratedClientImpl::build(
-            render_handler,
-            self.app.cursor_type.clone().unwrap(),
-            webrender::ClientQueues {
-                message_queue,
-                url_change_queue,
-                title_change_queue,
-                loading_state_queue,
-                ime_enable_queue,
-                ime_composition_queue,
-            },
-        );
-
-        cef::browser_host_create_browser_sync(
-            Some(window_info),
-            Some(&mut client),
-            Some(&self.url.to_string().as_str().into()),
-            Some(browser_settings),
-            None,
-            context,
-        )
-        .ok_or_else(|| {
-            CefError::BrowserCreationFailed(
-                "browser_host_create_browser_sync returned None (accelerated)".into(),
-            )
-        })
+        Ok(browser)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
