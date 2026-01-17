@@ -28,7 +28,6 @@ fn main() -> std::process::ExitCode {
         cef_app::load_sandbox_from_path(&framework_path, args.as_main_args());
     }
 
-    // On Windows, check for adapter LUID argument and install DXGI hooks
     #[cfg(target_os = "windows")]
     {
         use cef_app::AdapterLuid;

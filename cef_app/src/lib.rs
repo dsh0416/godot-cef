@@ -57,7 +57,6 @@ pub struct SecurityConfig {
 }
 
 /// Adapter LUID (Locally Unique Identifier) for GPU selection on Windows.
-/// Stored as (HighPart, LowPart) for easy serialization.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AdapterLuid {
     pub high: i32,
@@ -69,12 +68,10 @@ impl AdapterLuid {
         Self { high, low }
     }
 
-    /// Format the LUID for command line argument (high,low format)
     pub fn to_arg_string(&self) -> String {
         format!("{},{}", self.high, self.low)
     }
 
-    /// Parse LUID from command line argument string
     pub fn from_arg_string(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split(',').collect();
         if parts.len() != 2 {
@@ -146,11 +143,6 @@ impl OsrApp {
         }
     }
 
-    /// Sets the adapter LUID for GPU selection (Windows only).
-    ///
-    /// This LUID will be passed to child processes so they can use the same
-    /// GPU adapter as the main Godot process, which is required for DX12
-    /// shared texture handles to work correctly.
     pub fn with_adapter_luid(mut self, high: i32, low: u32) -> Self {
         self.adapter_luid = Some(AdapterLuid::new(high, low));
         self
@@ -295,7 +287,6 @@ wrap_browser_process_handler! {
             command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
             command_line.append_switch(Some(&"enable-logging=stderr".into()));
 
-            // Pass the adapter LUID to child processes for GPU selection (Windows only)
             if let Some(luid) = &self.handler.adapter_luid {
                 let luid_str = luid.to_arg_string();
                 command_line.append_switch_with_value(

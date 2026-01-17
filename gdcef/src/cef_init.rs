@@ -110,7 +110,6 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
     let godot_backend = detect_godot_render_backend();
     let enable_remote_debugging = should_enable_remote_debugging();
 
-    // Build OsrApp with options
     #[allow(unused_mut)]
     let mut osr_app = cef_app::OsrApp::with_security_options(
         godot_backend,
@@ -118,7 +117,6 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
         security_config,
     );
 
-    // On Windows, query Godot's adapter LUID for GPU selection
     #[cfg(target_os = "windows")]
     {
         use crate::accelerated_osr::get_godot_adapter_luid;
