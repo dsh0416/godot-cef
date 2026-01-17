@@ -9,7 +9,12 @@ use std::io;
 /// Main error type for CEF operations.
 #[derive(Debug)]
 pub enum CefError {
-    /// CEF framework loading failed.
+    /// CEF framework loading failed. only occurs on macOS.
+    #[cfg(target_os = "macos")]
+    FrameworkLoadFailed(String),
+    // allow dead code on other platforms
+    #[allow(dead_code)]
+    #[cfg(not(target_os = "macos"))]
     FrameworkLoadFailed(String),
     /// CEF initialization failed.
     InitializationFailed(String),
