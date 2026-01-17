@@ -9,8 +9,8 @@
 //! 3. Our hooked EnumAdapters1 remaps adapter indices so index 0 returns our target adapter
 
 use std::ffi::c_void;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use retour::static_detour;
 use windows::Win32::Foundation::LUID;
@@ -24,6 +24,7 @@ static TARGET_LUID: OnceLock<LUID> = OnceLock::new();
 static HOOKS_INSTALLED: OnceLock<bool> = OnceLock::new();
 static TARGET_ADAPTER_INDEX: AtomicU32 = AtomicU32::new(u32::MAX);
 static ORIGINAL_ENUM_ADAPTERS1: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static VTABLE_PATCH_LOCK: Mutex<()> = Mutex::new(());
 
 // Raw function signatures for hooking (these match the actual DLL exports)
 type CreateDXGIFactory1Fn = unsafe extern "system" fn(*const GUID, *mut *mut c_void) -> HRESULT;
@@ -77,8 +78,11 @@ unsafe extern "system" fn hooked_enum_adapters1(
     pp_adapter: *mut *mut c_void,
 ) -> HRESULT {
     unsafe {
-        let original: EnumAdapters1Fn =
-            std::mem::transmute(ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst));
+        let original_ptr = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
+        if original_ptr.is_null() {
+            return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
+        }
+        let original: EnumAdapters1Fn = std::mem::transmute(original_ptr);
 
         let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
 
@@ -162,6 +166,11 @@ impl Drop for MemoryProtectionGuard {
 }
 
 unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
+    let _lock = match VTABLE_PATCH_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
     unsafe {
         if factory_ptr.is_null() {
             return false;
@@ -174,9 +183,15 @@ unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
 
         let enum_adapters1_slot = vtable.add(ENUM_ADAPTERS1_VTABLE_INDEX);
 
+        // Check if already patched (another thread may have done it while we waited for the lock)
+        let current = *enum_adapters1_slot;
+        if current == hooked_enum_adapters1 as *mut c_void {
+            return true;
+        }
+
         let _ = ORIGINAL_ENUM_ADAPTERS1.compare_exchange(
             std::ptr::null_mut(),
-            *enum_adapters1_slot,
+            current,
             Ordering::SeqCst,
             Ordering::SeqCst,
         );
