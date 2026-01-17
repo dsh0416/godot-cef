@@ -4,7 +4,7 @@ use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
 use std::ffi::c_void;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_BARRIER,
     D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
@@ -13,6 +13,7 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator,
     ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
 };
+use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, IDXGIDevice, DXGI_ADAPTER_DESC1};
 use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
 use windows::core::Interface;
 
@@ -368,6 +369,50 @@ impl Drop for GodotTextureImporter {
 
 pub fn is_supported() -> bool {
     NativeTextureImporter::new().is_some() && RenderBackend::detect().supports_accelerated_osr()
+}
+
+/// Gets the adapter LUID from a D3D12 device.
+///
+/// This is used to identify which GPU adapter Godot is using, so we can
+/// instruct CEF to use the same adapter for shared texture compatibility.
+pub fn get_adapter_luid(device: &ID3D12Device) -> Option<LUID> {
+    unsafe {
+        // Query for IDXGIDevice interface from the D3D12 device
+        let dxgi_device: IDXGIDevice = device.cast().ok()?;
+
+        // Get the adapter
+        let adapter = dxgi_device.GetAdapter().ok()?;
+
+        // Cast to IDXGIAdapter1 to get DXGI_ADAPTER_DESC1 (which includes LUID)
+        let adapter1: IDXGIAdapter1 = adapter.cast().ok()?;
+
+        let mut desc = DXGI_ADAPTER_DESC1::default();
+        adapter1.GetDesc1(&mut desc).ok()?;
+
+        Some(desc.AdapterLuid)
+    }
+}
+
+/// Gets the adapter LUID from Godot's RenderingDevice.
+///
+/// Returns the LUID as (HighPart, LowPart) tuple for easy serialization.
+pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
+    let mut rd = RenderingServer::singleton().get_rendering_device()?;
+    let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
+
+    if device_ptr == 0 {
+        godot_warn!("[AcceleratedOSR/Windows] Failed to get D3D12 device for LUID query");
+        return None;
+    }
+
+    // Create a temporary reference to the device - we don't own it
+    let device: ID3D12Device = unsafe { ID3D12Device::from_raw(device_ptr as *mut c_void) };
+    let luid = get_adapter_luid(&device);
+
+    // Don't drop - we don't own this device
+    std::mem::forget(device);
+
+    luid.map(|l| (l.HighPart, l.LowPart))
 }
 
 unsafe impl Send for GodotTextureImporter {}

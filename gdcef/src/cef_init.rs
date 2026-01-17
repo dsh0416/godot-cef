@@ -109,11 +109,30 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
     let enable_remote_debugging = should_enable_remote_debugging();
-    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_security_options(
+
+    // Build OsrApp with options
+    #[allow(unused_mut)]
+    let mut osr_app = cef_app::OsrApp::with_security_options(
         godot_backend,
         enable_remote_debugging,
         security_config,
-    ));
+    );
+
+    // On Windows, query Godot's adapter LUID for GPU selection
+    #[cfg(target_os = "windows")]
+    {
+        use crate::accelerated_osr::windows::get_godot_adapter_luid;
+        if let Some((high, low)) = get_godot_adapter_luid() {
+            godot::global::godot_print!(
+                "[CefInit] Godot adapter LUID: {},{} - will pass to CEF subprocesses",
+                high,
+                low
+            );
+            osr_app = osr_app.with_adapter_luid(high, low);
+        }
+    }
+
+    let mut app = cef_app::AppBuilder::build(osr_app);
 
     #[cfg(target_os = "macos")]
     load_sandbox(args.as_main_args());

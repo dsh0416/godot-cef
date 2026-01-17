@@ -20,3 +20,5 @@ libloading = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true }
+windows = { workspace = true }
+retour = { workspace = true }

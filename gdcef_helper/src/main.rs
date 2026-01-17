@@ -7,6 +7,9 @@ use cef::{CefString, ImplCommandLine, api_hash, args::Args, execute_process};
 
 mod utils;
 
+#[cfg(target_os = "windows")]
+mod dxgi_hook;
+
 fn main() -> std::process::ExitCode {
     #[cfg(target_os = "macos")]
     {
@@ -23,6 +26,27 @@ fn main() -> std::process::ExitCode {
     {
         let framework_path = utils::get_framework_path().expect("Failed to get CEF framework path");
         cef_app::load_sandbox_from_path(&framework_path, args.as_main_args());
+    }
+
+    // On Windows, check for adapter LUID argument and install DXGI hooks
+    #[cfg(target_os = "windows")]
+    {
+        let luid_switch = CefString::from("godot-adapter-luid");
+        if cmd.has_switch(Some(&luid_switch)) == 1 {
+            let luid_value = CefString::from(&cmd.switch_value(Some(&luid_switch)));
+            let luid_str = luid_value.to_string();
+            
+            if let Some(luid) = parse_adapter_luid(&luid_str) {
+                eprintln!("[gdcef_helper] Installing DXGI hooks for adapter LUID: {}, {}", 
+                    luid.HighPart, luid.LowPart);
+                
+                if !dxgi_hook::install_hooks(luid) {
+                    eprintln!("[gdcef_helper] Warning: Failed to install DXGI hooks");
+                }
+            } else {
+                eprintln!("[gdcef_helper] Warning: Invalid adapter LUID format: {}", luid_str);
+            }
+        }
     }
 
     let switch = CefString::from("type");
@@ -45,4 +69,21 @@ fn main() -> std::process::ExitCode {
     }
 
     std::process::ExitCode::SUCCESS
+}
+
+/// Parses an adapter LUID from the "high,low" string format.
+#[cfg(target_os = "windows")]
+fn parse_adapter_luid(s: &str) -> Option<windows::Win32::Foundation::LUID> {
+    let parts: Vec<&str> = s.split(',').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    
+    let high: i32 = parts[0].parse().ok()?;
+    let low: u32 = parts[1].parse().ok()?;
+    
+    Some(windows::Win32::Foundation::LUID {
+        HighPart: high,
+        LowPart: low,
+    })
 }
