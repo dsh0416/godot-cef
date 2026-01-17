@@ -164,9 +164,7 @@ fn initialize_cef() -> CefResult<()> {
             framework_dir_path: framework_path
                 .to_str()
                 .ok_or_else(|| {
-                    CefError::InitializationFailed(
-                        "framework path is not valid UTF-8".to_string(),
-                    )
+                    CefError::InitializationFailed("framework path is not valid UTF-8".to_string())
                 })?
                 .into(),
             main_bundle_path: main_bundle_path
