@@ -31,12 +31,19 @@ fn main() -> std::process::ExitCode {
     // On Windows, check for adapter LUID argument and install DXGI hooks
     #[cfg(target_os = "windows")]
     {
+        use cef_app::AdapterLuid;
+
         let luid_switch = CefString::from("godot-adapter-luid");
         if cmd.has_switch(Some(&luid_switch)) == 1 {
             let luid_value = CefString::from(&cmd.switch_value(Some(&luid_switch)));
             let luid_str = luid_value.to_string();
 
-            if let Some(luid) = parse_adapter_luid(&luid_str) {
+            if let Some(adapter_luid) = AdapterLuid::from_arg_string(&luid_str) {
+                let luid = windows::Win32::Foundation::LUID {
+                    HighPart: adapter_luid.high,
+                    LowPart: adapter_luid.low,
+                };
+
                 eprintln!(
                     "[gdcef_helper] Installing DXGI hooks for adapter LUID: {}, {}",
                     luid.HighPart, luid.LowPart
@@ -74,21 +81,4 @@ fn main() -> std::process::ExitCode {
     }
 
     std::process::ExitCode::SUCCESS
-}
-
-/// Parses an adapter LUID from the "high,low" string format.
-#[cfg(target_os = "windows")]
-fn parse_adapter_luid(s: &str) -> Option<windows::Win32::Foundation::LUID> {
-    let parts: Vec<&str> = s.split(',').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-
-    let high: i32 = parts[0].parse().ok()?;
-    let low: u32 = parts[1].parse().ok()?;
-
-    Some(windows::Win32::Foundation::LUID {
-        HighPart: high,
-        LowPart: low,
-    })
 }

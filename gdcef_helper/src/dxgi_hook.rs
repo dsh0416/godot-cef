@@ -125,6 +125,70 @@ unsafe fn get_vtable(obj: *mut c_void) -> *mut *mut c_void {
 /// IUnknown(3) + IDXGIObject(4) + IDXGIFactory(5) = 12
 const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12;
 
+/// RAII guard for memory protection changes.
+/// Ensures protection is restored when dropped, even on panic.
+struct MemoryProtectionGuard {
+    address: *const c_void,
+    size: usize,
+    old_protect: PAGE_PROTECTION_FLAGS,
+    active: bool,
+}
+
+impl MemoryProtectionGuard {
+    /// Creates a new guard that will restore protection on drop.
+    /// Returns None if changing protection failed.
+    unsafe fn new(address: *const c_void, size: usize) -> Option<Self> {
+        let mut old_protect = PAGE_PROTECTION_FLAGS(0);
+        let result =
+            unsafe { VirtualProtect(address, size, PAGE_EXECUTE_READWRITE, &mut old_protect) };
+
+        if result.is_err() {
+            return None;
+        }
+
+        Some(Self {
+            address,
+            size,
+            old_protect,
+            active: true,
+        })
+    }
+
+    /// Restores the original protection and marks the guard as inactive.
+    /// Returns true if restoration succeeded.
+    unsafe fn restore(&mut self) -> bool {
+        if !self.active {
+            return true;
+        }
+
+        let mut dummy = PAGE_PROTECTION_FLAGS(0);
+        let result =
+            unsafe { VirtualProtect(self.address, self.size, self.old_protect, &mut dummy) };
+
+        self.active = false;
+        result.is_ok()
+    }
+}
+
+impl Drop for MemoryProtectionGuard {
+    fn drop(&mut self) {
+        if self.active {
+            // Safety: We're in drop, so we must restore protection.
+            // If this fails, we log a warning but can't do much else.
+            let mut dummy = PAGE_PROTECTION_FLAGS(0);
+            let result =
+                unsafe { VirtualProtect(self.address, self.size, self.old_protect, &mut dummy) };
+            if result.is_err() {
+                eprintln!(
+                    "[DXGI Hook] Warning: Failed to restore memory protection in drop. \
+                     Memory at {:p} may remain writable+executable.",
+                    self.address
+                );
+            }
+        }
+    }
+}
+
 /// Patches the vtable of a factory to redirect EnumAdapters1.
 unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
     unsafe {
@@ -140,35 +204,33 @@ unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
         let enum_adapters1_slot = vtable.add(ENUM_ADAPTERS1_VTABLE_INDEX);
 
         // Store the original function pointer (only once)
-        let original = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
-        if original.is_null() {
-            ORIGINAL_ENUM_ADAPTERS1.store(*enum_adapters1_slot, Ordering::SeqCst);
-        }
-
-        // Make the vtable writable
-        let mut old_protect = PAGE_PROTECTION_FLAGS(0);
-        let result = VirtualProtect(
-            enum_adapters1_slot as *const c_void,
-            std::mem::size_of::<*mut c_void>(),
-            PAGE_EXECUTE_READWRITE,
-            &mut old_protect,
+        let _ = ORIGINAL_ENUM_ADAPTERS1.compare_exchange(
+            std::ptr::null_mut(),
+            *enum_adapters1_slot,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
         );
 
-        if result.is_err() {
+        // Make the vtable writable using RAII guard for automatic cleanup
+        let slot_ptr = enum_adapters1_slot as *const c_void;
+        let slot_size = std::mem::size_of::<*mut c_void>();
+
+        let Some(mut guard) = MemoryProtectionGuard::new(slot_ptr, slot_size) else {
             eprintln!("[DXGI Hook] Failed to change vtable protection");
             return false;
-        }
+        };
 
-        // Replace with our hook
+        // Replace with our hook - this is the only operation in the vulnerable window
         *enum_adapters1_slot = hooked_enum_adapters1 as *mut c_void;
 
-        // Restore protection
-        let _ = VirtualProtect(
-            enum_adapters1_slot as *const c_void,
-            std::mem::size_of::<*mut c_void>(),
-            old_protect,
-            &mut old_protect,
-        );
+        // Explicitly restore protection and check result
+        if !guard.restore() {
+            eprintln!(
+                "[DXGI Hook] Warning: Failed to restore vtable protection. \
+                 Memory may remain writable+executable."
+            );
+            // Still return true since the hook was installed successfully
+        }
 
         true
     }

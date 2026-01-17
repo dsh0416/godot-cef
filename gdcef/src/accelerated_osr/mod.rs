@@ -17,6 +17,8 @@ pub use linux::GodotTextureImporter;
 pub use macos::GodotTextureImporter;
 #[cfg(target_os = "windows")]
 pub use windows::GodotTextureImporter;
+#[cfg(target_os = "windows")]
+pub use windows::get_godot_adapter_luid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderBackend {

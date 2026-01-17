@@ -13,7 +13,7 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator,
     ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
 };
-use windows::Win32::Graphics::Dxgi::{DXGI_ADAPTER_DESC1, IDXGIAdapter1, IDXGIDevice};
+use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, IDXGIDevice};
 use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
 use windows::core::Interface;
 
@@ -386,8 +386,7 @@ pub fn get_adapter_luid(device: &ID3D12Device) -> Option<LUID> {
         // Cast to IDXGIAdapter1 to get DXGI_ADAPTER_DESC1 (which includes LUID)
         let adapter1: IDXGIAdapter1 = adapter.cast().ok()?;
 
-        let mut desc = DXGI_ADAPTER_DESC1::default();
-        adapter1.GetDesc1(&mut desc).ok()?;
+        let desc = adapter1.GetDesc1().ok()?;
 
         Some(desc.AdapterLuid)
     }

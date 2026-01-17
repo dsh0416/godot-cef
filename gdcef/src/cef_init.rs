@@ -121,7 +121,7 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
     // On Windows, query Godot's adapter LUID for GPU selection
     #[cfg(target_os = "windows")]
     {
-        use crate::accelerated_osr::windows::get_godot_adapter_luid;
+        use crate::accelerated_osr::get_godot_adapter_luid;
         if let Some((high, low)) = get_godot_adapter_luid() {
             godot::global::godot_print!(
                 "[CefInit] Godot adapter LUID: {},{} - will pass to CEF subprocesses",
