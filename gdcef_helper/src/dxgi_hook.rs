@@ -14,10 +14,7 @@ use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
 use retour::static_detour;
 use windows::Win32::Foundation::LUID;
-use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, CreateDXGIFactory2, DXGI_ADAPTER_DESC1, IDXGIAdapter1, IDXGIFactory1,
-    IDXGIFactory2,
-};
+use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, IDXGIFactory1, IDXGIFactory2};
 use windows::Win32::System::Memory::{
     PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
 };
@@ -35,7 +32,7 @@ static TARGET_ADAPTER_INDEX: AtomicU32 = AtomicU32::new(u32::MAX);
 /// Original EnumAdapters1 function pointer (from vtable)
 static ORIGINAL_ENUM_ADAPTERS1: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
-// Type aliases for the hooked functions
+// Raw function signatures for hooking (these match the actual DLL exports)
 type CreateDXGIFactory1Fn = unsafe extern "system" fn(*const GUID, *mut *mut c_void) -> HRESULT;
 type CreateDXGIFactory2Fn =
     unsafe extern "system" fn(u32, *const GUID, *mut *mut c_void) -> HRESULT;
@@ -61,11 +58,12 @@ pub fn get_target_luid() -> Option<&'static LUID> {
 
 /// Checks if an adapter matches the target LUID.
 fn adapter_matches_luid(adapter: &IDXGIAdapter1, target: &LUID) -> bool {
-    let mut desc = DXGI_ADAPTER_DESC1::default();
-    if unsafe { adapter.GetDesc1(&mut desc) }.is_ok() {
-        desc.AdapterLuid.HighPart == target.HighPart && desc.AdapterLuid.LowPart == target.LowPart
-    } else {
-        false
+    match unsafe { adapter.GetDesc1() } {
+        Ok(desc) => {
+            desc.AdapterLuid.HighPart == target.HighPart
+                && desc.AdapterLuid.LowPart == target.LowPart
+        }
+        Err(_) => false,
     }
 }
 
@@ -90,85 +88,90 @@ unsafe extern "system" fn hooked_enum_adapters1(
     adapter_index: u32,
     pp_adapter: *mut *mut c_void,
 ) -> HRESULT {
-    let original: EnumAdapters1Fn =
-        std::mem::transmute(ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst));
+    unsafe {
+        let original: EnumAdapters1Fn =
+            std::mem::transmute(ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst));
 
-    let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
+        let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
 
-    // If we haven't found a target adapter, just pass through
-    if target_index == u32::MAX {
-        return original(this, adapter_index, pp_adapter);
+        // If we haven't found a target adapter, just pass through
+        if target_index == u32::MAX {
+            return original(this, adapter_index, pp_adapter);
+        }
+
+        // Remap indices:
+        // - Virtual index 0 -> Real target_index (our target adapter)
+        // - Virtual index 1..=target_index -> Real 0..target_index-1 (adapters before target)
+        // - Virtual index > target_index -> Real index (adapters after target, unchanged)
+        let real_index = if adapter_index == 0 {
+            target_index
+        } else if adapter_index <= target_index {
+            adapter_index - 1
+        } else {
+            adapter_index
+        };
+
+        original(this, real_index, pp_adapter)
     }
-
-    // Remap indices:
-    // - Virtual index 0 -> Real target_index (our target adapter)
-    // - Virtual index 1..=target_index -> Real 0..target_index-1 (adapters before target)
-    // - Virtual index > target_index -> Real index (adapters after target, unchanged)
-    let real_index = if adapter_index == 0 {
-        target_index
-    } else if adapter_index <= target_index {
-        adapter_index - 1
-    } else {
-        adapter_index
-    };
-
-    original(this, real_index, pp_adapter)
 }
 
 /// Gets the vtable pointer from a COM object.
 unsafe fn get_vtable(obj: *mut c_void) -> *mut *mut c_void {
-    *(obj as *mut *mut *mut c_void)
+    unsafe { *(obj as *mut *mut *mut c_void) }
 }
 
 /// IDXGIFactory1 vtable layout (partial)
-/// Index 7 is EnumAdapters1 in IDXGIFactory1's vtable
-const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12; // IUnknown(3) + IDXGIObject(4) + IDXGIFactory(5) = 12
+/// Index 12 is EnumAdapters1 in IDXGIFactory1's vtable
+/// IUnknown(3) + IDXGIObject(4) + IDXGIFactory(5) = 12
+const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12;
 
 /// Patches the vtable of a factory to redirect EnumAdapters1.
 unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
-    if factory_ptr.is_null() {
-        return false;
+    unsafe {
+        if factory_ptr.is_null() {
+            return false;
+        }
+
+        let vtable = get_vtable(factory_ptr);
+        if vtable.is_null() {
+            return false;
+        }
+
+        let enum_adapters1_slot = vtable.add(ENUM_ADAPTERS1_VTABLE_INDEX);
+
+        // Store the original function pointer (only once)
+        let original = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
+        if original.is_null() {
+            ORIGINAL_ENUM_ADAPTERS1.store(*enum_adapters1_slot, Ordering::SeqCst);
+        }
+
+        // Make the vtable writable
+        let mut old_protect = PAGE_PROTECTION_FLAGS(0);
+        let result = VirtualProtect(
+            enum_adapters1_slot as *const c_void,
+            std::mem::size_of::<*mut c_void>(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old_protect,
+        );
+
+        if result.is_err() {
+            eprintln!("[DXGI Hook] Failed to change vtable protection");
+            return false;
+        }
+
+        // Replace with our hook
+        *enum_adapters1_slot = hooked_enum_adapters1 as *mut c_void;
+
+        // Restore protection
+        let _ = VirtualProtect(
+            enum_adapters1_slot as *const c_void,
+            std::mem::size_of::<*mut c_void>(),
+            old_protect,
+            &mut old_protect,
+        );
+
+        true
     }
-
-    let vtable = get_vtable(factory_ptr);
-    if vtable.is_null() {
-        return false;
-    }
-
-    let enum_adapters1_slot = vtable.add(ENUM_ADAPTERS1_VTABLE_INDEX);
-
-    // Store the original function pointer (only once)
-    let original = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
-    if original.is_null() {
-        ORIGINAL_ENUM_ADAPTERS1.store(*enum_adapters1_slot, Ordering::SeqCst);
-    }
-
-    // Make the vtable writable
-    let mut old_protect = PAGE_PROTECTION_FLAGS(0);
-    let result = VirtualProtect(
-        enum_adapters1_slot as *const c_void,
-        std::mem::size_of::<*mut c_void>(),
-        PAGE_EXECUTE_READWRITE,
-        &mut old_protect,
-    );
-
-    if result.is_err() {
-        eprintln!("[DXGI Hook] Failed to change vtable protection");
-        return false;
-    }
-
-    // Replace with our hook
-    *enum_adapters1_slot = hooked_enum_adapters1 as *mut c_void;
-
-    // Restore protection
-    let _ = VirtualProtect(
-        enum_adapters1_slot as *const c_void,
-        std::mem::size_of::<*mut c_void>(),
-        old_protect,
-        &mut old_protect,
-    );
-
-    true
 }
 
 /// Hooked CreateDXGIFactory1 implementation.
@@ -187,9 +190,9 @@ fn hooked_create_dxgi_factory1(riid: *const GUID, pp_factory: *mut *mut c_void) 
                 let factory_ptr = *pp_factory;
 
                 // Try to get IDXGIFactory1 interface
-                if let Ok(factory) = IDXGIFactory1::from_raw_borrowed(&factory_ptr) {
+                if let Some(factory) = IDXGIFactory1::from_raw_borrowed(&factory_ptr) {
                     // Find the target adapter index
-                    if let Some(idx) = find_target_adapter_index(&factory, target) {
+                    if let Some(idx) = find_target_adapter_index(factory, target) {
                         TARGET_ADAPTER_INDEX.store(idx, Ordering::SeqCst);
 
                         eprintln!(
@@ -242,7 +245,7 @@ fn hooked_create_dxgi_factory2(
                 let factory_ptr = *pp_factory;
 
                 // IDXGIFactory2 inherits from IDXGIFactory1, so we can use the same vtable index
-                if let Ok(factory2) = IDXGIFactory2::from_raw_borrowed(&factory_ptr) {
+                if let Some(factory2) = IDXGIFactory2::from_raw_borrowed(&factory_ptr) {
                     if let Ok(factory1) = factory2.cast::<IDXGIFactory1>() {
                         // Find the target adapter index using the original EnumAdapters1
                         // (before we patch it)
@@ -280,6 +283,38 @@ fn hooked_create_dxgi_factory2(
     result
 }
 
+/// Gets the raw function pointer for CreateDXGIFactory1 from dxgi.dll
+fn get_create_dxgi_factory1_ptr() -> Option<CreateDXGIFactory1Fn> {
+    unsafe {
+        let module =
+            windows::Win32::System::LibraryLoader::GetModuleHandleA(windows::core::s!("dxgi.dll"))
+                .ok()?;
+
+        let proc = windows::Win32::System::LibraryLoader::GetProcAddress(
+            module,
+            windows::core::s!("CreateDXGIFactory1"),
+        )?;
+
+        Some(std::mem::transmute(proc))
+    }
+}
+
+/// Gets the raw function pointer for CreateDXGIFactory2 from dxgi.dll
+fn get_create_dxgi_factory2_ptr() -> Option<CreateDXGIFactory2Fn> {
+    unsafe {
+        let module =
+            windows::Win32::System::LibraryLoader::GetModuleHandleA(windows::core::s!("dxgi.dll"))
+                .ok()?;
+
+        let proc = windows::Win32::System::LibraryLoader::GetProcAddress(
+            module,
+            windows::core::s!("CreateDXGIFactory2"),
+        )?;
+
+        Some(std::mem::transmute(proc))
+    }
+}
+
 /// Installs the DXGI hooks.
 ///
 /// This should be called early in the process, before any DXGI calls are made.
@@ -297,6 +332,11 @@ pub fn install_hooks(target_luid: LUID) -> bool {
         target_luid.HighPart, target_luid.LowPart
     );
 
+    // Load dxgi.dll first to ensure it's available
+    unsafe {
+        let _ = windows::Win32::System::LibraryLoader::LoadLibraryA(windows::core::s!("dxgi.dll"));
+    }
+
     let success = unsafe { install_hooks_internal() };
     HOOKS_INSTALLED.set(success).ok();
 
@@ -311,12 +351,20 @@ pub fn install_hooks(target_luid: LUID) -> bool {
 
 /// Internal hook installation (unsafe).
 unsafe fn install_hooks_internal() -> bool {
+    // Get the raw function pointers
+    let Some(factory1_ptr) = get_create_dxgi_factory1_ptr() else {
+        eprintln!("[DXGI Hook] Failed to get CreateDXGIFactory1 address");
+        return false;
+    };
+
+    let Some(factory2_ptr) = get_create_dxgi_factory2_ptr() else {
+        eprintln!("[DXGI Hook] Failed to get CreateDXGIFactory2 address");
+        return false;
+    };
+
     // Hook CreateDXGIFactory1
     let factory1_result = CreateDXGIFactory1Hook
-        .initialize(
-            CreateDXGIFactory1 as CreateDXGIFactory1Fn,
-            hooked_create_dxgi_factory1,
-        )
+        .initialize(factory1_ptr, hooked_create_dxgi_factory1)
         .and_then(|_| CreateDXGIFactory1Hook.enable());
 
     if let Err(e) = factory1_result {
@@ -326,10 +374,7 @@ unsafe fn install_hooks_internal() -> bool {
 
     // Hook CreateDXGIFactory2
     let factory2_result = CreateDXGIFactory2Hook
-        .initialize(
-            CreateDXGIFactory2 as CreateDXGIFactory2Fn,
-            hooked_create_dxgi_factory2,
-        )
+        .initialize(factory2_ptr, hooked_create_dxgi_factory2)
         .and_then(|_| CreateDXGIFactory2Hook.enable());
 
     if let Err(e) = factory2_result {

@@ -1,3 +1,5 @@
+# nightly is required to use [retour-rs](https://github.com/Hpmason/retour-rs).
+# Since it reuires feature(unboxed_closures, tuple_trait)
+
 [toolchain]
 channel = "nightly"
-
