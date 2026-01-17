@@ -33,6 +33,7 @@ use crate::browser::{
     App, ImeCompositionQueue, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue,
     RenderMode, TitleChangeQueue, UrlChangeQueue,
 };
+use crate::error::CefError;
 use crate::utils::get_display_scale_factor;
 
 struct GodotCef;
@@ -142,7 +143,10 @@ impl CefTexture {
         // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF
         self.base_mut().set_focus_mode(FocusMode::CLICK);
 
-        cef_init::cef_retain();
+        if let Err(e) = cef_init::cef_retain() {
+            godot::global::godot_error!("[CefTexture] {}", e);
+            return;
+        }
 
         // Create hidden LineEdit for IME proxy
         self.create_ime_proxy();
@@ -235,6 +239,12 @@ impl CefTexture {
     }
 
     fn create_browser(&mut self) {
+        if let Err(e) = self.try_create_browser() {
+            godot::global::godot_error!("[CefTexture] {}", e);
+        }
+    }
+
+    fn try_create_browser(&mut self) -> Result<(), CefError> {
         let logical_size = self.base().get_size();
         let dpi = self.get_pixel_scale_factor();
         let pixel_width = (logical_size.x * dpi) as i32;
@@ -280,7 +290,7 @@ impl CefTexture {
                 dpi,
                 pixel_width,
                 pixel_height,
-            )
+            )?
         } else {
             self.create_software_browser(
                 &window_info,
@@ -289,13 +299,13 @@ impl CefTexture {
                 dpi,
                 pixel_width,
                 pixel_height,
-            )
+            )?
         };
 
-        assert!(browser.is_some(), "failed to create browser");
-        self.app.browser = browser;
+        self.app.browser = Some(browser);
         self.last_size = logical_size;
         self.last_dpi = dpi;
+        Ok(())
     }
 
     fn should_use_accelerated_osr(&self) -> bool {
@@ -310,7 +320,7 @@ impl CefTexture {
         dpi: f32,
         pixel_width: i32,
         pixel_height: i32,
-    ) -> Option<cef::Browser> {
+    ) -> Result<cef::Browser, CefError> {
         let window_info = WindowInfo {
             bounds: cef::Rect {
                 x: 0,
@@ -377,6 +387,9 @@ impl CefTexture {
             None,
             context,
         )
+        .ok_or_else(|| {
+            CefError::BrowserCreationFailed("browser_host_create_browser_sync returned None".into())
+        })
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -388,7 +401,7 @@ impl CefTexture {
         dpi: f32,
         pixel_width: i32,
         pixel_height: i32,
-    ) -> Option<cef::Browser> {
+    ) -> Result<cef::Browser, CefError> {
         let importer = match GodotTextureImporter::new() {
             Some(imp) => imp,
             None => {
@@ -407,7 +420,7 @@ impl CefTexture {
         };
 
         // Create the RD texture first
-        let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height);
+        let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height)?;
 
         // Create shared render state with the importer and destination texture
         let render_state = Arc::new(Mutex::new(AcceleratedRenderState::new(
@@ -471,6 +484,11 @@ impl CefTexture {
             None,
             context,
         )
+        .ok_or_else(|| {
+            CefError::BrowserCreationFailed(
+                "browser_host_create_browser_sync returned None (accelerated)".into(),
+            )
+        })
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -482,7 +500,7 @@ impl CefTexture {
         dpi: f32,
         pixel_width: i32,
         pixel_height: i32,
-    ) -> Option<cef::Browser> {
+    ) -> Result<cef::Browser, CefError> {
         self.create_software_browser(
             window_info,
             browser_settings,
@@ -617,7 +635,13 @@ impl CefTexture {
                 render::free_rd_texture(state.dst_rd_rid);
 
                 let (new_rd_rid, new_texture_2d_rd) =
-                    render::create_rd_texture(new_w as i32, new_h as i32);
+                    match render::create_rd_texture(new_w as i32, new_h as i32) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            godot::global::godot_error!("[CefTexture] {}", e);
+                            return;
+                        }
+                    };
 
                 state.dst_rd_rid = new_rd_rid;
                 state.dst_width = new_w;
