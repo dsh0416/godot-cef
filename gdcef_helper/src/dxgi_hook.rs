@@ -196,6 +196,37 @@ unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
     }
 }
 
+unsafe fn process_created_factory(
+    factory_ptr: *mut c_void,
+    factory: &IDXGIFactory1,
+    target: &LUID,
+) {
+    if let Some(idx) = find_target_adapter_index(factory, target) {
+        TARGET_ADAPTER_INDEX.store(idx, Ordering::SeqCst);
+
+        eprintln!(
+            "[DXGI Hook] Target adapter found at index {} (LUID: {}, {})",
+            idx, target.HighPart, target.LowPart
+        );
+
+        if idx != 0 {
+            if unsafe { patch_factory_vtable(factory_ptr) } {
+                eprintln!(
+                    "[DXGI Hook] Vtable patched - adapter {} will appear at index 0",
+                    idx
+                );
+            } else {
+                eprintln!("[DXGI Hook] Warning: Failed to patch vtable");
+            }
+        }
+    } else {
+        eprintln!(
+            "[DXGI Hook] Warning: No adapter found matching LUID {}, {}",
+            target.HighPart, target.LowPart
+        );
+    }
+}
+
 fn hooked_create_dxgi_factory1(riid: *const GUID, pp_factory: *mut *mut c_void) -> HRESULT {
     let result = unsafe { CreateDXGIFactory1Hook.call(riid, pp_factory) };
     if result.is_err() {
@@ -206,32 +237,8 @@ fn hooked_create_dxgi_factory1(riid: *const GUID, pp_factory: *mut *mut c_void) 
         unsafe {
             if !pp_factory.is_null() && !(*pp_factory).is_null() {
                 let factory_ptr = *pp_factory;
-
                 if let Some(factory) = IDXGIFactory1::from_raw_borrowed(&factory_ptr) {
-                    if let Some(idx) = find_target_adapter_index(factory, target) {
-                        TARGET_ADAPTER_INDEX.store(idx, Ordering::SeqCst);
-
-                        eprintln!(
-                            "[DXGI Hook] Target adapter found at index {} (LUID: {}, {})",
-                            idx, target.HighPart, target.LowPart
-                        );
-
-                        if idx != 0 {
-                            if patch_factory_vtable(factory_ptr) {
-                                eprintln!(
-                                    "[DXGI Hook] Vtable patched - adapter {} will appear at index 0",
-                                    idx
-                                );
-                            } else {
-                                eprintln!("[DXGI Hook] Warning: Failed to patch vtable");
-                            }
-                        }
-                    } else {
-                        eprintln!(
-                            "[DXGI Hook] Warning: No adapter found matching LUID {}, {}",
-                            target.HighPart, target.LowPart
-                        );
-                    }
+                    process_created_factory(factory_ptr, factory, target);
                 }
             }
         }
@@ -254,33 +261,9 @@ fn hooked_create_dxgi_factory2(
         unsafe {
             if !pp_factory.is_null() && !(*pp_factory).is_null() {
                 let factory_ptr = *pp_factory;
-
                 if let Some(factory2) = IDXGIFactory2::from_raw_borrowed(&factory_ptr) {
                     if let Ok(factory1) = factory2.cast::<IDXGIFactory1>() {
-                        if let Some(idx) = find_target_adapter_index(&factory1, target) {
-                            TARGET_ADAPTER_INDEX.store(idx, Ordering::SeqCst);
-
-                            eprintln!(
-                                "[DXGI Hook] Target adapter found at index {} (LUID: {}, {})",
-                                idx, target.HighPart, target.LowPart
-                            );
-
-                            if idx != 0 {
-                                if patch_factory_vtable(factory_ptr) {
-                                    eprintln!(
-                                        "[DXGI Hook] Vtable patched - adapter {} will appear at index 0",
-                                        idx
-                                    );
-                                } else {
-                                    eprintln!("[DXGI Hook] Warning: Failed to patch vtable");
-                                }
-                            }
-                        } else {
-                            eprintln!(
-                                "[DXGI Hook] Warning: No adapter found matching LUID {}, {}",
-                                target.HighPart, target.LowPart
-                            );
-                        }
+                        process_created_factory(factory_ptr, &factory1, target);
                     }
                 }
             }
