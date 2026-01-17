@@ -9,19 +9,19 @@
 //! 3. Our hooked EnumAdapters1 remaps adapter indices so index 0 returns our target adapter
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
 use retour::static_detour;
-use windows::core::{Interface, GUID, HRESULT};
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, CreateDXGIFactory2, IDXGIAdapter1, IDXGIFactory1, IDXGIFactory2,
-    DXGI_ADAPTER_DESC1,
+    CreateDXGIFactory1, CreateDXGIFactory2, DXGI_ADAPTER_DESC1, IDXGIAdapter1, IDXGIFactory1,
+    IDXGIFactory2,
 };
 use windows::Win32::System::Memory::{
-    VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS,
+    PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
 };
+use windows::core::{GUID, HRESULT, Interface};
 
 /// Target adapter LUID to filter for
 static TARGET_LUID: OnceLock<LUID> = OnceLock::new();

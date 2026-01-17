@@ -35,16 +35,21 @@ fn main() -> std::process::ExitCode {
         if cmd.has_switch(Some(&luid_switch)) == 1 {
             let luid_value = CefString::from(&cmd.switch_value(Some(&luid_switch)));
             let luid_str = luid_value.to_string();
-            
+
             if let Some(luid) = parse_adapter_luid(&luid_str) {
-                eprintln!("[gdcef_helper] Installing DXGI hooks for adapter LUID: {}, {}", 
-                    luid.HighPart, luid.LowPart);
-                
+                eprintln!(
+                    "[gdcef_helper] Installing DXGI hooks for adapter LUID: {}, {}",
+                    luid.HighPart, luid.LowPart
+                );
+
                 if !dxgi_hook::install_hooks(luid) {
                     eprintln!("[gdcef_helper] Warning: Failed to install DXGI hooks");
                 }
             } else {
-                eprintln!("[gdcef_helper] Warning: Invalid adapter LUID format: {}", luid_str);
+                eprintln!(
+                    "[gdcef_helper] Warning: Invalid adapter LUID format: {}",
+                    luid_str
+                );
             }
         }
     }
@@ -78,10 +83,10 @@ fn parse_adapter_luid(s: &str) -> Option<windows::Win32::Foundation::LUID> {
     if parts.len() != 2 {
         return None;
     }
-    
+
     let high: i32 = parts[0].parse().ok()?;
     let low: u32 = parts[1].parse().ok()?;
-    
+
     Some(windows::Win32::Foundation::LUID {
         HighPart: high,
         LowPart: low,
