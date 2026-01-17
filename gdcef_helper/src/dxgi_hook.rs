@@ -62,6 +62,9 @@ fn find_target_adapter_index(factory: &IDXGIFactory1, target: &LUID) -> Option<u
         if adapter_matches_luid(&adapter, target) {
             return Some(index);
         }
+        if index == u32::MAX {
+            break;
+        }
         index += 1;
     }
     None
@@ -104,7 +107,9 @@ unsafe fn get_vtable(obj: *mut c_void) -> *mut *mut c_void {
     unsafe { *(obj as *mut *mut *mut c_void) }
 }
 
-// IUnknown(3) + IDXGIObject(4) + IDXGIFactory(5) = 12
+// VTable index for IDXGIFactory1::EnumAdapters1:
+// cumulative method counts from base interfaces:
+// IUnknown (3 methods) + IDXGIObject (4 methods) + IDXGIFactory1 (5th method) = 12
 const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12;
 
 struct MemoryProtectionGuard {
