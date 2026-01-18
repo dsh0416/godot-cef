@@ -626,23 +626,51 @@ wrap_client! {
     }
 }
 
+fn build_client_common(
+    cursor_type: Arc<Mutex<CursorType>>,
+    url_change_queue: UrlChangeQueue,
+    title_change_queue: TitleChangeQueue,
+    loading_state_queue: LoadingStateQueue,
+    console_message_queue: ConsoleMessageQueue,
+) -> (
+    cef::DisplayHandler,
+    cef::ContextMenuHandler,
+    cef::LifeSpanHandler,
+    cef::LoadHandler,
+) {
+    (
+        DisplayHandlerImpl::build(
+            cursor_type,
+            url_change_queue,
+            title_change_queue,
+            console_message_queue,
+        ),
+        ContextMenuHandlerImpl::build(),
+        LifeSpanHandlerImpl::build(),
+        LoadHandlerImpl::build(loading_state_queue),
+    )
+}
+
 impl SoftwareClientImpl {
     pub(crate) fn build(
         render_handler: cef_app::OsrRenderHandler,
         queues: ClientQueues,
     ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
-        Self::new(
-            SoftwareOsrHandler::build(render_handler, queues.ime_composition_queue),
-            DisplayHandlerImpl::build(
-                cursor_type,
+        let (display_handler, context_menu_handler, life_span_handler, load_handler) =
+            build_client_common(
+                cursor_type.clone(),
                 queues.url_change_queue,
                 queues.title_change_queue,
+                queues.loading_state_queue,
                 queues.console_message_queue,
-            ),
-            ContextMenuHandlerImpl::build(),
-            LifeSpanHandlerImpl::build(),
-            LoadHandlerImpl::build(queues.loading_state_queue),
+            );
+        Self::new(
+            SoftwareOsrHandler::build(render_handler, queues.ime_composition_queue),
+            display_handler,
+            context_menu_handler,
+            life_span_handler,
+            load_handler,
             queues.message_queue,
             queues.ime_enable_queue,
         )
@@ -699,17 +727,20 @@ impl AcceleratedClientImpl {
         cursor_type: Arc<Mutex<CursorType>>,
         queues: ClientQueues,
     ) -> cef::Client {
-        Self::new(
-            AcceleratedOsrHandler::build(render_handler, queues.ime_composition_queue),
-            DisplayHandlerImpl::build(
-                cursor_type,
+        let (display_handler, context_menu_handler, life_span_handler, load_handler) =
+            build_client_common(
+                cursor_type.clone(),
                 queues.url_change_queue,
                 queues.title_change_queue,
+                queues.loading_state_queue,
                 queues.console_message_queue,
-            ),
-            ContextMenuHandlerImpl::build(),
-            LifeSpanHandlerImpl::build(),
-            LoadHandlerImpl::build(queues.loading_state_queue),
+            );
+        Self::new(
+            AcceleratedOsrHandler::build(render_handler, queues.ime_composition_queue),
+            display_handler,
+            context_menu_handler,
+            life_span_handler,
+            load_handler,
             queues.message_queue,
             queues.ime_enable_queue,
         )

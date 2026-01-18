@@ -46,10 +46,21 @@ pub enum GodotRenderBackend {
     Vulkan,
 }
 
+#[derive(Clone, Default)]
+pub struct SecurityConfig {
+    /// Allow loading insecure (HTTP) content in HTTPS pages.
+    pub allow_insecure_content: bool,
+    /// Ignore SSL/TLS certificate errors.
+    pub ignore_certificate_errors: bool,
+    /// Disable web security (CORS, same-origin policy).
+    pub disable_web_security: bool,
+}
+
 #[derive(Clone)]
 pub struct OsrApp {
     godot_backend: GodotRenderBackend,
     enable_remote_debugging: bool,
+    security_config: SecurityConfig,
 }
 
 impl Default for OsrApp {
@@ -63,6 +74,7 @@ impl OsrApp {
         Self {
             godot_backend: GodotRenderBackend::Unknown,
             enable_remote_debugging: false,
+            security_config: SecurityConfig::default(),
         }
     }
 
@@ -70,6 +82,7 @@ impl OsrApp {
         Self {
             godot_backend,
             enable_remote_debugging: false,
+            security_config: SecurityConfig::default(),
         }
     }
 
@@ -81,6 +94,19 @@ impl OsrApp {
         Self {
             godot_backend,
             enable_remote_debugging,
+            security_config: SecurityConfig::default(),
+        }
+    }
+
+    pub fn with_security_options(
+        godot_backend: GodotRenderBackend,
+        enable_remote_debugging: bool,
+        security_config: SecurityConfig,
+    ) -> Self {
+        Self {
+            godot_backend,
+            enable_remote_debugging,
+            security_config,
         }
     }
 
@@ -90,6 +116,10 @@ impl OsrApp {
 
     pub fn enable_remote_debugging(&self) -> bool {
         self.enable_remote_debugging
+    }
+
+    pub fn security_config(&self) -> &SecurityConfig {
+        &self.security_config
     }
 }
 
@@ -144,7 +174,7 @@ wrap_app! {
 
         fn browser_process_handler(&self) -> Option<cef::BrowserProcessHandler> {
             Some(BrowserProcessHandlerBuilder::build(
-                OsrBrowserProcessHandler::new(),
+                OsrBrowserProcessHandler::new(self.app.security_config().clone()),
             ))
         }
 
@@ -165,18 +195,20 @@ impl AppBuilder {
 #[derive(Clone)]
 pub struct OsrBrowserProcessHandler {
     is_cef_ready: RefCell<bool>,
+    security_config: SecurityConfig,
 }
 
 impl Default for OsrBrowserProcessHandler {
     fn default() -> Self {
-        Self::new()
+        Self::new(SecurityConfig::default())
     }
 }
 
 impl OsrBrowserProcessHandler {
-    pub fn new() -> Self {
+    pub fn new(security_config: SecurityConfig) -> Self {
         Self {
             is_cef_ready: RefCell::new(false),
+            security_config,
         }
     }
 }
@@ -196,11 +228,19 @@ wrap_browser_process_handler! {
                 return;
             };
 
-            command_line.append_switch(Some(&"disable-web-security".into()));
-            command_line.append_switch(Some(&"allow-running-insecure-content".into()));
+            let security_config = &self.handler.security_config;
+            if security_config.disable_web_security {
+                command_line.append_switch(Some(&"disable-web-security".into()));
+            }
+            if security_config.allow_insecure_content {
+                command_line.append_switch(Some(&"allow-running-insecure-content".into()));
+            }
+            if security_config.ignore_certificate_errors {
+                command_line.append_switch(Some(&"ignore-certificate-errors".into()));
+                command_line.append_switch(Some(&"ignore-ssl-errors".into()));
+            }
+
             command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
-            command_line.append_switch(Some(&"ignore-certificate-errors".into()));
-            command_line.append_switch(Some(&"ignore-ssl-errors".into()));
             command_line.append_switch(Some(&"enable-logging=stderr".into()));
         }
     }
