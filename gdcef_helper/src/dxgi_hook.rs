@@ -5,8 +5,8 @@
 //!
 //! The approach:
 //! 1. Hook CreateDXGIFactory1/2 to intercept factory creation
-//! 2. After the real factory is created, patch its vtable to redirect EnumAdapters1
-//! 3. Our hooked EnumAdapters1 remaps adapter indices so index 0 returns our target adapter
+//! 2. After the real factory is created, patch its vtable to redirect EnumAdapters and EnumAdapters1
+//! 3. Our hooked functions remap adapter indices so index 0 returns our target adapter
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
@@ -23,6 +23,7 @@ use windows::core::{GUID, HRESULT, Interface};
 static TARGET_LUID: OnceLock<LUID> = OnceLock::new();
 static HOOKS_INSTALLED: OnceLock<bool> = OnceLock::new();
 static TARGET_ADAPTER_INDEX: AtomicU32 = AtomicU32::new(u32::MAX);
+static ORIGINAL_ENUM_ADAPTERS: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static ORIGINAL_ENUM_ADAPTERS1: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static VTABLE_PATCH_LOCK: Mutex<()> = Mutex::new(());
 
@@ -31,8 +32,9 @@ type CreateDXGIFactory1Fn = unsafe extern "system" fn(*const GUID, *mut *mut c_v
 type CreateDXGIFactory2Fn =
     unsafe extern "system" fn(u32, *const GUID, *mut *mut c_void) -> HRESULT;
 
-// EnumAdapters1 method signature (COM calling convention)
-type EnumAdapters1Fn = unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT;
+// EnumAdapters/EnumAdapters1 method signature (COM calling convention)
+// Both have the same ABI signature: (this, adapter_index, pp_adapter) -> HRESULT
+type EnumAdaptersFn = unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT;
 
 static_detour! {
     static CreateDXGIFactory1Hook: unsafe extern "system" fn(*const GUID, *mut *mut c_void) -> HRESULT;
@@ -72,6 +74,44 @@ fn find_target_adapter_index(factory: &IDXGIFactory1, target: &LUID) -> Option<u
 }
 
 /// Remaps adapter indices so index 0 returns our target adapter.
+fn remap_adapter_index(adapter_index: u32) -> u32 {
+    let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
+
+    // If we haven't found a target adapter, just pass through
+    if target_index == u32::MAX {
+        return adapter_index;
+    }
+
+    // Remap indices:
+    // - Virtual index 0 -> Real target_index (our target adapter)
+    // - Virtual index 1..=target_index -> Real 0..target_index-1 (adapters before target)
+    // - Virtual index > target_index -> Real index (adapters after target, unchanged)
+    if adapter_index == 0 {
+        target_index
+    } else if adapter_index <= target_index {
+        adapter_index - 1
+    } else {
+        adapter_index
+    }
+}
+
+/// Hooked EnumAdapters (IDXGIFactory) - remaps adapter indices.
+unsafe extern "system" fn hooked_enum_adapters(
+    this: *mut c_void,
+    adapter_index: u32,
+    pp_adapter: *mut *mut c_void,
+) -> HRESULT {
+    unsafe {
+        let original_ptr = ORIGINAL_ENUM_ADAPTERS.load(Ordering::SeqCst);
+        if original_ptr.is_null() {
+            return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
+        }
+        let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
+        original(this, remap_adapter_index(adapter_index), pp_adapter)
+    }
+}
+
+/// Hooked EnumAdapters1 (IDXGIFactory1) - remaps adapter indices.
 unsafe extern "system" fn hooked_enum_adapters1(
     this: *mut c_void,
     adapter_index: u32,
@@ -82,28 +122,8 @@ unsafe extern "system" fn hooked_enum_adapters1(
         if original_ptr.is_null() {
             return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
         }
-        let original: EnumAdapters1Fn = std::mem::transmute(original_ptr);
-
-        let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
-
-        // If we haven't found a target adapter, just pass through
-        if target_index == u32::MAX {
-            return original(this, adapter_index, pp_adapter);
-        }
-
-        // Remap indices:
-        // - Virtual index 0 -> Real target_index (our target adapter)
-        // - Virtual index 1..=target_index -> Real 0..target_index-1 (adapters before target)
-        // - Virtual index > target_index -> Real index (adapters after target, unchanged)
-        let real_index = if adapter_index == 0 {
-            target_index
-        } else if adapter_index <= target_index {
-            adapter_index - 1
-        } else {
-            adapter_index
-        };
-
-        original(this, real_index, pp_adapter)
+        let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
+        original(this, remap_adapter_index(adapter_index), pp_adapter)
     }
 }
 
@@ -111,9 +131,15 @@ unsafe fn get_vtable(obj: *mut c_void) -> *mut *mut c_void {
     unsafe { *(obj as *mut *mut *mut c_void) }
 }
 
-// VTable index for IDXGIFactory1::EnumAdapters1:
-// cumulative method counts from base interfaces:
-// IUnknown (3 methods) + IDXGIObject (4 methods) + IDXGIFactory1 (5th method) = 12
+// VTable indices for EnumAdapters methods:
+// IUnknown: 3 methods (QueryInterface, AddRef, Release)
+// IDXGIObject: 4 methods (SetPrivateData, SetPrivateDataInterface, GetPrivateData, GetParent)
+// IDXGIFactory: 4 methods (EnumAdapters, MakeWindowAssociation, GetWindowAssociation, CreateSwapChain, CreateSoftwareAdapter)
+// IDXGIFactory1: 2 methods (EnumAdapters1, IsCurrent)
+//
+// EnumAdapters is at index 7 (3 + 4 = 7, first method of IDXGIFactory)
+// EnumAdapters1 is at index 12 (3 + 4 + 5 = 12, first method of IDXGIFactory1)
+const ENUM_ADAPTERS_VTABLE_INDEX: usize = 7;
 const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12;
 
 struct MemoryProtectionGuard {
@@ -165,6 +191,43 @@ impl Drop for MemoryProtectionGuard {
     }
 }
 
+unsafe fn patch_vtable_slot(
+    vtable: *mut *mut c_void,
+    index: usize,
+    original_storage: &AtomicPtr<c_void>,
+    hook_fn: *mut c_void,
+) -> bool {
+    unsafe {
+        let slot = vtable.add(index);
+        let current = *slot;
+
+        // Check if already patched
+        if current == hook_fn {
+            return true;
+        }
+
+        // Store original (only if not already set)
+        let _ = original_storage.compare_exchange(
+            std::ptr::null_mut(),
+            current,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+
+        let slot_ptr = slot as *const c_void;
+        let slot_size = std::mem::size_of::<*mut c_void>();
+
+        let Some(mut guard) = MemoryProtectionGuard::new(slot_ptr, slot_size) else {
+            return false;
+        };
+
+        *slot = hook_fn;
+        let _ = guard.restore();
+
+        true
+    }
+}
+
 unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
     let _lock = match VTABLE_PATCH_LOCK.lock() {
         Ok(guard) => guard,
@@ -181,33 +244,28 @@ unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
             return false;
         }
 
-        let enum_adapters1_slot = vtable.add(ENUM_ADAPTERS1_VTABLE_INDEX);
-
-        // Check if already patched (another thread may have done it while we waited for the lock)
-        let current = *enum_adapters1_slot;
-        if current == hooked_enum_adapters1 as *mut c_void {
-            return true;
+        let enum_adapters_ok = patch_vtable_slot(
+            vtable,
+            ENUM_ADAPTERS_VTABLE_INDEX,
+            &ORIGINAL_ENUM_ADAPTERS,
+            hooked_enum_adapters as *mut c_void,
+        );
+        if !enum_adapters_ok {
+            eprintln!("[DXGI Hook] Failed to patch EnumAdapters vtable slot");
         }
 
-        let _ = ORIGINAL_ENUM_ADAPTERS1.compare_exchange(
-            std::ptr::null_mut(),
-            current,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
+        // Patch EnumAdapters1 (IDXGIFactory1)
+        let enum_adapters1_ok = patch_vtable_slot(
+            vtable,
+            ENUM_ADAPTERS1_VTABLE_INDEX,
+            &ORIGINAL_ENUM_ADAPTERS1,
+            hooked_enum_adapters1 as *mut c_void,
         );
+        if !enum_adapters1_ok {
+            eprintln!("[DXGI Hook] Failed to patch EnumAdapters1 vtable slot");
+        }
 
-        let slot_ptr = enum_adapters1_slot as *const c_void;
-        let slot_size = std::mem::size_of::<*mut c_void>();
-
-        let Some(mut guard) = MemoryProtectionGuard::new(slot_ptr, slot_size) else {
-            eprintln!("[DXGI Hook] Failed to change vtable protection");
-            return false;
-        };
-
-        *enum_adapters1_slot = hooked_enum_adapters1 as *mut c_void;
-        let _ = guard.restore();
-
-        true
+        enum_adapters_ok || enum_adapters1_ok
     }
 }
 

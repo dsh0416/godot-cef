@@ -391,6 +391,8 @@ pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
 
     let device: ID3D12Device = unsafe { ID3D12Device::from_raw(device_ptr as *mut c_void) };
     let luid = get_adapter_luid(&device);
+    godot_print!("[AcceleratedOSR/Windows] Godot adapter LUID: {:?}", luid);
+
     std::mem::forget(device);
 
     luid.map(|l| (l.HighPart, l.LowPart))
