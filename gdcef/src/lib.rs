@@ -30,8 +30,9 @@ use crate::accelerated_osr::{
     AcceleratedRenderState, GodotTextureImporter, PlatformAcceleratedRenderHandler,
 };
 use crate::browser::{
-    App, ImeCompositionQueue, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue,
-    RenderMode, TitleChangeQueue, UrlChangeQueue,
+    App, ConsoleMessageEvent, ConsoleMessageQueue, ImeCompositionQueue, ImeEnableQueue,
+    LoadingStateEvent, LoadingStateQueue, MessageQueue, RenderMode, TitleChangeQueue,
+    UrlChangeQueue,
 };
 use crate::error::CefError;
 use crate::utils::get_display_scale_factor;
@@ -134,6 +135,9 @@ impl CefTexture {
     #[signal]
     fn load_error(url: GString, error_code: i32, error_text: GString);
 
+    #[signal]
+    fn console_message(level: i32, message: GString, source: GString, line: i32);
+
     #[func]
     fn on_ready(&mut self) {
         use godot::classes::control::FocusMode;
@@ -186,6 +190,7 @@ impl CefTexture {
         self.process_url_change_queue();
         self.process_title_change_queue();
         self.process_loading_state_queue();
+        self.process_console_message_queue();
         self.process_ime_enable_queue();
         self.process_ime_composition_queue();
         self.process_ime_position();
@@ -231,6 +236,7 @@ impl CefTexture {
         self.app.loading_state_queue = None;
         self.app.ime_enable_queue = None;
         self.app.ime_composition_range = None;
+        self.app.console_message_queue = None;
 
         self.ime_active = false;
         self.ime_proxy = None;
@@ -349,6 +355,7 @@ impl CefTexture {
         let loading_state_queue: LoadingStateQueue = Arc::new(Mutex::new(VecDeque::new()));
         let ime_enable_queue: ImeEnableQueue = Arc::new(Mutex::new(VecDeque::new()));
         let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
+        let console_message_queue: ConsoleMessageQueue = Arc::new(Mutex::new(VecDeque::new()));
 
         let texture = ImageTexture::new_gd();
 
@@ -361,6 +368,7 @@ impl CefTexture {
                 loading_state_queue: loading_state_queue.clone(),
                 ime_enable_queue: ime_enable_queue.clone(),
                 ime_composition_queue: ime_composition_queue.clone(),
+                console_message_queue: console_message_queue.clone(),
             },
         );
 
@@ -392,6 +400,7 @@ impl CefTexture {
         self.app.loading_state_queue = Some(loading_state_queue);
         self.app.ime_enable_queue = Some(ime_enable_queue);
         self.app.ime_composition_range = Some(ime_composition_queue);
+        self.app.console_message_queue = Some(console_message_queue);
 
         Ok(browser)
     }
@@ -450,6 +459,7 @@ impl CefTexture {
         let loading_state_queue: LoadingStateQueue = Arc::new(Mutex::new(VecDeque::new()));
         let ime_enable_queue: ImeEnableQueue = Arc::new(Mutex::new(VecDeque::new()));
         let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
+        let console_message_queue: ConsoleMessageQueue = Arc::new(Mutex::new(VecDeque::new()));
 
         let mut client = webrender::AcceleratedClientImpl::build(
             render_handler,
@@ -461,6 +471,7 @@ impl CefTexture {
                 loading_state_queue: loading_state_queue.clone(),
                 ime_enable_queue: ime_enable_queue.clone(),
                 ime_composition_queue: ime_composition_queue.clone(),
+                console_message_queue: console_message_queue.clone(),
             },
         );
 
@@ -498,6 +509,7 @@ impl CefTexture {
         self.app.loading_state_queue = Some(loading_state_queue);
         self.app.ime_enable_queue = Some(ime_enable_queue);
         self.app.ime_composition_range = Some(ime_composition_queue);
+        self.app.console_message_queue = Some(console_message_queue);
 
         Ok(browser)
     }
@@ -792,6 +804,31 @@ impl CefTexture {
                     );
                 }
             }
+        }
+    }
+
+    fn process_console_message_queue(&mut self) {
+        let Some(queue) = &self.app.console_message_queue else {
+            return;
+        };
+
+        let events: Vec<ConsoleMessageEvent> = {
+            let Ok(mut q) = queue.lock() else {
+                return;
+            };
+            q.drain(..).collect()
+        };
+
+        for event in events {
+            self.base_mut().emit_signal(
+                "console_message",
+                &[
+                    event.level.to_variant(),
+                    GString::from(&event.message).to_variant(),
+                    GString::from(&event.source).to_variant(),
+                    event.line.to_variant(),
+                ],
+            );
         }
     }
 

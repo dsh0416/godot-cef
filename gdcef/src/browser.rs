@@ -55,6 +55,17 @@ pub type ImeEnableQueue = Arc<Mutex<VecDeque<bool>>>;
 /// Shared state for IME composition range.
 pub type ImeCompositionQueue = Arc<Mutex<Option<ImeCompositionRange>>>;
 
+#[derive(Debug, Clone)]
+pub struct ConsoleMessageEvent {
+    pub level: u32,
+    pub message: String,
+    pub source: String,
+    pub line: i32,
+}
+
+/// Queue for console messages from the browser to Godot.
+pub type ConsoleMessageQueue = Arc<Mutex<VecDeque<ConsoleMessageEvent>>>;
+
 /// Rendering mode for the CEF browser.
 ///
 /// Determines whether the browser uses software (CPU) rendering or
@@ -106,4 +117,6 @@ pub struct App {
     pub ime_enable_queue: Option<ImeEnableQueue>,
     /// Shared IME composition range for caret positioning.
     pub ime_composition_range: Option<ImeCompositionQueue>,
+    /// Queue for console messages from the browser.
+    pub console_message_queue: Option<ConsoleMessageQueue>,
 }
