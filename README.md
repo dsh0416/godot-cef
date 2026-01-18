@@ -84,7 +84,7 @@ The motivation for developing this project comes from our work-in-progress game,
 
 ### Prerequisites
 
-- **Rust** (1.92+) — Install via [rustup](https://rustup.rs/)
+- **Rust** (nightly) — Install via [rustup](https://rustup.rs/)
 - **Godot** (4.5+) — Download from [godotengine.org](https://godotengine.org/)
 - **CEF Binaries** — Automatically downloaded during build
 
