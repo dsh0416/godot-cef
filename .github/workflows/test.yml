@@ -107,7 +107,7 @@ jobs:
             name: Linux
 
     runs-on: ${{ matrix.os }}
-    name: Clippy (${{ matrix.name }})
+    name: Clippy (${{ matrix.os }})
 
     steps:
       - name: Checkout repository
