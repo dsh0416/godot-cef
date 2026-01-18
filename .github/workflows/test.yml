@@ -95,14 +95,26 @@ jobs:
           cargo test --workspace --all-features
 
   clippy:
-    runs-on: ubuntu-latest
-    name: Clippy
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macOS
+          - os: windows-latest
+            name: Windows
+          - os: ubuntu-latest
+            name: Linux
+
+    runs-on: ${{ matrix.os }}
+    name: Clippy (${{ matrix.os }})
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -134,9 +146,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: linux-clippy-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-clippy-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            linux-clippy-
+            ${{ runner.os }}-clippy-
 
       - name: Install CEF export tool
         run: cargo install export-cef-dir

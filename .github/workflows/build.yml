@@ -79,7 +79,7 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    name: Windows x86_64
+    name: Windows
 
     steps:
       - name: Checkout repository
@@ -145,7 +145,7 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
-    name: Linux x86_64
+    name: Linux
 
     steps:
       - name: Checkout repository
