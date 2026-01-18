@@ -6,8 +6,9 @@ use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
-    ImeCompositionQueue, ImeCompositionRange, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue,
-    MessageQueue, TitleChangeQueue, UrlChangeQueue,
+    ConsoleMessageEvent, ConsoleMessageQueue, ImeCompositionQueue, ImeCompositionRange,
+    ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue, TitleChangeQueue,
+    UrlChangeQueue,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -19,6 +20,7 @@ pub(crate) struct ClientQueues {
     pub loading_state_queue: LoadingStateQueue,
     pub ime_enable_queue: ImeEnableQueue,
     pub ime_composition_queue: ImeCompositionQueue,
+    pub console_message_queue: ConsoleMessageQueue,
 }
 
 /// Swizzle indices for BGRA -> RGBA conversion.
@@ -298,6 +300,7 @@ wrap_display_handler! {
         cursor_type: Arc<Mutex<CursorType>>,
         url_change_queue: UrlChangeQueue,
         title_change_queue: TitleChangeQueue,
+        console_message_queue: ConsoleMessageQueue,
     }
 
     impl DisplayHandler {
@@ -360,6 +363,36 @@ wrap_display_handler! {
                 }
             }
         }
+
+        fn on_console_message(
+            &self,
+            _browser: Option<&mut Browser>,
+            level: cef::LogSeverity,
+            message: Option<&CefString>,
+            source: Option<&CefString>,
+            line: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            let message_str = message.map(|m| m.to_string()).unwrap_or_default();
+            let source_str = source.map(|s| s.to_string()).unwrap_or_default();
+            // level.get_raw() returns a u32 on macOS and Linux,
+            // but a i32 on Windows.
+            #[cfg(target_os = "windows")]
+            let level: u32 = level.get_raw() as u32;
+            #[cfg(not(target_os = "windows"))]
+            let level: u32 = level.get_raw();
+
+            if let Ok(mut queue) = self.console_message_queue.lock() {
+                queue.push_back(ConsoleMessageEvent {
+                    level,
+                    message: message_str,
+                    source: source_str,
+                    line,
+                });
+            }
+
+            // Return false to allow default console output
+            false as _
+        }
     }
 }
 
@@ -368,8 +401,14 @@ impl DisplayHandlerImpl {
         cursor_type: Arc<Mutex<CursorType>>,
         url_change_queue: UrlChangeQueue,
         title_change_queue: TitleChangeQueue,
+        console_message_queue: ConsoleMessageQueue,
     ) -> cef::DisplayHandler {
-        Self::new(cursor_type, url_change_queue, title_change_queue)
+        Self::new(
+            cursor_type,
+            url_change_queue,
+            title_change_queue,
+            console_message_queue,
+        )
     }
 }
 
@@ -599,6 +638,7 @@ impl SoftwareClientImpl {
                 cursor_type,
                 queues.url_change_queue,
                 queues.title_change_queue,
+                queues.console_message_queue,
             ),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
@@ -665,6 +705,7 @@ impl AcceleratedClientImpl {
                 cursor_type,
                 queues.url_change_queue,
                 queues.title_change_queue,
+                queues.console_message_queue,
             ),
             ContextMenuHandlerImpl::build(),
             LifeSpanHandlerImpl::build(),
