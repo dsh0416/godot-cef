@@ -10,6 +10,7 @@ use crate::utils::get_subprocess_path;
 
 use crate::accelerated_osr::RenderBackend;
 use crate::error::{CefError, CefResult};
+use cef_app::SecurityConfig;
 
 struct CefState {
     ref_count: usize,
@@ -21,13 +22,13 @@ static CEF_STATE: Mutex<CefState> = Mutex::new(CefState {
     initialized: false,
 });
 
-pub fn cef_retain() -> CefResult<()> {
+pub fn cef_retain_with_security(security_config: SecurityConfig) -> CefResult<()> {
     let mut state = CEF_STATE.lock().unwrap();
 
     if state.ref_count == 0 {
         load_cef_framework()?;
         cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
-        initialize_cef()?;
+        initialize_cef(security_config)?;
         state.initialized = true;
     }
 
@@ -104,13 +105,14 @@ fn should_enable_remote_debugging() -> bool {
 }
 
 /// Initializes CEF with the given settings
-fn initialize_cef() -> CefResult<()> {
+fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
     let enable_remote_debugging = should_enable_remote_debugging();
-    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_options(
+    let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::with_security_options(
         godot_backend,
         enable_remote_debugging,
+        security_config,
     ));
 
     #[cfg(target_os = "macos")]
