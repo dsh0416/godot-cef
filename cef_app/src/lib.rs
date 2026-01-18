@@ -183,7 +183,10 @@ wrap_app! {
                 | cef::SchemeOptions::FETCH_ENABLED.get_raw()
                 | cef::SchemeOptions::CSP_BYPASSING.get_raw();
 
+            #[cfg(target_os = "windows")]
             registrar.add_custom_scheme(Some(&"res".into()), options);
+            #[cfg(not(target_os = "windows"))]
+            registrar.add_custom_scheme(Some(&"res".into()), options as i32);
         }
 
         fn on_before_command_line_processing(
