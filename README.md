@@ -485,6 +485,25 @@ CefTexture provides automatic Input Method Editor (IME) support for text input i
 - On platforms where Godot does not expose native IME support, IME behavior in CefTexture may be limited or unavailable
 
 On platforms where Godot provides native IME integration, CefTexture works without additional configuration in this plugin. Refer to the platform support matrix above and the Godot documentation for details on per-platform IME support and any OS-level setup that may be required.
+
+## ⚠️ Limitations
+
+### One-Time Initialization Parameters
+
+Due to the architecture of CEF, certain parameters can only be configured **once** during Godot's boot-up process. Once CEF is initialized, these settings cannot be changed without restarting the application.
+
+The following security configuration options in `cef_app/src/lib.rs` are affected:
+
+| Parameter | Description |
+|-----------|-------------|
+| `allow_insecure_content` | Allow loading insecure (HTTP) content in HTTPS pages |
+| `ignore_certificate_errors` | Ignore SSL/TLS certificate errors |
+| `disable_web_security` | Disable web security (CORS, same-origin policy) |
+
+These parameters are passed as command-line switches to the CEF subprocess during initialization and cannot be modified at runtime. If you need to change these settings, you must restart your Godot application.
+
+**Note:** Remote debugging is also configured once at startup and is automatically enabled only when running in debug builds or from the Godot editor for security purposes.
+
 ## 🛣️ Roadmap
 
 - [x] Automatic Building Support
