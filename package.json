@@ -1,0 +1,21 @@
+{
+  "name": "godot-cef",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "docs:dev": "vuepress dev docs",
+    "docs:build": "vuepress build docs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.23.0",
+  "devDependencies": {
+    "@vuepress/bundler-vite": "2.0.0-rc.26",
+    "@vuepress/theme-default": "2.0.0-rc.121",
+    "sass-embedded": "^1.97.2",
+    "vue": "^3.5.26",
+    "vuepress": "2.0.0-rc.26"
+  }
+}

@@ -200,291 +200,40 @@ func _ready():
     add_child(cef_texture)
 ```
 
-### Node Properties
-
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `url` | `String` | `"https://google.com"` | The URL to display. Setting this property navigates the browser to the new URL. Reading it returns the current URL from the browser. |
-| `enable_accelerated_osr` | `bool` | `true` | Enable GPU-accelerated rendering |
-
-The `url` property is reactive: when you set it from GDScript, the browser automatically navigates to the new URL:
+### Quick Example
 
 ```gdscript
-# Navigate to a new page by setting the property
-cef_texture.url = "https://example.com/game-ui"
+extends Node2D
 
-# Read the current URL (reflects user navigation, redirects, etc.)
-print("Currently at: ", cef_texture.url)
-```
+@onready var browser = $CefTexture
 
-### Methods
-
-#### Navigation
-
-##### `go_back()`
-
-Navigates back in the browser history.
-
-```gdscript
-cef_texture.go_back()
-```
-
-##### `go_forward()`
-
-Navigates forward in the browser history.
-
-```gdscript
-cef_texture.go_forward()
-```
-
-##### `can_go_back() -> bool`
-
-Returns `true` if the browser can navigate back.
-
-```gdscript
-if cef_texture.can_go_back():
-    cef_texture.go_back()
-```
-
-##### `can_go_forward() -> bool`
-
-Returns `true` if the browser can navigate forward.
-
-```gdscript
-if cef_texture.can_go_forward():
-    cef_texture.go_forward()
-```
-
-##### `reload()`
-
-Reloads the current page.
-
-```gdscript
-cef_texture.reload()
-```
-
-##### `reload_ignore_cache()`
-
-Reloads the current page, ignoring any cached data.
-
-```gdscript
-cef_texture.reload_ignore_cache()
-```
-
-##### `stop_loading()`
-
-Stops loading the current page.
-
-```gdscript
-cef_texture.stop_loading()
-```
-
-##### `is_loading() -> bool`
-
-Returns `true` if the browser is currently loading a page.
-
-```gdscript
-if cef_texture.is_loading():
-    print("Page is still loading...")
-```
-
-#### JavaScript Execution
-
-##### `eval(code: String)`
-
-Executes JavaScript code in the browser's main frame.
-
-```gdscript
-# Execute JavaScript
-cef_texture.eval("document.body.style.backgroundColor = 'red'")
-
-# Call a JavaScript function
-cef_texture.eval("updateScore(100)")
-
-# Interact with the DOM
-cef_texture.eval("document.getElementById('player-name').innerText = 'Player1'")
-```
-
-#### IPC (Inter-Process Communication)
-
-##### `send_ipc_message(message: String)`
-
-Sends a message from Godot to JavaScript. The message will be delivered via `window.onIpcMessage(msg)` callback if it is registered.
-
-```gdscript
-# Send a simple string message
-cef_texture.send_ipc_message("Hello from Godot!")
-
-# Send structured data as JSON using a Dictionary
-var payload := {"action": "update", "value": 42}
-cef_texture.send_ipc_message(JSON.stringify(payload))
-```
-
-In your JavaScript (running in the CEF browser):
-
-```javascript
-// Register the callback to receive messages from Godot
-window.onIpcMessage = function(msg) {
-    console.log("Received from Godot:", msg);
-    var data = JSON.parse(msg);
-    // Handle the message...
-};
-```
-
-#### Zoom Control
-
-##### `set_zoom_level(level: float)`
-
-Sets the zoom level for the browser. A value of `0.0` is the default (100%). Positive values zoom in, negative values zoom out.
-
-```gdscript
-cef_texture.set_zoom_level(1.0)   # Zoom in
-cef_texture.set_zoom_level(-1.0)  # Zoom out
-cef_texture.set_zoom_level(0.0)   # Reset to default
-```
-
-##### `get_zoom_level() -> float`
-
-Returns the current zoom level.
-
-```gdscript
-var zoom = cef_texture.get_zoom_level()
-print("Current zoom: ", zoom)
-```
-
-#### Audio Control
-
-##### `set_audio_muted(muted: bool)`
-
-Mutes or unmutes the browser audio.
-
-```gdscript
-cef_texture.set_audio_muted(true)   # Mute
-cef_texture.set_audio_muted(false)  # Unmute
-```
-
-##### `is_audio_muted() -> bool`
-
-Returns `true` if the browser audio is muted.
-
-```gdscript
-if cef_texture.is_audio_muted():
-    print("Audio is muted")
-```
-
-### Signals
-
-#### `ipc_message(message: String)`
-
-Emitted when JavaScript sends a message to Godot via the `sendIpcMessage` function. Use this for bidirectional communication between your web UI and game logic.
-
-```gdscript
 func _ready():
-    cef_texture.ipc_message.connect(_on_ipc_message)
+    # Set initial URL
+    browser.url = "https://example.com"
 
-func _on_ipc_message(message: String):
+    # Connect to signals
+    browser.load_finished.connect(_on_page_loaded)
+    browser.ipc_message.connect(_on_message_received)
+
+func _on_page_loaded(url: String, status: int):
+    print("Page loaded: ", url)
+
+    # Execute JavaScript
+    browser.eval("document.body.style.backgroundColor = '#f0f0f0'")
+
+func _on_message_received(message: String):
     print("Received from web: ", message)
-    var data = JSON.parse_string(message)
-    # Handle the message...
 ```
 
-In your JavaScript (running in the CEF browser):
+## 📚 Documentation
 
-```javascript
-// Send a message to Godot
-window.sendIpcMessage("button_clicked");
+For comprehensive API documentation, examples, and guides, visit the [full documentation](https://dsh0416.github.io/godot-cef/).
 
-// Send structured data as JSON
-window.sendIpcMessage(JSON.stringify({ action: "purchase", item_id: 42 }));
-```
-
-#### `url_changed(url: String)`
-
-Emitted when the browser navigates to a new URL. This fires for user-initiated navigation (clicking links), JavaScript navigation, redirects, and programmatic `load_url()` calls. Useful for injecting scripts or tracking navigation.
-
-```gdscript
-func _ready():
-    cef_texture.url_changed.connect(_on_url_changed)
-
-func _on_url_changed(url: String):
-    print("Navigated to: ", url)
-    # Inject data based on the current page
-    if "game-ui" in url:
-        cef_texture.eval("window.playerData = %s" % JSON.stringify(player_data))
-```
-
-#### `title_changed(title: String)`
-
-Emitted when the page title changes. Useful for updating window titles or UI elements.
-
-```gdscript
-func _ready():
-    cef_texture.title_changed.connect(_on_title_changed)
-
-func _on_title_changed(title: String):
-    print("Page title: ", title)
-    $TitleLabel.text = title
-```
-
-#### `load_started(url: String)`
-
-Emitted when the browser starts loading a page.
-
-```gdscript
-func _ready():
-    cef_texture.load_started.connect(_on_load_started)
-
-func _on_load_started(url: String):
-    print("Loading: ", url)
-    $LoadingSpinner.visible = true
-```
-
-#### `load_finished(url: String, http_status_code: int)`
-
-Emitted when the browser finishes loading a page. The `http_status_code` contains the HTTP response status (e.g., 200 for success, 404 for not found).
-
-```gdscript
-func _ready():
-    cef_texture.load_finished.connect(_on_load_finished)
-
-func _on_load_finished(url: String, http_status_code: int):
-    print("Loaded: ", url, " (status: ", http_status_code, ")")
-    $LoadingSpinner.visible = false
-    if http_status_code != 200:
-        print("Warning: Page returned status ", http_status_code)
-```
-
-#### `load_error(url: String, error_code: int, error_text: String)`
-
-Emitted when a page load error occurs (e.g., network error, invalid URL).
-
-```gdscript
-func _ready():
-    cef_texture.load_error.connect(_on_load_error)
-
-func _on_load_error(url: String, error_code: int, error_text: String):
-    print("Failed to load: ", url)
-    print("Error ", error_code, ": ", error_text)
-    # Show error page or retry
-```
-
-### IME Support
-
-CefTexture provides automatic Input Method Editor (IME) support for text input in web content. When you click on an input field in the browser, the system IME is automatically activated, allowing you to input text in languages like Chinese, Japanese, Korean, etc.
-
-**How it works:**
-- When an input field gains focus in CEF, Godot's native IME is automatically activated
-- The IME candidate window is positioned near the text cursor in the browser
-- Composition text is forwarded to CEF in real-time
-- When the input field loses focus, IME is automatically deactivated
-
-**Platform and configuration notes:**
-- IME behavior depends on the underlying operating system and Godot's own IME support on that platform
-- You must have a system IME / input source configured and enabled for the languages you want to type
-- IME appearance and candidate window positioning may vary between platforms and window managers
-- On platforms where Godot does not expose native IME support, IME behavior in CefTexture may be limited or unavailable
-
-On platforms where Godot provides native IME integration, CefTexture works without additional configuration in this plugin. Refer to the platform support matrix above and the Godot documentation for details on per-platform IME support and any OS-level setup that may be required.
+- [**API Reference**](https://dsh0416.github.io/godot-cef/api/) - Complete CefTexture API documentation
+- [**Properties**](https://dsh0416.github.io/godot-cef/api/properties.html) - Node properties and configuration
+- [**Methods**](https://dsh0416.github.io/godot-cef/api/methods.html) - Browser control and JavaScript execution
+- [**Signals**](https://dsh0416.github.io/godot-cef/api/signals.html) - Events and notifications
+- [**IME Support**](https://dsh0416.github.io/godot-cef/api/ime-support.html) - International text input
 
 ## ⚠️ Limitations
 
