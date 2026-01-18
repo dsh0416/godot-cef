@@ -374,11 +374,16 @@ wrap_display_handler! {
         ) -> ::std::os::raw::c_int {
             let message_str = message.map(|m| m.to_string()).unwrap_or_default();
             let source_str = source.map(|s| s.to_string()).unwrap_or_default();
-            let level_i32: u32 = level.get_raw();
+            // level.get_raw() returns a u32 on macOS and Linux,
+            // but a i32 on Windows.
+            #[cfg(target_os = "windows")]
+            let level: u32 = level.get_raw() as u32;
+            #[cfg(not(target_os = "windows"))]
+            let level: u32 = level.get_raw();
 
             if let Ok(mut queue) = self.console_message_queue.lock() {
                 queue.push_back(ConsoleMessageEvent {
-                    level: level_i32,
+                    level,
                     message: message_str,
                     source: source_str,
                     line,
