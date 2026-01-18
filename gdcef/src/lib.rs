@@ -136,7 +136,7 @@ impl CefTexture {
     fn load_error(url: GString, error_code: i32, error_text: GString);
 
     #[signal]
-    fn console_message(level: i32, message: GString, source: GString, line: i32);
+    fn console_message(level: u32, message: GString, source: GString, line: i32);
 
     #[func]
     fn on_ready(&mut self) {
