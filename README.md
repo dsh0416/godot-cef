@@ -84,7 +84,7 @@ The motivation for developing this project comes from our work-in-progress game,
 
 ### Prerequisites
 
-- **Rust** (1.92+) — Install via [rustup](https://rustup.rs/)
+- **Rust** (nightly) — Install via [rustup](https://rustup.rs/)
 - **Godot** (4.5+) — Download from [godotengine.org](https://godotengine.org/)
 - **CEF Binaries** — Automatically downloaded during build
 
@@ -234,24 +234,6 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 - [**Methods**](https://dsh0416.github.io/godot-cef/api/methods.html) - Browser control and JavaScript execution
 - [**Signals**](https://dsh0416.github.io/godot-cef/api/signals.html) - Events and notifications
 - [**IME Support**](https://dsh0416.github.io/godot-cef/api/ime-support.html) - International text input
-
-## Limitations
-
-### One-Time Initialization Parameters
-
-Due to the architecture of CEF, certain parameters can only be configured **once** during Godot's boot-up process. Once CEF is initialized, these settings cannot be changed without restarting the application.
-
-The following security configuration options in `cef_app/src/lib.rs` are affected:
-
-| Parameter | Description |
-|-----------|-------------|
-| `allow_insecure_content` | Allow loading insecure (HTTP) content in HTTPS pages |
-| `ignore_certificate_errors` | Ignore SSL/TLS certificate errors |
-| `disable_web_security` | Disable web security (CORS, same-origin policy) |
-
-These parameters are passed as command-line switches to the CEF subprocess during initialization and cannot be modified at runtime. If you need to change these settings, you must restart your Godot application.
-
-**Note:** Remote debugging is also configured once at startup and is automatically enabled only when running in debug builds or from the Godot editor for security purposes.
 
 ## License
 

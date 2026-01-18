@@ -96,6 +96,30 @@ func _on_load_error(url: String, error_code: int, error_text: String):
     # Show error page or retry
 ```
 
+## `console_message(level: int, message: String, source: String, line: int)`
+
+Emitted when JavaScript logs a message to the browser console (e.g., `console.log()`, `console.warn()`, `console.error()`). Useful for debugging web content or capturing JavaScript errors.
+
+**Parameters:**
+- `level`: Log severity level (0=debug, 1=info, 2=warning, 3=error, 4=fatal)
+- `message`: The console message text
+- `source`: The source file URL where the message originated
+- `line`: The line number in the source file
+
+```gdscript
+func _ready():
+    cef_texture.console_message.connect(_on_console_message)
+
+func _on_console_message(level: int, message: String, source: String, line: int):
+    var level_names = ["DEBUG", "INFO", "WARNING", "ERROR", "FATAL"]
+    var level_name = level_names[level] if level < level_names.size() else "UNKNOWN"
+    print("[%s] %s (%s:%d)" % [level_name, message, source, line])
+    
+    # Capture JavaScript errors for debugging
+    if level >= 3:  # ERROR or FATAL
+        push_error("JS Error: %s at %s:%d" % [message, source, line])
+```
+
 ## Signal Usage Patterns
 
 ### Loading State Management
