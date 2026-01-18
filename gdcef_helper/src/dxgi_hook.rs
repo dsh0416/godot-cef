@@ -6,7 +6,7 @@
 //! The approach:
 //! 1. Hook CreateDXGIFactory1/2 to intercept factory creation
 //! 2. After the real factory is created, patch its vtable to redirect EnumAdapters and EnumAdapters1
-//! 3. Our hooked functions remap adapter indices so index 0 returns our target adapter
+//! 3. Our hooked functions hide all adapters except the target - only index 0 is valid
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
@@ -73,57 +73,78 @@ fn find_target_adapter_index(factory: &IDXGIFactory1, target: &LUID) -> Option<u
     None
 }
 
-/// Remaps adapter indices so index 0 returns our target adapter.
-fn remap_adapter_index(adapter_index: u32) -> u32 {
-    let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
+// DXGI_ERROR_NOT_FOUND
+const DXGI_ERROR_NOT_FOUND: HRESULT = HRESULT(0x887A0002_u32 as i32);
 
-    // If we haven't found a target adapter, just pass through
-    if target_index == u32::MAX {
-        return adapter_index;
-    }
-
-    // Remap indices:
-    // - Virtual index 0 -> Real target_index (our target adapter)
-    // - Virtual index 1..=target_index -> Real 0..target_index-1 (adapters before target)
-    // - Virtual index > target_index -> Real index (adapters after target, unchanged)
-    if adapter_index == 0 {
-        target_index
-    } else if adapter_index <= target_index {
-        adapter_index - 1
-    } else {
-        adapter_index
-    }
-}
-
-/// Hooked EnumAdapters (IDXGIFactory) - remaps adapter indices.
+/// Hooked EnumAdapters (IDXGIFactory) - only returns target adapter at index 0.
 unsafe extern "system" fn hooked_enum_adapters(
     this: *mut c_void,
     adapter_index: u32,
     pp_adapter: *mut *mut c_void,
 ) -> HRESULT {
+    let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
+
+    // If we haven't found a target adapter, pass through unchanged
+    if target_index == u32::MAX {
+        unsafe {
+            let original_ptr = ORIGINAL_ENUM_ADAPTERS.load(Ordering::SeqCst);
+            if original_ptr.is_null() {
+                return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
+            }
+            let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
+            return original(this, adapter_index, pp_adapter);
+        }
+    }
+
+    // Only index 0 is valid - it returns the target adapter
+    // All other indices return NOT_FOUND to hide other adapters
+    if adapter_index != 0 {
+        return DXGI_ERROR_NOT_FOUND;
+    }
+
     unsafe {
         let original_ptr = ORIGINAL_ENUM_ADAPTERS.load(Ordering::SeqCst);
         if original_ptr.is_null() {
             return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
         }
         let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
-        original(this, remap_adapter_index(adapter_index), pp_adapter)
+        original(this, target_index, pp_adapter)
     }
 }
 
-/// Hooked EnumAdapters1 (IDXGIFactory1) - remaps adapter indices.
+/// Hooked EnumAdapters1 (IDXGIFactory1) - only returns target adapter at index 0.
 unsafe extern "system" fn hooked_enum_adapters1(
     this: *mut c_void,
     adapter_index: u32,
     pp_adapter: *mut *mut c_void,
 ) -> HRESULT {
+    let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
+
+    // If we haven't found a target adapter, pass through unchanged
+    if target_index == u32::MAX {
+        unsafe {
+            let original_ptr = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
+            if original_ptr.is_null() {
+                return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
+            }
+            let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
+            return original(this, adapter_index, pp_adapter);
+        }
+    }
+
+    // Only index 0 is valid - it returns the target adapter
+    // All other indices return NOT_FOUND to hide other adapters
+    if adapter_index != 0 {
+        return DXGI_ERROR_NOT_FOUND;
+    }
+
     unsafe {
         let original_ptr = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
         if original_ptr.is_null() {
             return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
         }
         let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
-        original(this, remap_adapter_index(adapter_index), pp_adapter)
+        original(this, target_index, pp_adapter)
     }
 }
 
@@ -285,7 +306,7 @@ unsafe fn process_created_factory(
         if idx != 0 {
             if unsafe { patch_factory_vtable(factory_ptr) } {
                 eprintln!(
-                    "[DXGI Hook] Vtable patched - adapter {} will appear at index 0",
+                    "[DXGI Hook] Vtable patched - only adapter {} visible at index 0, others hidden",
                     idx
                 );
             } else {
@@ -334,10 +355,10 @@ fn hooked_create_dxgi_factory2(
         unsafe {
             if !pp_factory.is_null() && !(*pp_factory).is_null() {
                 let factory_ptr = *pp_factory;
-                if let Some(factory2) = IDXGIFactory2::from_raw_borrowed(&factory_ptr) {
-                    if let Ok(factory1) = factory2.cast::<IDXGIFactory1>() {
-                        process_created_factory(factory_ptr, &factory1, target);
-                    }
+                if let Some(factory2) = IDXGIFactory2::from_raw_borrowed(&factory_ptr)
+                    && let Ok(factory1) = factory2.cast::<IDXGIFactory1>()
+                {
+                    process_created_factory(factory_ptr, &factory1, target);
                 }
             }
         }
@@ -357,7 +378,10 @@ fn get_create_dxgi_factory1_ptr() -> Option<CreateDXGIFactory1Fn> {
             windows::core::s!("CreateDXGIFactory1"),
         )?;
 
-        Some(std::mem::transmute(proc))
+        Some(std::mem::transmute::<
+            unsafe extern "system" fn() -> isize,
+            CreateDXGIFactory1Fn,
+        >(proc))
     }
 }
 
@@ -372,7 +396,10 @@ fn get_create_dxgi_factory2_ptr() -> Option<CreateDXGIFactory2Fn> {
             windows::core::s!("CreateDXGIFactory2"),
         )?;
 
-        Some(std::mem::transmute(proc))
+        Some(std::mem::transmute::<
+            unsafe extern "system" fn() -> isize,
+            CreateDXGIFactory2Fn,
+        >(proc))
     }
 }
 
@@ -415,22 +442,28 @@ unsafe fn install_hooks_internal() -> bool {
         return false;
     };
 
-    let factory1_result = CreateDXGIFactory1Hook
-        .initialize(factory1_ptr, hooked_create_dxgi_factory1)
-        .and_then(|_| CreateDXGIFactory1Hook.enable());
+    let factory1_result = unsafe {
+        CreateDXGIFactory1Hook
+            .initialize(factory1_ptr, hooked_create_dxgi_factory1)
+            .and_then(|_| CreateDXGIFactory1Hook.enable())
+    };
 
     if let Err(e) = factory1_result {
         eprintln!("[DXGI Hook] Failed to hook CreateDXGIFactory1: {:?}", e);
         return false;
     }
 
-    let factory2_result = CreateDXGIFactory2Hook
-        .initialize(factory2_ptr, hooked_create_dxgi_factory2)
-        .and_then(|_| CreateDXGIFactory2Hook.enable());
+    let factory2_result = unsafe {
+        CreateDXGIFactory2Hook
+            .initialize(factory2_ptr, hooked_create_dxgi_factory2)
+            .and_then(|_| CreateDXGIFactory2Hook.enable())
+    };
 
     if let Err(e) = factory2_result {
         eprintln!("[DXGI Hook] Failed to hook CreateDXGIFactory2: {:?}", e);
-        let _ = CreateDXGIFactory1Hook.disable();
+        unsafe {
+            let _ = CreateDXGIFactory1Hook.disable();
+        }
         return false;
     }
 

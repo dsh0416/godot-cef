@@ -183,7 +183,7 @@ wrap_app! {
                 | cef::SchemeOptions::FETCH_ENABLED.get_raw()
                 | cef::SchemeOptions::CSP_BYPASSING.get_raw();
 
-            registrar.add_custom_scheme(Some(&"res".into()), options as i32);
+            registrar.add_custom_scheme(Some(&"res".into()), options);
         }
 
         fn on_before_command_line_processing(

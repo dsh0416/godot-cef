@@ -4,7 +4,7 @@ use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
 use std::ffi::c_void;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_BARRIER,
     D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
@@ -13,7 +13,6 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator,
     ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
 };
-use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, IDXGIDevice};
 use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
 use windows::core::Interface;
 
@@ -371,15 +370,6 @@ pub fn is_supported() -> bool {
     NativeTextureImporter::new().is_some() && RenderBackend::detect().supports_accelerated_osr()
 }
 
-pub fn get_adapter_luid(device: &ID3D12Device) -> Option<LUID> {
-    unsafe {
-        let dxgi_device: IDXGIDevice = device.cast().ok()?;
-        let adapter = dxgi_device.GetAdapter().ok()?;
-        let adapter1: IDXGIAdapter1 = adapter.cast().ok()?;
-        Some(adapter1.GetDesc1().ok()?.AdapterLuid)
-    }
-}
-
 pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
     let mut rd = RenderingServer::singleton().get_rendering_device()?;
     let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
@@ -390,12 +380,13 @@ pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
     }
 
     let device: ID3D12Device = unsafe { ID3D12Device::from_raw(device_ptr as *mut c_void) };
-    let luid = get_adapter_luid(&device);
+    let luid = unsafe { device.GetAdapterLuid() };
     godot_print!("[AcceleratedOSR/Windows] Godot adapter LUID: {:?}", luid);
 
+    // Device is from Godot, we don't need to close it
     std::mem::forget(device);
 
-    luid.map(|l| (l.HighPart, l.LowPart))
+    Some((luid.HighPart, luid.LowPart))
 }
 
 unsafe impl Send for GodotTextureImporter {}
