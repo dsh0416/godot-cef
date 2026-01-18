@@ -5,6 +5,17 @@
 
 use cef::{CefString, ImplCommandLine, api_hash, args::Args, execute_process};
 
+// Request discrete GPU on Windows laptops with hybrid graphics
+#[cfg(windows)]
+#[no_mangle]
+#[used]
+pub static NvOptimusEnablement: u32 = 0x00000001;
+
+#[cfg(windows)]
+#[no_mangle]
+#[used]
+pub static AmdPowerXpressRequestHighPerformance: u32 = 0x00000001;
+
 mod utils;
 
 #[cfg(target_os = "windows")]

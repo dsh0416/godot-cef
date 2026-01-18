@@ -13,6 +13,17 @@ mod webrender;
 
 use godot::init::*;
 
+// Request discrete GPU on Windows laptops with hybrid graphics
+#[cfg(windows)]
+#[no_mangle]
+#[used]
+pub static NvOptimusEnablement: u32 = 0x00000001;
+
+#[cfg(windows)]
+#[no_mangle]
+#[used]
+pub static AmdPowerXpressRequestHighPerformance: u32 = 0x00000001;
+
 struct GodotCef;
 
 #[gdextension]
