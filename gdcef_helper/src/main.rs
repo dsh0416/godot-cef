@@ -5,7 +5,10 @@
 
 use cef::{CefString, ImplCommandLine, api_hash, args::Args, execute_process};
 
-// Request discrete GPU on Windows laptops with hybrid graphics
+// In Godot's codebase, Godot sets NvOptimusEnablement and AmdPowerXpressRequestHighPerformance
+// to request discrete GPU on Windows laptops with hybrid graphics.
+// This might cause the gdcef_helper uses a different GPU than Godot.
+// See https://github.com/godotengine/godot/blob/741fb8a30687d0662ab6b5c04a2a531440dd29d9/platform/windows/os_windows.cpp#L101
 #[cfg(windows)]
 #[no_mangle]
 #[used]
