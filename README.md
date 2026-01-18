@@ -504,16 +504,6 @@ These parameters are passed as command-line switches to the CEF subprocess durin
 
 **Note:** Remote debugging is also configured once at startup and is automatically enabled only when running in debug builds or from the Godot editor for security purposes.
 
-## 🛣️ Roadmap
-
-- [x] Automatic Building Support
-- [x] CI/CD Configuration
-- [x] Custom Scheme Support (`res://` protocol)
-- [x] IPC Support
-- [x] Better IME Support
-- [ ] Gamepad Support
-- [x] Access to Godot Filesystem
-
 ## 📄 License
 
 MIT License — Copyright 2025-2026 Delton Ding
