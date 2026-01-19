@@ -8,14 +8,13 @@ repository.workspace = true
 
 [lib]
 name = "gdcef"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 godot = { workspace = true }
 cef = { workspace = true }
 cef-dll-sys = { workspace = true }
 process_path = { workspace = true }
-winit = { workspace = true }
 cef_app = { path = "../cef_app" }
 serde_json = { workspace = true }
 wide = { workspace = true }

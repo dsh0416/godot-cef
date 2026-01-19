@@ -1,10 +1,10 @@
 use super::CefTexture;
 use cef::{BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, WindowInfo};
+use cef_app::PhysicalSize;
 use godot::classes::ImageTexture;
 use godot::prelude::*;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::{
     self, AcceleratedRenderState, GodotTextureImporter, PlatformAcceleratedRenderHandler,
