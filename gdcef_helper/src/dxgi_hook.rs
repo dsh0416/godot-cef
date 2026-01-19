@@ -90,7 +90,8 @@ fn find_target_adapter_index(factory: &IDXGIFactory1, target: &LUID) -> Option<u
             // Use the original function directly to bypass our hook
             unsafe {
                 let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
-                let factory_ptr = factory as *const IDXGIFactory1 as *mut c_void;
+                // Get the raw COM interface pointer, not the Rust wrapper address
+                let factory_ptr = factory.as_raw();
                 let mut adapter_ptr: *mut c_void = std::ptr::null_mut();
                 let hr = original(factory_ptr, index, &mut adapter_ptr);
                 if hr.is_ok() && !adapter_ptr.is_null() {
