@@ -9,7 +9,7 @@ macos     = "bin/universal-apple-darwin/Godot CEF.framework"
 windows.x86_64   = "bin/x86_64-pc-windows-msvc/gdcef.dll"
 
 [icons]
-WebView = "icons/webview.svg"
+CefTexture = "icons/webview.png"
 
 [dependencies]
 

@@ -5,9 +5,9 @@ hero:
   name: Godot CEF
   text: High-Performance Chromium Integration
   tagline: Full web browser capabilities for Godot Engine 4.5+
-#   TODO: image:
-#     src: /logo.svg
-#     alt: Godot CEF
+  image:
+    src: /icon.png
+    alt: Godot CEF
   actions:
     - theme: brand
       text: Get Started
