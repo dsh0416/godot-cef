@@ -6,10 +6,23 @@ use godot::classes::RenderingServer;
 use godot::global::{godot_print, godot_warn};
 use godot::prelude::*;
 
-pub use d3d12::get_godot_adapter_luid;
-
 use d3d12::D3D12TextureImporter;
 use vulkan::VulkanTextureImporter;
+
+pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
+    let backend = RenderBackend::detect();
+    match backend {
+        RenderBackend::D3D12 => d3d12::get_godot_adapter_luid(),
+        RenderBackend::Vulkan => vulkan::get_godot_adapter_luid(),
+        _ => {
+            godot_warn!(
+                "[AcceleratedOSR/Windows] Cannot get adapter LUID for backend {:?}",
+                backend
+            );
+            None
+        }
+    }
+}
 
 pub struct GodotTextureImporter {
     backend: TextureImporterBackend,

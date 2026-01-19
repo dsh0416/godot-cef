@@ -117,20 +117,18 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
         security_config,
     );
 
+    // To make sure CEF uses the correct GPU adapter,
+    // we need to pass the adapter LUID to the subprocesses.
     #[cfg(target_os = "windows")]
     {
-        // Only query D3D12 adapter LUID when using D3D12 backend
-        // Calling get_godot_adapter_luid() on Vulkan would crash (wrong device type)
-        if godot_backend == cef_app::GodotRenderBackend::Direct3D12 {
-            use crate::accelerated_osr::get_godot_adapter_luid;
-            if let Some((high, low)) = get_godot_adapter_luid() {
-                godot::global::godot_print!(
-                    "[CefInit] Godot adapter LUID: {},{} - will pass to CEF subprocesses",
-                    high,
-                    low
-                );
-                osr_app = osr_app.with_adapter_luid(high, low);
-            }
+        use crate::accelerated_osr::get_godot_adapter_luid;
+        if let Some((high, low)) = get_godot_adapter_luid() {
+            godot::global::godot_print!(
+                "[CefInit] Godot adapter LUID: {},{} - will pass to CEF subprocesses",
+                high,
+                low
+            );
+            osr_app = osr_app.with_adapter_luid(high, low);
         }
     }
 
