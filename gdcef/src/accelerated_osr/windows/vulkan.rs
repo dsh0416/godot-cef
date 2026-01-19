@@ -688,7 +688,8 @@ pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
 
     let luid_bytes = id_props.device_luid;
     let low_part = u32::from_ne_bytes([luid_bytes[0], luid_bytes[1], luid_bytes[2], luid_bytes[3]]);
-    let high_part = i32::from_ne_bytes([luid_bytes[4], luid_bytes[5], luid_bytes[6], luid_bytes[7]]);
+    let high_part =
+        i32::from_ne_bytes([luid_bytes[4], luid_bytes[5], luid_bytes[6], luid_bytes[7]]);
 
     godot_print!(
         "[AcceleratedOSR/Vulkan] Godot adapter LUID: HighPart={}, LowPart={}",
