@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "linux")]
 pub use linux::GodotTextureImporter;
+#[cfg(target_os = "linux")]
+pub use linux::get_godot_device_uuid;
 #[cfg(target_os = "macos")]
 pub use macos::GodotTextureImporter;
 #[cfg(target_os = "windows")]

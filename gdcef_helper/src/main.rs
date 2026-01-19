@@ -24,6 +24,9 @@ mod utils;
 #[cfg(target_os = "windows")]
 mod dxgi_hook;
 
+#[cfg(target_os = "linux")]
+mod vulkan_select;
+
 fn main() -> std::process::ExitCode {
     #[cfg(target_os = "macos")]
     {
@@ -69,6 +72,33 @@ fn main() -> std::process::ExitCode {
                 eprintln!(
                     "[gdcef_helper] Warning: Invalid adapter LUID format: {}",
                     luid_str
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use cef_app::DeviceUuid;
+
+        let uuid_switch = CefString::from("godot-device-uuid");
+        if cmd.has_switch(Some(&uuid_switch)) == 1 {
+            let uuid_value = CefString::from(&cmd.switch_value(Some(&uuid_switch)));
+            let uuid_str = uuid_value.to_string();
+
+            if let Some(device_uuid) = DeviceUuid::from_arg_string(&uuid_str) {
+                eprintln!(
+                    "[gdcef_helper] Selecting Vulkan device by UUID: {}",
+                    uuid_str
+                );
+
+                if !vulkan_select::select_device_by_uuid(device_uuid.bytes) {
+                    eprintln!("[gdcef_helper] Warning: Failed to select Vulkan device by UUID");
+                }
+            } else {
+                eprintln!(
+                    "[gdcef_helper] Warning: Invalid device UUID format: {}",
+                    uuid_str
                 );
             }
         }

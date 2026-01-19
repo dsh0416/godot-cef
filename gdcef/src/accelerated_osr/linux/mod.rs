@@ -10,6 +10,10 @@ use cef::AcceleratedPaintInfo;
 use godot::global::{godot_print, godot_warn};
 use godot::prelude::*;
 
+pub fn get_godot_device_uuid() -> Option<[u8; 16]> {
+    vulkan::get_godot_device_uuid()
+}
+
 pub struct GodotTextureImporter {
     vulkan_importer: vulkan::VulkanTextureImporter,
 }

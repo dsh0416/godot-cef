@@ -83,6 +83,39 @@ impl AdapterLuid {
     }
 }
 
+/// Device UUID for GPU selection on Linux.
+///
+/// This 16-byte UUID uniquely identifies a Vulkan physical device and can be
+/// used to ensure CEF subprocesses use the same GPU as Godot.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DeviceUuid {
+    pub bytes: [u8; 16],
+}
+
+impl DeviceUuid {
+    pub fn new(bytes: [u8; 16]) -> Self {
+        Self { bytes }
+    }
+
+    /// Convert to a hex string for passing as command line argument
+    pub fn to_arg_string(&self) -> String {
+        self.bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
+    /// Parse from hex string (32 hex characters)
+    pub fn from_arg_string(s: &str) -> Option<Self> {
+        if s.len() != 32 {
+            return None;
+        }
+        let mut bytes = [0u8; 16];
+        for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
+            let hex_str = std::str::from_utf8(chunk).ok()?;
+            bytes[i] = u8::from_str_radix(hex_str, 16).ok()?;
+        }
+        Some(Self { bytes })
+    }
+}
+
 #[derive(Clone)]
 pub struct OsrApp {
     godot_backend: GodotRenderBackend,
@@ -90,6 +123,8 @@ pub struct OsrApp {
     security_config: SecurityConfig,
     /// Adapter LUID for GPU selection (Windows only)
     adapter_luid: Option<AdapterLuid>,
+    /// Device UUID for GPU selection (Linux only)
+    device_uuid: Option<DeviceUuid>,
 }
 
 impl Default for OsrApp {
@@ -105,6 +140,7 @@ impl OsrApp {
             enable_remote_debugging: false,
             security_config: SecurityConfig::default(),
             adapter_luid: None,
+            device_uuid: None,
         }
     }
 
@@ -114,6 +150,7 @@ impl OsrApp {
             enable_remote_debugging: false,
             security_config: SecurityConfig::default(),
             adapter_luid: None,
+            device_uuid: None,
         }
     }
 
@@ -127,6 +164,7 @@ impl OsrApp {
             enable_remote_debugging,
             security_config: SecurityConfig::default(),
             adapter_luid: None,
+            device_uuid: None,
         }
     }
 
@@ -140,11 +178,17 @@ impl OsrApp {
             enable_remote_debugging,
             security_config,
             adapter_luid: None,
+            device_uuid: None,
         }
     }
 
     pub fn with_adapter_luid(mut self, high: i32, low: u32) -> Self {
         self.adapter_luid = Some(AdapterLuid::new(high, low));
+        self
+    }
+
+    pub fn with_device_uuid(mut self, uuid: [u8; 16]) -> Self {
+        self.device_uuid = Some(DeviceUuid::new(uuid));
         self
     }
 
@@ -162,6 +206,10 @@ impl OsrApp {
 
     pub fn adapter_luid(&self) -> Option<AdapterLuid> {
         self.adapter_luid
+    }
+
+    pub fn device_uuid(&self) -> Option<DeviceUuid> {
+        self.device_uuid
     }
 }
 
@@ -219,7 +267,11 @@ wrap_app! {
 
         fn browser_process_handler(&self) -> Option<cef::BrowserProcessHandler> {
             Some(BrowserProcessHandlerBuilder::build(
-                OsrBrowserProcessHandler::new(self.app.security_config().clone(), self.app.adapter_luid()),
+                OsrBrowserProcessHandler::new(
+                    self.app.security_config().clone(),
+                    self.app.adapter_luid(),
+                    self.app.device_uuid(),
+                ),
             ))
         }
 
@@ -242,20 +294,26 @@ pub struct OsrBrowserProcessHandler {
     is_cef_ready: RefCell<bool>,
     security_config: SecurityConfig,
     adapter_luid: Option<AdapterLuid>,
+    device_uuid: Option<DeviceUuid>,
 }
 
 impl Default for OsrBrowserProcessHandler {
     fn default() -> Self {
-        Self::new(SecurityConfig::default(), None)
+        Self::new(SecurityConfig::default(), None, None)
     }
 }
 
 impl OsrBrowserProcessHandler {
-    pub fn new(security_config: SecurityConfig, adapter_luid: Option<AdapterLuid>) -> Self {
+    pub fn new(
+        security_config: SecurityConfig,
+        adapter_luid: Option<AdapterLuid>,
+        device_uuid: Option<DeviceUuid>,
+    ) -> Self {
         Self {
             is_cef_ready: RefCell::new(false),
             security_config,
             adapter_luid,
+            device_uuid,
         }
     }
 }
@@ -295,6 +353,14 @@ wrap_browser_process_handler! {
                 command_line.append_switch_with_value(
                     Some(&"godot-adapter-luid".into()),
                     Some(&luid_str.as_str().into()),
+                );
+            }
+
+            if let Some(uuid) = &self.handler.device_uuid {
+                let uuid_str = uuid.to_arg_string();
+                command_line.append_switch_with_value(
+                    Some(&"godot-device-uuid".into()),
+                    Some(&uuid_str.as_str().into()),
                 );
             }
         }

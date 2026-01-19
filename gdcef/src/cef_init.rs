@@ -132,6 +132,18 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
         }
     }
 
+    // On Linux, pass the device UUID to ensure CEF uses the same GPU as Godot.
+    #[cfg(target_os = "linux")]
+    {
+        use crate::accelerated_osr::get_godot_device_uuid;
+        if let Some(uuid) = get_godot_device_uuid() {
+            godot::global::godot_print!(
+                "[CefInit] Godot device UUID retrieved - will pass to CEF subprocesses"
+            );
+            osr_app = osr_app.with_device_uuid(uuid);
+        }
+    }
+
     let mut app = cef_app::AppBuilder::build(osr_app);
 
     #[cfg(target_os = "macos")]

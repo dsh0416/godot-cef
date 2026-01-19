@@ -744,3 +744,75 @@ fn cef_format_to_vulkan(format: &ColorType) -> vk::Format {
         _ => vk::Format::B8G8R8A8_SRGB,
     }
 }
+
+pub fn get_godot_device_uuid() -> Option<[u8; 16]> {
+    let mut rd = RenderingServer::singleton().get_rendering_device()?;
+
+    let physical_device_ptr =
+        rd.get_driver_resource(DriverResource::PHYSICAL_DEVICE, Rid::Invalid, 0);
+    if physical_device_ptr == 0 {
+        godot_error!("[AcceleratedOSR/Vulkan] Failed to get Vulkan physical device for UUID query");
+        return None;
+    }
+    let physical_device: vk::PhysicalDevice = unsafe { std::mem::transmute(physical_device_ptr) };
+
+    let lib = match unsafe { libloading::Library::new("libvulkan.so.1") } {
+        Ok(lib) => lib,
+        Err(e) => {
+            godot_error!(
+                "[AcceleratedOSR/Vulkan] Failed to load libvulkan.so.1 for UUID query: {}",
+                e
+            );
+            return None;
+        }
+    };
+
+    type GetPhysicalDeviceProperties2 = unsafe extern "system" fn(
+        physical_device: vk::PhysicalDevice,
+        p_properties: *mut vk::PhysicalDeviceProperties2<'_>,
+    );
+
+    let get_physical_device_properties2: GetPhysicalDeviceProperties2 = unsafe {
+        match lib.get(b"vkGetPhysicalDeviceProperties2\0") {
+            Ok(f) => *f,
+            Err(e) => {
+                godot_error!(
+                    "[AcceleratedOSR/Vulkan] Failed to get vkGetPhysicalDeviceProperties2: {}. \
+                     Vulkan 1.1+ is required for UUID query.",
+                    e
+                );
+                return None;
+            }
+        }
+    };
+
+    let mut id_props = vk::PhysicalDeviceIDProperties::default();
+    let mut props2 = vk::PhysicalDeviceProperties2::default().push_next(&mut id_props);
+
+    unsafe {
+        get_physical_device_properties2(physical_device, &mut props2);
+    }
+
+    let uuid = id_props.device_uuid;
+    godot_print!(
+        "[AcceleratedOSR/Vulkan] Godot device UUID: {:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        uuid[0],
+        uuid[1],
+        uuid[2],
+        uuid[3],
+        uuid[4],
+        uuid[5],
+        uuid[6],
+        uuid[7],
+        uuid[8],
+        uuid[9],
+        uuid[10],
+        uuid[11],
+        uuid[12],
+        uuid[13],
+        uuid[14],
+        uuid[15]
+    );
+
+    Some(uuid)
+}
