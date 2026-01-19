@@ -21,7 +21,8 @@ export default defineConfig({
             { text: 'Properties', link: '/api/properties' },
             { text: 'Methods', link: '/api/methods' },
             { text: 'Signals', link: '/api/signals' },
-            { text: 'IME Support', link: '/api/ime-support' }
+            { text: 'IME Support', link: '/api/ime-support' },
+            { text: 'Vulkan Support', link: '/api/vulkan-support' }
           ]
         }
       ]
