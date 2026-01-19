@@ -206,10 +206,7 @@ extern "system" fn hooked_vk_create_device(
                 "[VulkanHook/Linux] Successfully created device with external memory extensions"
             );
         } else {
-            eprintln!(
-                "[VulkanHook/Linux] Device creation failed: {:?}",
-                vk_result
-            );
+            eprintln!("[VulkanHook/Linux] Device creation failed: {:?}", vk_result);
         }
 
         result
@@ -324,4 +321,3 @@ pub fn install_vulkan_hook() {
         eprintln!("[VulkanHook/Linux] Hook installed successfully");
     }
 }
-

@@ -58,4 +58,3 @@ pub fn is_supported() -> bool {
 
 unsafe impl Send for GodotTextureImporter {}
 unsafe impl Sync for GodotTextureImporter {}
-

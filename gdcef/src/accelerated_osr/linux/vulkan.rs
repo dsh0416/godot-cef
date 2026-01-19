@@ -84,7 +84,10 @@ impl VulkanTextureImporter {
         let lib = match unsafe { libloading::Library::new("libvulkan.so.1") } {
             Ok(lib) => lib,
             Err(e) => {
-                godot_error!("[AcceleratedOSR/Vulkan] Failed to load libvulkan.so.1: {}", e);
+                godot_error!(
+                    "[AcceleratedOSR/Vulkan] Failed to load libvulkan.so.1: {}",
+                    e
+                );
                 return None;
             }
         };
@@ -399,10 +402,7 @@ impl VulkanTextureImporter {
                 )
             };
             if result != vk::Result::SUCCESS {
-                return Err(format!(
-                    "Failed to get memory fd properties: {:?}",
-                    result
-                ));
+                return Err(format!("Failed to get memory fd properties: {:?}", result));
             }
 
             let idx = Self::find_memory_type_index(fd_props.memory_type_bits)
@@ -640,4 +640,3 @@ impl Drop for VulkanTextureImporter {
 
 unsafe impl Send for VulkanTextureImporter {}
 unsafe impl Sync for VulkanTextureImporter {}
-
