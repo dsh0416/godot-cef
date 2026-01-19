@@ -77,12 +77,53 @@ fn adapter_matches_luid(adapter: &IDXGIAdapter1, target: &LUID) -> bool {
     }
 }
 
+/// Find the target adapter index using the ORIGINAL (unhooked) EnumAdapters1 if available.
+/// This is important because the vtable might already be patched from a previous factory creation.
 fn find_target_adapter_index(factory: &IDXGIFactory1, target: &LUID) -> Option<u32> {
     let mut index = 0u32;
-    while let Ok(adapter) = unsafe { factory.EnumAdapters1(index) } {
-        if adapter_matches_luid(&adapter, target) {
-            return Some(index);
+
+    // Check if we have the original function pointer (vtable might be patched)
+    let original_ptr = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
+
+    loop {
+        let adapter_result = if !original_ptr.is_null() {
+            // Use the original function directly to bypass our hook
+            unsafe {
+                let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
+                let factory_ptr = factory as *const IDXGIFactory1 as *mut c_void;
+                let mut adapter_ptr: *mut c_void = std::ptr::null_mut();
+                let hr = original(factory_ptr, index, &mut adapter_ptr);
+                if hr.is_ok() && !adapter_ptr.is_null() {
+                    Ok(IDXGIAdapter1::from_raw(adapter_ptr))
+                } else {
+                    Err(())
+                }
+            }
+        } else {
+            // No original stored yet, use the vtable (should be unpatched on first call)
+            unsafe { factory.EnumAdapters1(index) }.map_err(|_| ())
+        };
+
+        let Ok(adapter) = adapter_result else {
+            break;
+        };
+
+        if let Ok(desc) = unsafe { adapter.GetDesc1() } {
+            let name = String::from_utf16_lossy(&desc.Description)
+                .trim_end_matches('\0')
+                .to_string();
+            eprintln!(
+                "[DXGI Hook] Adapter {}: LUID ({}, {}), Name: {}",
+                index, desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart, name
+            );
+
+            if desc.AdapterLuid.HighPart == target.HighPart
+                && desc.AdapterLuid.LowPart == target.LowPart
+            {
+                return Some(index);
+            }
         }
+
         if index == u32::MAX {
             break;
         }
