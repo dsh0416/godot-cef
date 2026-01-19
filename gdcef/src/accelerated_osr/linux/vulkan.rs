@@ -307,9 +307,10 @@ impl VulkanTextureImporter {
         let mut offsets = Vec::with_capacity(plane_count);
 
         for i in 0..plane_count {
-            let plane = info.planes.get(i).ok_or_else(|| {
-                format!("Missing plane {} (plane_count={})", i, plane_count)
-            })?;
+            let plane = info
+                .planes
+                .get(i)
+                .ok_or_else(|| format!("Missing plane {} (plane_count={})", i, plane_count))?;
             if plane.fd < 0 {
                 return Err(format!("Invalid fd for plane {}: {}", i, plane.fd));
             }
