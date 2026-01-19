@@ -4,11 +4,32 @@
 //! and copies them to Godot's RenderingDevice textures.
 
 use ash::vk;
+use cef::ColorType;
 use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print};
 use godot::prelude::*;
 use std::os::fd::RawFd;
+
+/// DRM format modifier indicating invalid/linear modifier
+const DRM_FORMAT_MOD_INVALID: u64 = 0x00ffffffffffffff;
+
+/// Parameters for DMA-BUF import extracted from AcceleratedPaintInfo
+struct DmaBufImportParams {
+    /// File descriptors for each plane
+    fds: Vec<RawFd>,
+    /// Stride (pitch) for each plane
+    strides: Vec<u32>,
+    /// Offset for each plane
+    offsets: Vec<u64>,
+    /// DRM format modifier
+    modifier: u64,
+    /// Vulkan format to use
+    format: vk::Format,
+    /// Image dimensions
+    width: u32,
+    height: u32,
+}
 
 type PfnVkGetMemoryFdPropertiesKHR = unsafe extern "system" fn(
     device: vk::Device,
@@ -275,14 +296,26 @@ impl VulkanTextureImporter {
         // Wait for THIS frame's previous use to complete (allows other frame to be in-flight)
         let _ = unsafe { (fns.wait_for_fences)(self.device, 1, &fence, vk::TRUE, u64::MAX) };
 
-        // On Linux, the DMA-BUF file descriptor is in the planes array
-        let fd = info
-            .planes
-            .get(0)
-            .map(|plane| plane.fd)
-            .ok_or("No planes in AcceleratedPaintInfo")?;
-        if fd < 0 {
-            return Err("Source DMA-BUF fd is invalid".into());
+        // Extract DMA-BUF parameters from all planes
+        let plane_count = info.plane_count as usize;
+        if plane_count == 0 {
+            return Err("No planes in AcceleratedPaintInfo".into());
+        }
+
+        let mut fds = Vec::with_capacity(plane_count);
+        let mut strides = Vec::with_capacity(plane_count);
+        let mut offsets = Vec::with_capacity(plane_count);
+
+        for i in 0..plane_count {
+            let plane = info.planes.get(i).ok_or_else(|| {
+                format!("Missing plane {} (plane_count={})", i, plane_count)
+            })?;
+            if plane.fd < 0 {
+                return Err(format!("Invalid fd for plane {}: {}", i, plane.fd));
+            }
+            fds.push(plane.fd);
+            strides.push(plane.stride);
+            offsets.push(plane.offset as u64);
         }
 
         let width = info.extra.coded_size.width as u32;
@@ -295,8 +328,24 @@ impl VulkanTextureImporter {
             return Err("Destination RID is invalid".into());
         }
 
-        // Import the DMA-BUF fd as a Vulkan image
-        let src_image = self.import_fd_to_image(fd, width, height)?;
+        // Convert CEF color format to Vulkan format
+        // Note: CEF format names are reversed from DRM perspective
+        // CEF_COLOR_TYPE_RGBA_8888 -> DRM_FORMAT_ABGR8888 -> VK_FORMAT_R8G8B8A8
+        // CEF_COLOR_TYPE_BGRA_8888 -> DRM_FORMAT_ARGB8888 -> VK_FORMAT_B8G8R8A8
+        let format = cef_format_to_vulkan(&info.format);
+
+        let params = DmaBufImportParams {
+            fds,
+            strides,
+            offsets,
+            modifier: info.modifier,
+            format,
+            width,
+            height,
+        };
+
+        // Import the DMA-BUF as a Vulkan image
+        let src_image = self.import_dmabuf_to_image(&params)?;
 
         // Get destination Vulkan image from Godot's RenderingDevice
         let dst_image: vk::Image = {
@@ -321,18 +370,17 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    fn import_fd_to_image(
-        &mut self,
-        fd: RawFd,
-        width: u32,
-        height: u32,
-    ) -> Result<vk::Image, String> {
+    fn import_dmabuf_to_image(&mut self, params: &DmaBufImportParams) -> Result<vk::Image, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-        let extent = vk::Extent2D { width, height };
+        let extent = vk::Extent2D {
+            width: params.width,
+            height: params.height,
+        };
 
-        // Check if we can fully reuse existing import (same fd AND dimensions)
+        // Check if we can fully reuse existing import (same primary fd AND dimensions)
+        let primary_fd = params.fds[0];
         if let Some(existing) = &self.imported_image
-            && existing.fd_value == fd
+            && existing.fd_value == primary_fd
             && existing.extent == extent
         {
             // Cache hit! Reuse everything
@@ -346,35 +394,70 @@ impl VulkanTextureImporter {
         let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
             .handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
 
-        let image_info = vk::ImageCreateInfo::default()
+        // Build plane layouts for DRM format modifier
+        let plane_layouts: Vec<vk::SubresourceLayout> = params
+            .fds
+            .iter()
+            .enumerate()
+            .map(|(i, _)| vk::SubresourceLayout {
+                offset: params.offsets.get(i).copied().unwrap_or(0),
+                size: 0, // Calculated by driver
+                row_pitch: params.strides.get(i).copied().unwrap_or(0) as u64,
+                array_pitch: 0,
+                depth_pitch: 0,
+            })
+            .collect();
+
+        // Set up DRM format modifier info if we have a valid modifier
+        let use_drm_modifier = params.modifier != DRM_FORMAT_MOD_INVALID;
+
+        let mut drm_modifier_info = vk::ImageDrmFormatModifierExplicitCreateInfoEXT::default()
+            .drm_format_modifier(params.modifier)
+            .plane_layouts(&plane_layouts);
+
+        let tiling = if use_drm_modifier {
+            vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT
+        } else {
+            vk::ImageTiling::LINEAR
+        };
+
+        let mut image_info = vk::ImageCreateInfo::default()
             .push_next(&mut external_memory_info)
             .image_type(vk::ImageType::TYPE_2D)
-            .format(vk::Format::B8G8R8A8_SRGB)
+            .format(params.format)
             .extent(vk::Extent3D {
-                width,
-                height,
+                width: params.width,
+                height: params.height,
                 depth: 1,
             })
             .mip_levels(1)
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
-            .tiling(vk::ImageTiling::OPTIMAL)
+            .tiling(tiling)
             .usage(vk::ImageUsageFlags::TRANSFER_SRC)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
+
+        // Only add DRM modifier info if we're using DRM tiling
+        if use_drm_modifier {
+            image_info = image_info.push_next(&mut drm_modifier_info);
+        }
 
         let mut image = vk::Image::null();
         let result =
             unsafe { (fns.create_image)(self.device, &image_info, std::ptr::null(), &mut image) };
         if result != vk::Result::SUCCESS {
-            return Err(format!("Failed to create image: {:?}", result));
+            return Err(format!(
+                "Failed to create image: {:?} (format={:?}, tiling={:?}, modifier=0x{:x})",
+                result, params.format, tiling, params.modifier
+            ));
         }
 
-        // Import memory for this fd
-        let memory = self.import_memory_for_image(fd, image, width, height)?;
+        // Import memory for this DMA-BUF
+        let memory = self.import_memory_for_dmabuf(params, image)?;
 
         self.imported_image = Some(ImportedVulkanImage {
-            fd_value: fd,
+            fd_value: primary_fd,
             image,
             memory,
             extent,
@@ -382,14 +465,15 @@ impl VulkanTextureImporter {
         Ok(image)
     }
 
-    fn import_memory_for_image(
+    fn import_memory_for_dmabuf(
         &mut self,
-        fd: RawFd,
+        params: &DmaBufImportParams,
         image: vk::Image,
-        width: u32,
-        height: u32,
     ) -> Result<vk::DeviceMemory, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+
+        // Use the first plane's fd for memory import
+        let fd = params.fds[0];
 
         // Get or cache the memory type index (same for all DMA-BUF imports)
         let memory_type_index = if let Some(cached) = self.cached_memory_type_index {
@@ -423,7 +507,7 @@ impl VulkanTextureImporter {
 
         let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().image(image);
 
-        let allocation_size = (width as u64) * (height as u64) * 4;
+        let allocation_size = (params.width as u64) * (params.height as u64) * 4;
 
         let alloc_info = vk::MemoryAllocateInfo::default()
             .push_next(&mut import_info)
@@ -644,3 +728,18 @@ impl Drop for VulkanTextureImporter {
 
 unsafe impl Send for VulkanTextureImporter {}
 unsafe impl Sync for VulkanTextureImporter {}
+
+/// Convert CEF color format to Vulkan format.
+///
+/// Note: CEF format names are from CPU perspective (memory order),
+/// while DRM/Vulkan formats specify channel order in the packed value.
+/// CEF_COLOR_TYPE_RGBA_8888 means R is at lowest address -> maps to ABGR in DRM -> R8G8B8A8 in Vulkan
+/// CEF_COLOR_TYPE_BGRA_8888 means B is at lowest address -> maps to ARGB in DRM -> B8G8R8A8 in Vulkan
+fn cef_format_to_vulkan(format: &ColorType) -> vk::Format {
+    match *format {
+        ColorType::RGBA_8888 => vk::Format::R8G8B8A8_SRGB,
+        ColorType::BGRA_8888 => vk::Format::B8G8R8A8_SRGB,
+        // Default to BGRA which is most common
+        _ => vk::Format::B8G8R8A8_SRGB,
+    }
+}
