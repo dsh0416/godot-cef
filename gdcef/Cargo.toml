@@ -31,3 +31,8 @@ windows-sys = { workspace = true }
 ash = { workspace = true }
 retour = { workspace = true }
 libloading = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ash = { workspace = true }
+retour = { workspace = true }
+libloading = { workspace = true }

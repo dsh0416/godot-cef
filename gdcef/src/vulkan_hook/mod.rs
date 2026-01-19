@@ -11,12 +11,17 @@
 #[cfg(target_os = "windows")]
 mod windows;
 
+#[cfg(target_os = "linux")]
+mod linux;
+
 #[cfg(target_os = "windows")]
 pub use windows::install_vulkan_hook;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+pub use linux::install_vulkan_hook;
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 pub fn install_vulkan_hook() {
     // No-op on other platforms for now
     // macOS: retour doesn't support ARM64
-    // Linux: TODO - implement when needed
 }
