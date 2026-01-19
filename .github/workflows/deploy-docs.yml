@@ -48,7 +48,7 @@ jobs:
         run: pnpm docs:build
 
       - name: Add .nojekyll file
-        run: touch docs/.vuepress/dist/.nojekyll
+        run: touch docs/.vitepress/dist/.nojekyll
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -56,7 +56,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/.vuepress/dist
+          path: docs/.vitepress/dist
 
   deploy:
     if: github.event_name != 'pull_request'

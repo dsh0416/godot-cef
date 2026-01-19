@@ -26,7 +26,7 @@ The `CefTexture` node extends `TextureRect` and provides a Chromium-based web br
 - **Input handling** including mouse, keyboard, and IME support
 - **Navigation controls** and browser state management
 
-## ⚠️ Limitations
+## Limitations
 
 ### One-Time Initialization Parameters
 
