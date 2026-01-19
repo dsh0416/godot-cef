@@ -2,11 +2,11 @@
 
 A high-performance Chromium Embedded Framework (CEF) integration for Godot Engine 4.5 and above, written in Rust. Render web content directly inside your Godot games and applications with full support for modern web standards, JavaScript, HTML5, and CSS3.
 
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/build.yml?label=Build)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/test.yml?label=Test)
-![GitHub Release](https://img.shields.io/github/v/release/dsh0416/godot-cef)
-![GitHub Issues](https://img.shields.io/github/issues/dsh0416/godot-cef)
-![GitHub Pull Requests](https://img.shields.io/github/issues-pr/dsh0416/godot-cef)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/build.yml?label=Build)](https://github.com/dsh0416/godot-cef/actions/workflows/build.yml)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/test.yml?label=Test)](https://github.com/dsh0416/godot-cef/actions/workflows/test.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/releases)
+[![GitHub Issues](https://img.shields.io/github/issues/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/issues)
+[![GitHub Pull Requests](https://img.shields.io/github/issues-pr/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/pulls)
 
 ## Features
 

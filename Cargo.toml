@@ -3,7 +3,7 @@ resolver = "3"
 members = ["cef_app", "gdcef", "gdcef_helper", "xtask"]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.10.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/dsh0416/godot-cef"
