@@ -3,12 +3,11 @@
 //! This module contains the core state types used by CefTexture for managing
 //! the browser instance and rendering mode.
 
-use cef_app::{CursorType, FrameBuffer};
+use cef_app::{CursorType, FrameBuffer, PhysicalSize};
 use godot::classes::{ImageTexture, Texture2Drd};
 use godot::prelude::*;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use winit::dpi::PhysicalSize;
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use crate::accelerated_osr::AcceleratedRenderState;

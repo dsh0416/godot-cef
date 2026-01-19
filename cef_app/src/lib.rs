@@ -10,6 +10,18 @@ use cef::{
     self, BrowserProcessHandler, ImplBrowserProcessHandler, WrapBrowserProcessHandler, rc::Rc, *,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PhysicalSize<T> {
+    pub width: T,
+    pub height: T,
+}
+
+impl<T> PhysicalSize<T> {
+    pub const fn new(width: T, height: T) -> Self {
+        Self { width, height }
+    }
+}
+
 #[derive(Default)]
 pub struct FrameBuffer {
     pub data: Vec<u8>,
@@ -535,13 +547,13 @@ pub enum CursorType {
 #[derive(Clone)]
 pub struct OsrRenderHandler {
     pub device_scale_factor: Arc<Mutex<f32>>,
-    pub size: Arc<Mutex<winit::dpi::PhysicalSize<f32>>>,
+    pub size: Arc<Mutex<PhysicalSize<f32>>>,
     pub frame_buffer: Arc<Mutex<FrameBuffer>>,
     pub cursor_type: Arc<Mutex<CursorType>>,
 }
 
 impl OsrRenderHandler {
-    pub fn new(device_scale_factor: f32, size: winit::dpi::PhysicalSize<f32>) -> Self {
+    pub fn new(device_scale_factor: f32, size: PhysicalSize<f32>) -> Self {
         Self {
             size: Arc::new(Mutex::new(size)),
             device_scale_factor: Arc::new(Mutex::new(device_scale_factor)),
@@ -554,7 +566,7 @@ impl OsrRenderHandler {
         self.frame_buffer.clone()
     }
 
-    pub fn get_size(&self) -> Arc<Mutex<winit::dpi::PhysicalSize<f32>>> {
+    pub fn get_size(&self) -> Arc<Mutex<PhysicalSize<f32>>> {
         self.size.clone()
     }
 

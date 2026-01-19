@@ -1,8 +1,7 @@
 use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
-use cef_app::CursorType;
+use cef_app::{CursorType, PhysicalSize};
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
-use winit::dpi::PhysicalSize;
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{

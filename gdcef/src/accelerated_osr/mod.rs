@@ -96,13 +96,13 @@ impl AcceleratedRenderState {
 #[derive(Clone)]
 pub struct AcceleratedRenderHandler {
     pub device_scale_factor: Arc<Mutex<f32>>,
-    pub size: Arc<Mutex<winit::dpi::PhysicalSize<f32>>>,
+    pub size: Arc<Mutex<cef_app::PhysicalSize<f32>>>,
     pub cursor_type: Arc<Mutex<cef_app::CursorType>>,
     render_state: Option<Arc<Mutex<AcceleratedRenderState>>>,
 }
 
 impl AcceleratedRenderHandler {
-    pub fn new(device_scale_factor: f32, size: winit::dpi::PhysicalSize<f32>) -> Self {
+    pub fn new(device_scale_factor: f32, size: cef_app::PhysicalSize<f32>) -> Self {
         Self {
             device_scale_factor: Arc::new(Mutex::new(device_scale_factor)),
             size: Arc::new(Mutex::new(size)),
@@ -162,7 +162,7 @@ impl AcceleratedRenderHandler {
         }
     }
 
-    pub fn get_size(&self) -> Arc<Mutex<winit::dpi::PhysicalSize<f32>>> {
+    pub fn get_size(&self) -> Arc<Mutex<cef_app::PhysicalSize<f32>>> {
         self.size.clone()
     }
 
