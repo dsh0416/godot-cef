@@ -275,8 +275,12 @@ impl VulkanTextureImporter {
         // Wait for THIS frame's previous use to complete (allows other frame to be in-flight)
         let _ = unsafe { (fns.wait_for_fences)(self.device, 1, &fence, vk::TRUE, u64::MAX) };
 
-        // On Linux, the shared_texture_handle is a DMA-BUF file descriptor
-        let fd = info.shared_texture_handle as RawFd;
+        // On Linux, the DMA-BUF file descriptor is in the planes array
+        let fd = info
+            .planes
+            .get(0)
+            .map(|plane| plane.fd)
+            .ok_or("No planes in AcceleratedPaintInfo")?;
         if fd < 0 {
             return Err("Source DMA-BUF fd is invalid".into());
         }
