@@ -5,7 +5,11 @@
 //!
 //! The approach:
 //! 1. Hook CreateDXGIFactory1/2 to intercept factory creation
-//! 2. After the real factory is created, patch its vtable to redirect EnumAdapters and EnumAdapters1
+//! 2. After the real factory is created, patch its vtable to redirect adapter enumeration methods:
+//!    - EnumAdapters (IDXGIFactory)
+//!    - EnumAdapters1 (IDXGIFactory1)
+//!    - EnumAdapterByLuid (IDXGIFactory4)
+//!    - EnumAdapterByGpuPreference (IDXGIFactory6)
 //! 3. Our hooked functions hide all adapters except the target - only index 0 is valid
 
 use std::ffi::c_void;
@@ -25,6 +29,9 @@ static HOOKS_INSTALLED: OnceLock<bool> = OnceLock::new();
 static TARGET_ADAPTER_INDEX: AtomicU32 = AtomicU32::new(u32::MAX);
 static ORIGINAL_ENUM_ADAPTERS: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static ORIGINAL_ENUM_ADAPTERS1: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static ORIGINAL_ENUM_ADAPTER_BY_LUID: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE: AtomicPtr<c_void> =
+    AtomicPtr::new(std::ptr::null_mut());
 static VTABLE_PATCH_LOCK: Mutex<()> = Mutex::new(());
 
 // Raw function signatures for hooking (these match the actual DLL exports)
@@ -35,6 +42,17 @@ type CreateDXGIFactory2Fn =
 // EnumAdapters/EnumAdapters1 method signature (COM calling convention)
 // Both have the same ABI signature: (this, adapter_index, pp_adapter) -> HRESULT
 type EnumAdaptersFn = unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT;
+
+// EnumAdapterByLuid signature (IDXGIFactory4)
+// HRESULT EnumAdapterByLuid(LUID AdapterLuid, REFIID riid, void **ppvAdapter)
+// Note: LUID is passed by value (8 bytes: LowPart u32, HighPart i32)
+type EnumAdapterByLuidFn =
+    unsafe extern "system" fn(*mut c_void, LUID, *const GUID, *mut *mut c_void) -> HRESULT;
+
+// EnumAdapterByGpuPreference signature (IDXGIFactory6)
+// HRESULT EnumAdapterByGpuPreference(UINT Adapter, DXGI_GPU_PREFERENCE GpuPreference, REFIID riid, void **ppvAdapter)
+type EnumAdapterByGpuPreferenceFn =
+    unsafe extern "system" fn(*mut c_void, u32, i32, *const GUID, *mut *mut c_void) -> HRESULT;
 
 static_detour! {
     static CreateDXGIFactory1Hook: unsafe extern "system" fn(*const GUID, *mut *mut c_void) -> HRESULT;
@@ -148,20 +166,131 @@ unsafe extern "system" fn hooked_enum_adapters1(
     }
 }
 
+/// Hooked EnumAdapterByLuid (IDXGIFactory4) - only allows target LUID.
+unsafe extern "system" fn hooked_enum_adapter_by_luid(
+    this: *mut c_void,
+    adapter_luid: LUID,
+    riid: *const GUID,
+    pp_adapter: *mut *mut c_void,
+) -> HRESULT {
+    // Check if the requested LUID matches our target
+    if let Some(target) = get_target_luid()
+        && (adapter_luid.HighPart != target.HighPart || adapter_luid.LowPart != target.LowPart)
+    {
+        // Not our target adapter - reject the request
+        return DXGI_ERROR_NOT_FOUND;
+    }
+
+    // Pass through to original - either it's our target or we have no target set
+    unsafe {
+        let original_ptr = ORIGINAL_ENUM_ADAPTER_BY_LUID.load(Ordering::SeqCst);
+        if original_ptr.is_null() {
+            return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
+        }
+        let original: EnumAdapterByLuidFn = std::mem::transmute(original_ptr);
+        original(this, adapter_luid, riid, pp_adapter)
+    }
+}
+
+/// Hooked EnumAdapterByGpuPreference (IDXGIFactory6) - only returns target adapter at index 0.
+unsafe extern "system" fn hooked_enum_adapter_by_gpu_preference(
+    this: *mut c_void,
+    adapter_index: u32,
+    gpu_preference: i32,
+    riid: *const GUID,
+    pp_adapter: *mut *mut c_void,
+) -> HRESULT {
+    let target_index = TARGET_ADAPTER_INDEX.load(Ordering::SeqCst);
+
+    // If we haven't found a target adapter, pass through unchanged
+    if target_index == u32::MAX {
+        unsafe {
+            let original_ptr = ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE.load(Ordering::SeqCst);
+            if original_ptr.is_null() {
+                return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
+            }
+            let original: EnumAdapterByGpuPreferenceFn = std::mem::transmute(original_ptr);
+            return original(this, adapter_index, gpu_preference, riid, pp_adapter);
+        }
+    }
+
+    // Only index 0 is valid - it returns the target adapter
+    // All other indices return NOT_FOUND to hide other adapters
+    if adapter_index != 0 {
+        return DXGI_ERROR_NOT_FOUND;
+    }
+
+    // For index 0, we call the original with target_index
+    // But EnumAdapterByGpuPreference uses its own ordering based on preference,
+    // so we need to find which index our target is at for this preference.
+    // The safest approach is to iterate and find our target by LUID.
+    unsafe {
+        let original_ptr = ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE.load(Ordering::SeqCst);
+        if original_ptr.is_null() {
+            return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
+        }
+        let original: EnumAdapterByGpuPreferenceFn = std::mem::transmute(original_ptr);
+
+        // Find the target adapter in the GPU preference ordering
+        if let Some(target_luid) = get_target_luid() {
+            let mut idx = 0u32;
+            loop {
+                let mut adapter_ptr: *mut c_void = std::ptr::null_mut();
+                let hr = original(
+                    this,
+                    idx,
+                    gpu_preference,
+                    &IDXGIAdapter1::IID as *const GUID,
+                    &mut adapter_ptr,
+                );
+
+                if hr.is_err() {
+                    // No more adapters - target not found in this preference order
+                    // Fall back to returning target_index (may not be correct but better than nothing)
+                    break;
+                }
+
+                if !adapter_ptr.is_null() {
+                    // Wrap in owned interface so it gets released when dropped
+                    let adapter: IDXGIAdapter1 = IDXGIAdapter1::from_raw(adapter_ptr);
+                    if adapter_matches_luid(&adapter, target_luid) {
+                        // Found it - drop the adapter and call original with the correct riid
+                        drop(adapter);
+                        return original(this, idx, gpu_preference, riid, pp_adapter);
+                    }
+                    // adapter is dropped here, releasing the COM object
+                }
+
+                if idx == u32::MAX {
+                    break;
+                }
+                idx += 1;
+            }
+        }
+
+        // Fallback: use target_index (this may not work correctly with GPU preference ordering)
+        original(this, target_index, gpu_preference, riid, pp_adapter)
+    }
+}
+
 unsafe fn get_vtable(obj: *mut c_void) -> *mut *mut c_void {
     unsafe { *(obj as *mut *mut *mut c_void) }
 }
 
 // VTable indices for EnumAdapters methods:
-// IUnknown: 3 methods (QueryInterface, AddRef, Release)
-// IDXGIObject: 4 methods (SetPrivateData, SetPrivateDataInterface, GetPrivateData, GetParent)
-// IDXGIFactory: 4 methods (EnumAdapters, MakeWindowAssociation, GetWindowAssociation, CreateSwapChain, CreateSoftwareAdapter)
-// IDXGIFactory1: 2 methods (EnumAdapters1, IsCurrent)
-//
-// EnumAdapters is at index 7 (3 + 4 = 7, first method of IDXGIFactory)
-// EnumAdapters1 is at index 12 (3 + 4 + 5 = 12, first method of IDXGIFactory1)
+// IUnknown: 3 methods (QueryInterface, AddRef, Release) - indices 0-2
+// IDXGIObject: 4 methods (SetPrivateData, SetPrivateDataInterface, GetPrivateData, GetParent) - indices 3-6
+// IDXGIFactory: 5 methods (EnumAdapters, MakeWindowAssociation, GetWindowAssociation, CreateSwapChain, CreateSoftwareAdapter) - indices 7-11
+// IDXGIFactory1: 2 methods (EnumAdapters1, IsCurrent) - indices 12-13
+// IDXGIFactory2: 11 methods - indices 14-24
+// IDXGIFactory3: 1 method (GetCreationFlags) - index 25
+// IDXGIFactory4: 2 methods (EnumAdapterByLuid, EnumWarpAdapter) - indices 26-27
+// IDXGIFactory5: 1 method (CheckFeatureSupport) - index 28
+// IDXGIFactory6: 1 method (EnumAdapterByGpuPreference) - index 29
 const ENUM_ADAPTERS_VTABLE_INDEX: usize = 7;
 const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12;
+const ENUM_ADAPTER_BY_LUID_VTABLE_INDEX: usize = 26;
+const ENUM_ADAPTER_BY_GPU_PREFERENCE_VTABLE_INDEX: usize = 29;
 
 struct MemoryProtectionGuard {
     address: *const c_void,
@@ -284,6 +413,30 @@ unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
         );
         if !enum_adapters1_ok {
             eprintln!("[DXGI Hook] Failed to patch EnumAdapters1 vtable slot");
+        }
+
+        // Patch EnumAdapterByLuid (IDXGIFactory4)
+        // This may fail if the factory doesn't support IDXGIFactory4, which is OK
+        let enum_adapter_by_luid_ok = patch_vtable_slot(
+            vtable,
+            ENUM_ADAPTER_BY_LUID_VTABLE_INDEX,
+            &ORIGINAL_ENUM_ADAPTER_BY_LUID,
+            hooked_enum_adapter_by_luid as *mut c_void,
+        );
+        if enum_adapter_by_luid_ok {
+            eprintln!("[DXGI Hook] Patched EnumAdapterByLuid (IDXGIFactory4)");
+        }
+
+        // Patch EnumAdapterByGpuPreference (IDXGIFactory6)
+        // This may fail if the factory doesn't support IDXGIFactory6, which is OK
+        let enum_adapter_by_gpu_pref_ok = patch_vtable_slot(
+            vtable,
+            ENUM_ADAPTER_BY_GPU_PREFERENCE_VTABLE_INDEX,
+            &ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE,
+            hooked_enum_adapter_by_gpu_preference as *mut c_void,
+        );
+        if enum_adapter_by_gpu_pref_ok {
+            eprintln!("[DXGI Hook] Patched EnumAdapterByGpuPreference (IDXGIFactory6)");
         }
 
         enum_adapters_ok || enum_adapters1_ok
