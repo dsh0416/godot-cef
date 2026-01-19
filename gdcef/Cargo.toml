@@ -28,3 +28,6 @@ objc2-metal = { workspace = true }
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true }
 windows-sys = { workspace = true }
+ash = { workspace = true }
+retour = { workspace = true }
+libloading = { workspace = true }

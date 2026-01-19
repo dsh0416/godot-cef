@@ -9,6 +9,7 @@ mod queue_processing;
 mod render;
 mod res_protocol;
 mod utils;
+mod vulkan_hook;
 mod webrender;
 
 use godot::init::*;
@@ -16,7 +17,16 @@ use godot::init::*;
 struct GodotCef;
 
 #[gdextension]
-unsafe impl ExtensionLibrary for GodotCef {}
+unsafe impl ExtensionLibrary for GodotCef {
+    fn on_stage_init(level: InitStage) {
+        // Install Vulkan hook at the Core stage, BEFORE RenderingServer is created.
+        // This allows us to inject platform-specific external memory extensions
+        // (e.g., VK_EXT_metal_objects on macOS) into Godot's Vulkan device.
+        if level == InitStage::Core {
+            vulkan_hook::install_vulkan_hook();
+        }
+    }
+}
 
 // Re-export CefTexture for convenience
 pub use cef_texture::CefTexture;
