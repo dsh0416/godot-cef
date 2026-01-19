@@ -200,6 +200,9 @@ impl VulkanTextureImporter {
                 unsafe {
                     let ptr =
                         get_device_proc_addr(device, concat!($fn_name, "\0").as_ptr() as *const _);
+                    if ptr.is_none() {
+                        panic!("Failed to load Vulkan function: {}", $fn_name);
+                    }
                     std::mem::transmute::<vk::PFN_vkVoidFunction, $fn_type>(ptr)
                 }
             };

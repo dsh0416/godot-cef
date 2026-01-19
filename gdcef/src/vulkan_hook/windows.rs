@@ -34,12 +34,10 @@ type PFN_vkGetInstanceProcAddr = unsafe extern "system" fn(
     p_name: *const c_char,
 ) -> vk::PFN_vkVoidFunction;
 
-static ENUMERATE_EXTENSIONS_FN: OnceLock<PFN_vkEnumerateDeviceExtensionProperties> = OnceLock::new();
+static ENUMERATE_EXTENSIONS_FN: OnceLock<PFN_vkEnumerateDeviceExtensionProperties> =
+    OnceLock::new();
 
-unsafe fn device_supports_extension(
-    physical_device: vk::PhysicalDevice,
-    extension_name: &CStr,
-) -> bool {
+fn device_supports_extension(physical_device: vk::PhysicalDevice, extension_name: &CStr) -> bool {
     let enumerate_fn = match ENUMERATE_EXTENSIONS_FN.get() {
         Some(f) => *f,
         None => return false,
@@ -85,10 +83,7 @@ unsafe fn device_supports_extension(
     false
 }
 
-unsafe fn extension_already_enabled(
-    create_info: &vk::DeviceCreateInfo,
-    extension_name: &CStr,
-) -> bool {
+fn extension_already_enabled(create_info: &vk::DeviceCreateInfo, extension_name: &CStr) -> bool {
     if create_info.enabled_extension_count == 0 || create_info.pp_enabled_extension_names.is_null()
     {
         return false;
@@ -289,7 +284,7 @@ pub fn install_vulkan_hook() {
         );
 
         if enumerate_ptr.is_some() {
-            ENUMERATE_EXTENSIONS_FN = Some(std::mem::transmute::<
+            let _ = ENUMERATE_EXTENSIONS_FN.set(std::mem::transmute::<
                 vk::PFN_vkVoidFunction,
                 PFN_vkEnumerateDeviceExtensionProperties,
             >(enumerate_ptr));
@@ -298,7 +293,7 @@ pub fn install_vulkan_hook() {
             if let Ok(f) = lib.get::<PFN_vkEnumerateDeviceExtensionProperties>(
                 b"vkEnumerateDeviceExtensionProperties\0",
             ) {
-                ENUMERATE_EXTENSIONS_FN = Some(*f);
+                let _ = ENUMERATE_EXTENSIONS_FN.set(*f);
             }
         }
 
