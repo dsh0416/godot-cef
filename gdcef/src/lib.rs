@@ -21,7 +21,7 @@ unsafe impl ExtensionLibrary for GodotCef {
     fn on_stage_init(level: InitStage) {
         // Install Vulkan hook at the Core stage, BEFORE RenderingServer is created.
         // This allows us to inject platform-specific external memory extensions
-        // (e.g., VK_EXT_metal_objects on macOS) into Godot's Vulkan device.
+        // (e.g., VK_KHR_external_memory_win32 and related Win32 external memory extensions) into Godot's Vulkan device.
         if level == InitStage::Core {
             vulkan_hook::install_vulkan_hook();
         }

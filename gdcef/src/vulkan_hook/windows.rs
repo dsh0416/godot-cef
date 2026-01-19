@@ -34,14 +34,14 @@ type PFN_vkGetInstanceProcAddr = unsafe extern "system" fn(
     p_name: *const c_char,
 ) -> vk::PFN_vkVoidFunction;
 
-static mut ENUMERATE_EXTENSIONS_FN: Option<PFN_vkEnumerateDeviceExtensionProperties> = None;
+static ENUMERATE_EXTENSIONS_FN: OnceLock<PFN_vkEnumerateDeviceExtensionProperties> = OnceLock::new();
 
 unsafe fn device_supports_extension(
     physical_device: vk::PhysicalDevice,
     extension_name: &CStr,
 ) -> bool {
-    let enumerate_fn = match unsafe { ENUMERATE_EXTENSIONS_FN } {
-        Some(f) => f,
+    let enumerate_fn = match ENUMERATE_EXTENSIONS_FN.get() {
+        Some(f) => *f,
         None => return false,
     };
 

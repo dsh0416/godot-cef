@@ -5,7 +5,7 @@
 //!
 //! Platform-specific extensions:
 //! - Windows: `VK_KHR_external_memory_win32` for HANDLE sharing
-//! - Linux: `VK_EXT_external_memory_dma_buf` for DMA-Buf sharing  
+//! - Linux: `VK_EXT_external_memory_dma_buf` for DMA-Buf sharing
 //! - macOS: `VK_EXT_metal_objects` for IOSurface sharing (not yet supported - retour lacks ARM64)
 
 #[cfg(target_os = "windows")]
