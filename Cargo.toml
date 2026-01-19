@@ -47,7 +47,7 @@ objc2-metal = { version = "0.3", features = [
     "MTLResource",
     "MTLPixelFormat",
 ] }
-retour = { version = "0.3", features = ["static-detour"] }
+retour = { version = "0.4.0-alpha.4", features = ["static-detour"] }
 
 [profile.release]
 debug = "line-tables-only"
