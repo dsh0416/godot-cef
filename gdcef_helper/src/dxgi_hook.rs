@@ -5,7 +5,9 @@
 //!
 //! The approach:
 //! 1. Hook CreateDXGIFactory1/2 to intercept factory creation
-//! 2. After the real factory is created, patch its vtable to redirect EnumAdapters and EnumAdapters1
+//! 2. After the real factory is created, patch its vtable to redirect adapter enumeration methods:
+//!    - EnumAdapters (IDXGIFactory)
+//!    - EnumAdapters1 (IDXGIFactory1)
 //! 3. Our hooked functions hide all adapters except the target - only index 0 is valid
 
 use std::ffi::c_void;
@@ -49,22 +51,54 @@ pub fn get_target_luid() -> Option<&'static LUID> {
     TARGET_LUID.get()
 }
 
-fn adapter_matches_luid(adapter: &IDXGIAdapter1, target: &LUID) -> bool {
-    match unsafe { adapter.GetDesc1() } {
-        Ok(desc) => {
-            desc.AdapterLuid.HighPart == target.HighPart
-                && desc.AdapterLuid.LowPart == target.LowPart
-        }
-        Err(_) => false,
-    }
-}
-
+/// Find the target adapter index using the ORIGINAL (unhooked) EnumAdapters1 if available.
+/// This is important because the vtable might already be patched from a previous factory creation.
 fn find_target_adapter_index(factory: &IDXGIFactory1, target: &LUID) -> Option<u32> {
     let mut index = 0u32;
-    while let Ok(adapter) = unsafe { factory.EnumAdapters1(index) } {
-        if adapter_matches_luid(&adapter, target) {
-            return Some(index);
+
+    // Check if we have the original function pointer (vtable might be patched)
+    let original_ptr = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
+
+    loop {
+        let adapter_result = if !original_ptr.is_null() {
+            // Use the original function directly to bypass our hook
+            unsafe {
+                let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
+                // Get the raw COM interface pointer, not the Rust wrapper address
+                let factory_ptr = factory.as_raw();
+                let mut adapter_ptr: *mut c_void = std::ptr::null_mut();
+                let hr = original(factory_ptr, index, &mut adapter_ptr);
+                if hr.is_ok() && !adapter_ptr.is_null() {
+                    Ok(IDXGIAdapter1::from_raw(adapter_ptr))
+                } else {
+                    Err(())
+                }
+            }
+        } else {
+            // No original stored yet, use the vtable (should be unpatched on first call)
+            unsafe { factory.EnumAdapters1(index) }.map_err(|_| ())
+        };
+
+        let Ok(adapter) = adapter_result else {
+            break;
+        };
+
+        if let Ok(desc) = unsafe { adapter.GetDesc1() } {
+            let name = String::from_utf16_lossy(&desc.Description)
+                .trim_end_matches('\0')
+                .to_string();
+            eprintln!(
+                "[DXGI Hook] Adapter {}: LUID ({}, {}), Name: {}",
+                index, desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart, name
+            );
+
+            if desc.AdapterLuid.HighPart == target.HighPart
+                && desc.AdapterLuid.LowPart == target.LowPart
+            {
+                return Some(index);
+            }
         }
+
         if index == u32::MAX {
             break;
         }
@@ -153,13 +187,10 @@ unsafe fn get_vtable(obj: *mut c_void) -> *mut *mut c_void {
 }
 
 // VTable indices for EnumAdapters methods:
-// IUnknown: 3 methods (QueryInterface, AddRef, Release)
-// IDXGIObject: 4 methods (SetPrivateData, SetPrivateDataInterface, GetPrivateData, GetParent)
-// IDXGIFactory: 4 methods (EnumAdapters, MakeWindowAssociation, GetWindowAssociation, CreateSwapChain, CreateSoftwareAdapter)
-// IDXGIFactory1: 2 methods (EnumAdapters1, IsCurrent)
-//
-// EnumAdapters is at index 7 (3 + 4 = 7, first method of IDXGIFactory)
-// EnumAdapters1 is at index 12 (3 + 4 + 5 = 12, first method of IDXGIFactory1)
+// IUnknown: 3 methods (QueryInterface, AddRef, Release) - indices 0-2
+// IDXGIObject: 4 methods (SetPrivateData, SetPrivateDataInterface, GetPrivateData, GetParent) - indices 3-6
+// IDXGIFactory: 5 methods (EnumAdapters, MakeWindowAssociation, GetWindowAssociation, CreateSwapChain, CreateSoftwareAdapter) - indices 7-11
+// IDXGIFactory1: 2 methods (EnumAdapters1, IsCurrent) - indices 12-13
 const ENUM_ADAPTERS_VTABLE_INDEX: usize = 7;
 const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12;
 
