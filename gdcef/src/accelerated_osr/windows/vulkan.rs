@@ -73,7 +73,7 @@ impl VulkanTextureImporter {
             godot_error!("[AcceleratedOSR/Vulkan] Failed to get Vulkan device from Godot");
             return None;
         }
-        let device: vk::Device = unsafe { std::mem::transmute(device_ptr as u64) };
+        let device: vk::Device = unsafe { std::mem::transmute(device_ptr) };
 
         // Load Vulkan library and function pointers
         let lib = match unsafe { libloading::Library::new("vulkan-1.dll") } {
@@ -151,9 +151,9 @@ impl VulkanTextureImporter {
                     "[AcceleratedOSR/Vulkan] Failed to create fence: {:?}",
                     result
                 );
-                for j in 0..i {
+                for fence in fences.iter().take(i) {
                     unsafe {
-                        (fns.destroy_fence)(device, fences[j], std::ptr::null());
+                        (fns.destroy_fence)(device, *fence, std::ptr::null());
                     }
                 }
                 unsafe {
@@ -184,8 +184,10 @@ impl VulkanTextureImporter {
     }
 
     fn load_vulkan_functions(lib: &libloading::Library, device: vk::Device) -> VulkanFunctions {
-        type GetDeviceProcAddr =
-            unsafe extern "system" fn(vk::Device, *const std::ffi::c_char) -> vk::PFN_vkVoidFunction;
+        type GetDeviceProcAddr = unsafe extern "system" fn(
+            vk::Device,
+            *const std::ffi::c_char,
+        ) -> vk::PFN_vkVoidFunction;
 
         let get_device_proc_addr: GetDeviceProcAddr = unsafe {
             *lib.get(b"vkGetDeviceProcAddr\0")
@@ -194,36 +196,57 @@ impl VulkanTextureImporter {
 
         // Macro to load device functions
         macro_rules! load_device_fn {
-            ($fn_name:expr) => {
+            ($fn_name:expr, $fn_type:ty) => {
                 unsafe {
                     let ptr =
                         get_device_proc_addr(device, concat!($fn_name, "\0").as_ptr() as *const _);
-                    std::mem::transmute(ptr)
+                    std::mem::transmute::<vk::PFN_vkVoidFunction, $fn_type>(ptr)
                 }
             };
         }
 
         VulkanFunctions {
-            destroy_image: load_device_fn!("vkDestroyImage"),
-            free_memory: load_device_fn!("vkFreeMemory"),
-            allocate_memory: load_device_fn!("vkAllocateMemory"),
-            bind_image_memory: load_device_fn!("vkBindImageMemory"),
-            create_image: load_device_fn!("vkCreateImage"),
-            create_command_pool: load_device_fn!("vkCreateCommandPool"),
-            destroy_command_pool: load_device_fn!("vkDestroyCommandPool"),
-            allocate_command_buffers: load_device_fn!("vkAllocateCommandBuffers"),
-            create_fence: load_device_fn!("vkCreateFence"),
-            destroy_fence: load_device_fn!("vkDestroyFence"),
-            begin_command_buffer: load_device_fn!("vkBeginCommandBuffer"),
-            end_command_buffer: load_device_fn!("vkEndCommandBuffer"),
-            cmd_pipeline_barrier: load_device_fn!("vkCmdPipelineBarrier"),
-            cmd_copy_image: load_device_fn!("vkCmdCopyImage"),
-            queue_submit: load_device_fn!("vkQueueSubmit"),
-            wait_for_fences: load_device_fn!("vkWaitForFences"),
-            reset_fences: load_device_fn!("vkResetFences"),
-            reset_command_buffer: load_device_fn!("vkResetCommandBuffer"),
-            get_device_queue: load_device_fn!("vkGetDeviceQueue"),
-            get_memory_win32_handle_properties: load_device_fn!("vkGetMemoryWin32HandlePropertiesKHR"),
+            destroy_image: load_device_fn!("vkDestroyImage", vk::PFN_vkDestroyImage),
+            free_memory: load_device_fn!("vkFreeMemory", vk::PFN_vkFreeMemory),
+            allocate_memory: load_device_fn!("vkAllocateMemory", vk::PFN_vkAllocateMemory),
+            bind_image_memory: load_device_fn!("vkBindImageMemory", vk::PFN_vkBindImageMemory),
+            create_image: load_device_fn!("vkCreateImage", vk::PFN_vkCreateImage),
+            create_command_pool: load_device_fn!(
+                "vkCreateCommandPool",
+                vk::PFN_vkCreateCommandPool
+            ),
+            destroy_command_pool: load_device_fn!(
+                "vkDestroyCommandPool",
+                vk::PFN_vkDestroyCommandPool
+            ),
+            allocate_command_buffers: load_device_fn!(
+                "vkAllocateCommandBuffers",
+                vk::PFN_vkAllocateCommandBuffers
+            ),
+            create_fence: load_device_fn!("vkCreateFence", vk::PFN_vkCreateFence),
+            destroy_fence: load_device_fn!("vkDestroyFence", vk::PFN_vkDestroyFence),
+            begin_command_buffer: load_device_fn!(
+                "vkBeginCommandBuffer",
+                vk::PFN_vkBeginCommandBuffer
+            ),
+            end_command_buffer: load_device_fn!("vkEndCommandBuffer", vk::PFN_vkEndCommandBuffer),
+            cmd_pipeline_barrier: load_device_fn!(
+                "vkCmdPipelineBarrier",
+                vk::PFN_vkCmdPipelineBarrier
+            ),
+            cmd_copy_image: load_device_fn!("vkCmdCopyImage", vk::PFN_vkCmdCopyImage),
+            queue_submit: load_device_fn!("vkQueueSubmit", vk::PFN_vkQueueSubmit),
+            wait_for_fences: load_device_fn!("vkWaitForFences", vk::PFN_vkWaitForFences),
+            reset_fences: load_device_fn!("vkResetFences", vk::PFN_vkResetFences),
+            reset_command_buffer: load_device_fn!(
+                "vkResetCommandBuffer",
+                vk::PFN_vkResetCommandBuffer
+            ),
+            get_device_queue: load_device_fn!("vkGetDeviceQueue", vk::PFN_vkGetDeviceQueue),
+            get_memory_win32_handle_properties: load_device_fn!(
+                "vkGetMemoryWin32HandlePropertiesKHR",
+                PfnVkGetMemoryWin32HandlePropertiesKHR
+            ),
         }
     }
 
@@ -270,7 +293,7 @@ impl VulkanTextureImporter {
                 return Err("Failed to get destination Vulkan image".into());
             }
 
-            unsafe { std::mem::transmute(image_ptr as u64) }
+            unsafe { std::mem::transmute(image_ptr) }
         };
 
         // Copy from imported image to Godot's texture
@@ -293,11 +316,12 @@ impl VulkanTextureImporter {
         let handle_value = handle.0 as isize;
 
         // Check if we can fully reuse existing import (same handle AND dimensions)
-        if let Some(existing) = &self.imported_image {
-            if existing.handle_value == handle_value && existing.extent == extent {
-                // Cache hit! Reuse everything
-                return Ok(existing.image);
-            }
+        if let Some(existing) = &self.imported_image
+            && existing.handle_value == handle_value
+            && existing.extent == extent
+        {
+            // Cache hit! Reuse everything
+            return Ok(existing.image);
         }
 
         // Cache miss - must create new image (VkImage can only be bound once)
@@ -325,9 +349,8 @@ impl VulkanTextureImporter {
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
         let mut image = vk::Image::null();
-        let result = unsafe {
-            (fns.create_image)(self.device, &image_info, std::ptr::null(), &mut image)
-        };
+        let result =
+            unsafe { (fns.create_image)(self.device, &image_info, std::ptr::null(), &mut image) };
         if result != vk::Result::SUCCESS {
             return Err(format!("Failed to create image: {:?}", result));
         }
@@ -437,13 +460,12 @@ impl VulkanTextureImporter {
 
         // Reset fence and command buffer for this frame
         let _ = unsafe { (fns.reset_fences)(self.device, 1, &fence) };
-        let _ = unsafe {
-            (fns.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty())
-        };
+        let _ =
+            unsafe { (fns.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty()) };
 
         // Begin command buffer
-        let begin_info =
-            vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        let begin_info = vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
         let _ = unsafe { (fns.begin_command_buffer)(cmd_buffer, &begin_info) };
 
@@ -558,7 +580,8 @@ impl VulkanTextureImporter {
         let _ = unsafe { (fns.end_command_buffer)(cmd_buffer) };
 
         // Submit without waiting - we'll wait at the start of the next frame's use of this slot
-        let submit_info = vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
+        let submit_info =
+            vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
 
         let _ = unsafe { (fns.queue_submit)(self.queue, 1, &submit_info, fence) };
 
@@ -566,12 +589,12 @@ impl VulkanTextureImporter {
     }
 
     fn free_imported_image(&mut self) {
-        if let Some(img) = self.imported_image.take() {
-            if let Some(fns) = VULKAN_FNS.get() {
-                unsafe {
-                    (fns.destroy_image)(self.device, img.image, std::ptr::null());
-                    (fns.free_memory)(self.device, img.memory, std::ptr::null());
-                }
+        if let Some(img) = self.imported_image.take()
+            && let Some(fns) = VULKAN_FNS.get()
+        {
+            unsafe {
+                (fns.destroy_image)(self.device, img.image, std::ptr::null());
+                (fns.free_memory)(self.device, img.memory, std::ptr::null());
             }
         }
     }

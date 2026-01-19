@@ -6,25 +6,19 @@
 use ash::vk::{self, Handle};
 use retour::GenericDetour;
 use std::ffi::{CStr, c_char, c_void};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
 
-type VkCreateDeviceFn = unsafe extern "system" fn(
-    usize,
-    *const c_void,
-    *const c_void,
-    *mut c_void,
-) -> i32;
+type VkCreateDeviceFn =
+    unsafe extern "system" fn(usize, *const c_void, *const c_void, *mut c_void) -> i32;
 
 static VK_CREATE_DEVICE_HOOK: OnceLock<GenericDetour<VkCreateDeviceFn>> = OnceLock::new();
 
-const VK_KHR_EXTERNAL_MEMORY_WIN32_NAME: &CStr =
-    unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_KHR_external_memory_win32\0") };
+const VK_KHR_EXTERNAL_MEMORY_WIN32_NAME: &CStr = c"VK_KHR_external_memory_win32";
 
-const VK_KHR_EXTERNAL_MEMORY_NAME: &CStr =
-    unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_KHR_external_memory\0") };
+const VK_KHR_EXTERNAL_MEMORY_NAME: &CStr = c"VK_KHR_external_memory";
 
 #[allow(non_camel_case_types)]
 type PFN_vkEnumerateDeviceExtensionProperties = unsafe extern "system" fn(
@@ -35,8 +29,10 @@ type PFN_vkEnumerateDeviceExtensionProperties = unsafe extern "system" fn(
 ) -> vk::Result;
 
 #[allow(non_camel_case_types)]
-type PFN_vkGetInstanceProcAddr =
-    unsafe extern "system" fn(instance: vk::Instance, p_name: *const c_char) -> vk::PFN_vkVoidFunction;
+type PFN_vkGetInstanceProcAddr = unsafe extern "system" fn(
+    instance: vk::Instance,
+    p_name: *const c_char,
+) -> vk::PFN_vkVoidFunction;
 
 static mut ENUMERATE_EXTENSIONS_FN: Option<PFN_vkEnumerateDeviceExtensionProperties> = None;
 
@@ -51,13 +47,21 @@ unsafe fn device_supports_extension(
 
     // First call to get count
     let mut count: u32 = 0;
-    let result = unsafe { enumerate_fn(physical_device, std::ptr::null(), &mut count, std::ptr::null_mut()) };
+    let result = unsafe {
+        enumerate_fn(
+            physical_device,
+            std::ptr::null(),
+            &mut count,
+            std::ptr::null_mut(),
+        )
+    };
     if result != vk::Result::SUCCESS || count == 0 {
         return false;
     }
 
     // Second call to get properties
-    let mut properties: Vec<vk::ExtensionProperties> = vec![vk::ExtensionProperties::default(); count as usize];
+    let mut properties: Vec<vk::ExtensionProperties> =
+        vec![vk::ExtensionProperties::default(); count as usize];
     let result = unsafe {
         enumerate_fn(
             physical_device,
@@ -81,8 +85,12 @@ unsafe fn device_supports_extension(
     false
 }
 
-unsafe fn extension_already_enabled(create_info: &vk::DeviceCreateInfo, extension_name: &CStr) -> bool {
-    if create_info.enabled_extension_count == 0 || create_info.pp_enabled_extension_names.is_null() {
+unsafe fn extension_already_enabled(
+    create_info: &vk::DeviceCreateInfo,
+    extension_name: &CStr,
+) -> bool {
+    if create_info.enabled_extension_count == 0 || create_info.pp_enabled_extension_names.is_null()
+    {
         return false;
     }
 
@@ -122,18 +130,22 @@ extern "system" fn hooked_vk_create_device(
         let original_info = &*(p_create_info as *const vk::DeviceCreateInfo<'_>);
 
         // Check which extensions we need to inject
-        let need_external_memory = device_supports_extension(physical_device_handle, VK_KHR_EXTERNAL_MEMORY_NAME)
-            && !extension_already_enabled(original_info, VK_KHR_EXTERNAL_MEMORY_NAME);
-        
-        let need_external_memory_win32 = device_supports_extension(physical_device_handle, VK_KHR_EXTERNAL_MEMORY_WIN32_NAME)
-            && !extension_already_enabled(original_info, VK_KHR_EXTERNAL_MEMORY_WIN32_NAME);
+        let need_external_memory =
+            device_supports_extension(physical_device_handle, VK_KHR_EXTERNAL_MEMORY_NAME)
+                && !extension_already_enabled(original_info, VK_KHR_EXTERNAL_MEMORY_NAME);
+
+        let need_external_memory_win32 =
+            device_supports_extension(physical_device_handle, VK_KHR_EXTERNAL_MEMORY_WIN32_NAME)
+                && !extension_already_enabled(original_info, VK_KHR_EXTERNAL_MEMORY_WIN32_NAME);
 
         if !need_external_memory && !need_external_memory_win32 {
             // Either not supported or already enabled
             if extension_already_enabled(original_info, VK_KHR_EXTERNAL_MEMORY_WIN32_NAME) {
                 eprintln!("[VulkanHook/Windows] VK_KHR_external_memory_win32 already enabled");
             } else {
-                eprintln!("[VulkanHook/Windows] VK_KHR_external_memory_win32 not supported by device");
+                eprintln!(
+                    "[VulkanHook/Windows] VK_KHR_external_memory_win32 not supported by device"
+                );
             }
             return hook.call(physical_device, p_create_info, p_allocator, p_device);
         }
@@ -142,14 +154,13 @@ extern "system" fn hooked_vk_create_device(
 
         // Build new extension list
         let original_count = original_info.enabled_extension_count as usize;
-        let mut extensions: Vec<*const c_char> = if original_count > 0 && !original_info.pp_enabled_extension_names.is_null() {
-            std::slice::from_raw_parts(
-                original_info.pp_enabled_extension_names,
-                original_count,
-            ).to_vec()
-        } else {
-            Vec::new()
-        };
+        let mut extensions: Vec<*const c_char> =
+            if original_count > 0 && !original_info.pp_enabled_extension_names.is_null() {
+                std::slice::from_raw_parts(original_info.pp_enabled_extension_names, original_count)
+                    .to_vec()
+            } else {
+                Vec::new()
+            };
 
         // Add our extensions
         if need_external_memory {
@@ -162,6 +173,8 @@ extern "system" fn hooked_vk_create_device(
         }
 
         // Create a modified DeviceCreateInfo
+        // Note: enabled_layer_count and pp_enabled_layer_names are deprecated (device layers no longer operate)
+        #[allow(deprecated)]
         let modified_info = vk::DeviceCreateInfo {
             s_type: original_info.s_type,
             p_next: original_info.p_next,
@@ -185,9 +198,14 @@ extern "system" fn hooked_vk_create_device(
 
         let vk_result = vk::Result::from_raw(result);
         if vk_result == vk::Result::SUCCESS {
-            eprintln!("[VulkanHook/Windows] Successfully created device with external memory extensions");
+            eprintln!(
+                "[VulkanHook/Windows] Successfully created device with external memory extensions"
+            );
         } else {
-            eprintln!("[VulkanHook/Windows] Device creation failed: {:?}", vk_result);
+            eprintln!(
+                "[VulkanHook/Windows] Device creation failed: {:?}",
+                vk_result
+            );
         }
 
         result
@@ -203,9 +221,7 @@ pub fn install_vulkan_hook() {
     eprintln!("[VulkanHook/Windows] Installing vkCreateDevice hook...");
 
     // Try to load the Vulkan library
-    let lib = unsafe {
-        libloading::Library::new("vulkan-1.dll")
-    };
+    let lib = unsafe { libloading::Library::new("vulkan-1.dll") };
 
     let lib = match lib {
         Ok(lib) => lib,
@@ -218,14 +234,18 @@ pub fn install_vulkan_hook() {
 
     unsafe {
         // Get vkGetInstanceProcAddr first
-        let get_instance_proc_addr: PFN_vkGetInstanceProcAddr = match lib.get(b"vkGetInstanceProcAddr\0") {
-            Ok(f) => *f,
-            Err(e) => {
-                eprintln!("[VulkanHook/Windows] Failed to get vkGetInstanceProcAddr: {}", e);
-                HOOK_INSTALLED.store(false, Ordering::SeqCst);
-                return;
-            }
-        };
+        let get_instance_proc_addr: PFN_vkGetInstanceProcAddr =
+            match lib.get(b"vkGetInstanceProcAddr\0") {
+                Ok(f) => *f,
+                Err(e) => {
+                    eprintln!(
+                        "[VulkanHook/Windows] Failed to get vkGetInstanceProcAddr: {}",
+                        e
+                    );
+                    HOOK_INSTALLED.store(false, Ordering::SeqCst);
+                    return;
+                }
+            };
 
         // Get vkCreateDevice - we can get it with a null instance for the loader-level function
         let vk_create_device_name = b"vkCreateDevice\0";
@@ -238,7 +258,7 @@ pub fn install_vulkan_hook() {
             // Try getting it directly from the library
             let vk_create_device: Result<libloading::Symbol<VkCreateDeviceFn>, _> =
                 lib.get(b"vkCreateDevice\0");
-            
+
             match vk_create_device {
                 Ok(f) => *f,
                 Err(e) => {
@@ -248,7 +268,7 @@ pub fn install_vulkan_hook() {
                 }
             }
         } else {
-            std::mem::transmute(vk_create_device_ptr)
+            std::mem::transmute::<vk::PFN_vkVoidFunction, VkCreateDeviceFn>(vk_create_device_ptr)
         };
 
         // Create and enable the detour
@@ -269,10 +289,15 @@ pub fn install_vulkan_hook() {
         );
 
         if enumerate_ptr.is_some() {
-            ENUMERATE_EXTENSIONS_FN = Some(std::mem::transmute(enumerate_ptr));
+            ENUMERATE_EXTENSIONS_FN = Some(std::mem::transmute::<
+                vk::PFN_vkVoidFunction,
+                PFN_vkEnumerateDeviceExtensionProperties,
+            >(enumerate_ptr));
         } else {
             // Try getting it directly
-            if let Ok(f) = lib.get::<PFN_vkEnumerateDeviceExtensionProperties>(b"vkEnumerateDeviceExtensionProperties\0") {
+            if let Ok(f) = lib.get::<PFN_vkEnumerateDeviceExtensionProperties>(
+                b"vkEnumerateDeviceExtensionProperties\0",
+            ) {
                 ENUMERATE_EXTENSIONS_FN = Some(*f);
             }
         }
@@ -295,4 +320,3 @@ pub fn install_vulkan_hook() {
         eprintln!("[VulkanHook/Windows] Hook installed successfully");
     }
 }
-

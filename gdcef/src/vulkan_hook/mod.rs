@@ -20,4 +20,3 @@ pub fn install_vulkan_hook() {
     // macOS: retour doesn't support ARM64
     // Linux: TODO - implement when needed
 }
-

@@ -292,7 +292,8 @@ impl D3D12TextureImporter {
             return Err("Destination RID is invalid".into());
         }
 
-        let src_resource = self.import_shared_handle(handle, width, height, *info.format.as_ref())?;
+        let src_resource =
+            self.import_shared_handle(handle, width, height, *info.format.as_ref())?;
 
         // Get destination D3D12 resource from Godot's RenderingDevice
         let dst_resource = {
