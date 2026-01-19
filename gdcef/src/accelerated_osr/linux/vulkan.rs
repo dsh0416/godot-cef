@@ -316,7 +316,7 @@ impl VulkanTextureImporter {
             }
             fds.push(plane.fd);
             strides.push(plane.stride);
-            offsets.push(plane.offset as u64);
+            offsets.push(plane.offset);
         }
 
         let width = info.extra.coded_size.width as u32;
