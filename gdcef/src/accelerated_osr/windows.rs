@@ -3,6 +3,7 @@ use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
+use windows::Win32::Graphics::Dxgi::IDXGIAdapter;
 use std::ffi::c_void;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Graphics::Direct3D12::{
@@ -372,15 +373,15 @@ pub fn is_supported() -> bool {
 
 pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
     let mut rd = RenderingServer::singleton().get_rendering_device()?;
-    let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
+    let device_ptr = rd.get_driver_resource(DriverResource::PHYSICAL_DEVICE, Rid::Invalid, 0);
 
     if device_ptr == 0 {
         godot_warn!("[AcceleratedOSR/Windows] Failed to get D3D12 device for LUID query");
         return None;
     }
 
-    let device: ID3D12Device = unsafe { ID3D12Device::from_raw(device_ptr as *mut c_void) };
-    let luid = unsafe { device.GetAdapterLuid() };
+    let device: IDXGIAdapter = unsafe { IDXGIAdapter::from_raw(device_ptr as *mut c_void) };
+    let luid = unsafe { device.GetDesc().map_or(None, |desc| Some(desc.AdapterLuid))? };
     godot_print!("[AcceleratedOSR/Windows] Godot adapter LUID: {:?}", luid);
 
     // Device is from Godot, we don't need to close it
