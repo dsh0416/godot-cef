@@ -56,6 +56,10 @@ The DXGI hook solves this by:
 
 This ensures CEF's renderer subprocess uses the same GPU as Godot, enabling successful texture sharing.
 
+::: tip
+For detailed information about how GPU device pinning works, including the vtable patching mechanism and debugging tips, see [GPU Device Pinning](./gpu-device-pinning.md).
+:::
+
 ## Limitations
 
 ### Architecture Requirement (x86_64 Only)
@@ -144,6 +148,7 @@ If you see messages about extensions not being supported or hook installation fa
 
 ## See Also
 
+- [GPU Device Pinning](./gpu-device-pinning.md) — Multi-GPU support and DXGI adapter filtering
 - [Properties](./properties.md) — `enable_accelerated_osr` property documentation
 - [GitHub Issue #4](https://github.com/dsh0416/godot-cef/issues/4) — Tracking issue for Vulkan support
 
