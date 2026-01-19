@@ -131,7 +131,7 @@ pub fn select_device_by_uuid(target_uuid: [u8; 16]) -> bool {
         let mut props2 = VkPhysicalDeviceProperties2 {
             s_type: VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
             p_next: &mut id_props as *mut _ as *mut std::ffi::c_void,
-            properties: std::mem::zeroed(),
+            properties: unsafe { std::mem::zeroed() },
         };
 
         unsafe { vk_get_physical_device_properties2(device, &mut props2) };
@@ -154,16 +154,14 @@ pub fn select_device_by_uuid(target_uuid: [u8; 16]) -> bool {
         // Using vendor:device is more reliable across driver restarts
         if let Some((vendor, device)) = found_vendor_device {
             let select_value = format!("{:04x}:{:04x}", vendor, device);
-            std::env::set_var("MESA_VK_DEVICE_SELECT", &select_value);
+            unsafe { std::env::set_var("MESA_VK_DEVICE_SELECT", &select_value) };
             eprintln!(
                 "[gdcef_helper/vulkan] Set MESA_VK_DEVICE_SELECT={}",
                 select_value
             );
         }
 
-        // Also set the index-based selection as fallback for some drivers
-        // VK_LOADER_DEVICE_SELECT uses index
-        std::env::set_var("VK_LOADER_DEVICE_SELECT", idx.to_string());
+        unsafe { std::env::set_var("VK_LOADER_DEVICE_SELECT", idx.to_string()) };
         eprintln!("[gdcef_helper/vulkan] Set VK_LOADER_DEVICE_SELECT={}", idx);
 
         true
