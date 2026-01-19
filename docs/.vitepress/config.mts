@@ -30,5 +30,18 @@ export default defineConfig({
     socialLinks: [
       { icon: 'github', link: 'https://github.com/dsh0416/godot-cef' }
     ]
-  }
+  },
+
+  vite: {
+    optimizeDeps: {
+      exclude: [
+        '@nolebase/vitepress-plugin-enhanced-readabilities/client',
+      ]
+    },
+    ssr: {
+      noExternal: [
+        '@nolebase/vitepress-plugin-enhanced-readabilities',
+      ]
+    }
+  },
 })
