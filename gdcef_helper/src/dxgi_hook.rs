@@ -8,8 +8,6 @@
 //! 2. After the real factory is created, patch its vtable to redirect adapter enumeration methods:
 //!    - EnumAdapters (IDXGIFactory)
 //!    - EnumAdapters1 (IDXGIFactory1)
-//!    - EnumAdapterByLuid (IDXGIFactory4)
-//!    - EnumAdapterByGpuPreference (IDXGIFactory6)
 //! 3. Our hooked functions hide all adapters except the target - only index 0 is valid
 
 use std::ffi::c_void;
@@ -193,11 +191,6 @@ unsafe fn get_vtable(obj: *mut c_void) -> *mut *mut c_void {
 // IDXGIObject: 4 methods (SetPrivateData, SetPrivateDataInterface, GetPrivateData, GetParent) - indices 3-6
 // IDXGIFactory: 5 methods (EnumAdapters, MakeWindowAssociation, GetWindowAssociation, CreateSwapChain, CreateSoftwareAdapter) - indices 7-11
 // IDXGIFactory1: 2 methods (EnumAdapters1, IsCurrent) - indices 12-13
-// IDXGIFactory2: 11 methods - indices 14-24
-// IDXGIFactory3: 1 method (GetCreationFlags) - index 25
-// IDXGIFactory4: 2 methods (EnumAdapterByLuid, EnumWarpAdapter) - indices 26-27
-// IDXGIFactory5: 1 method (CheckFeatureSupport) - index 28
-// IDXGIFactory6: 1 method (EnumAdapterByGpuPreference) - index 29
 const ENUM_ADAPTERS_VTABLE_INDEX: usize = 7;
 const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12;
 
