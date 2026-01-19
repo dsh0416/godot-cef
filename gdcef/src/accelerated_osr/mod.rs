@@ -62,7 +62,7 @@ impl RenderBackend {
             RenderBackend::Metal => true,
             #[cfg(target_os = "windows")]
             RenderBackend::D3D12 => true,
-            #[cfg(target_os = "windows")]
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
             RenderBackend::Vulkan => true,
             #[cfg(target_os = "linux")]
             RenderBackend::Vulkan => true,

@@ -5,7 +5,6 @@ use godot::global::{godot_error, godot_print};
 use godot::prelude::*;
 use windows::Win32::Foundation::HANDLE;
 
-/// Function pointer types for VK_KHR_external_memory_win32
 type PfnVkGetMemoryWin32HandlePropertiesKHR = unsafe extern "system" fn(
     device: vk::Device,
     handle_type: vk::ExternalMemoryHandleTypeFlags,
@@ -13,40 +12,27 @@ type PfnVkGetMemoryWin32HandlePropertiesKHR = unsafe extern "system" fn(
     p_memory_win32_handle_properties: *mut vk::MemoryWin32HandlePropertiesKHR<'_>,
 ) -> vk::Result;
 
-/// Number of frames to buffer for async operation
 const FRAME_BUFFER_COUNT: usize = 2;
 
 pub struct VulkanTextureImporter {
-    /// The Vulkan device from Godot (Godot owns it, we just hold the handle)
     device: vk::Device,
-    /// Command pool for copy operations
     command_pool: vk::CommandPool,
-    /// Double-buffered command buffers
     command_buffers: [vk::CommandBuffer; FRAME_BUFFER_COUNT],
-    /// Double-buffered fences
     fences: [vk::Fence; FRAME_BUFFER_COUNT],
-    /// Queue for submitting copy commands
     queue: vk::Queue,
-    /// Current frame index (alternates 0, 1, 0, 1, ...)
     current_frame: usize,
-    /// Function pointer for GetMemoryWin32HandlePropertiesKHR
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
-    /// Cached memory type index for D3D12 imports (avoids querying each frame)
     cached_memory_type_index: Option<u32>,
-    /// Cached imported image (reused if handle AND dimensions match)
     imported_image: Option<ImportedVulkanImage>,
 }
 
-/// Cached imported image - reused when handle value matches
 struct ImportedVulkanImage {
-    /// The handle value used to import this image (for cache invalidation)
     handle_value: isize,
     image: vk::Image,
     memory: vk::DeviceMemory,
     extent: vk::Extent2D,
 }
 
-/// Vulkan extension function loader
 struct VulkanFunctions {
     destroy_image: vk::PFN_vkDestroyImage,
     free_memory: vk::PFN_vkFreeMemory,
@@ -70,7 +56,6 @@ struct VulkanFunctions {
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
 }
 
-/// Static storage for Vulkan function pointers (loaded once)
 static VULKAN_FNS: std::sync::OnceLock<VulkanFunctions> = std::sync::OnceLock::new();
 
 impl VulkanTextureImporter {
@@ -297,10 +282,6 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    /// Import a D3D12 shared handle into a Vulkan image.
-    /// Caches based on handle value - if handle matches, reuse everything.
-    /// Note: VkImage can only be bound to memory once, so we must recreate
-    /// the image whenever the handle changes.
     fn import_handle_to_image(
         &mut self,
         handle: HANDLE,
@@ -363,7 +344,6 @@ impl VulkanTextureImporter {
         Ok(image)
     }
 
-    /// Import external memory and bind it to an existing image
     fn import_memory_for_image(
         &mut self,
         handle: HANDLE,
@@ -435,7 +415,6 @@ impl VulkanTextureImporter {
         Ok(memory)
     }
 
-    /// Find the first valid memory type from the type filter bitmask.
     fn find_memory_type_index(type_filter: u32) -> Option<u32> {
         if type_filter == 0 {
             return None;
@@ -443,7 +422,6 @@ impl VulkanTextureImporter {
         Some(type_filter.trailing_zeros())
     }
 
-    /// Submit a copy command without waiting (async)
     fn submit_copy(
         &mut self,
         src: vk::Image,

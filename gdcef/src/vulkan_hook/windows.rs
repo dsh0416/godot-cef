@@ -11,22 +11,18 @@ use std::sync::OnceLock;
 
 static HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
 
-/// Type alias for the vkCreateDevice function signature using raw types
 type VkCreateDeviceFn = unsafe extern "system" fn(
-    usize,          // vk::PhysicalDevice (handle)
-    *const c_void,  // vk::DeviceCreateInfo
-    *const c_void,  // vk::AllocationCallbacks  
-    *mut c_void,    // *mut vk::Device
-) -> i32;           // vk::Result
+    usize,
+    *const c_void,
+    *const c_void,
+    *mut c_void,
+) -> i32;
 
-/// Global storage for the detour hook
 static VK_CREATE_DEVICE_HOOK: OnceLock<GenericDetour<VkCreateDeviceFn>> = OnceLock::new();
 
-/// The extension we want to inject for Windows HANDLE-based memory sharing
 const VK_KHR_EXTERNAL_MEMORY_WIN32_NAME: &CStr =
     unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_KHR_external_memory_win32\0") };
 
-/// Additional required extension for external memory
 const VK_KHR_EXTERNAL_MEMORY_NAME: &CStr =
     unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_KHR_external_memory\0") };
 
@@ -42,14 +38,8 @@ type PFN_vkEnumerateDeviceExtensionProperties = unsafe extern "system" fn(
 type PFN_vkGetInstanceProcAddr =
     unsafe extern "system" fn(instance: vk::Instance, p_name: *const c_char) -> vk::PFN_vkVoidFunction;
 
-
-/// Global storage for vkEnumerateDeviceExtensionProperties function pointer
 static mut ENUMERATE_EXTENSIONS_FN: Option<PFN_vkEnumerateDeviceExtensionProperties> = None;
 
-/// Check if the physical device supports an extension
-///
-/// # Safety
-/// This function accesses global mutable state and calls unsafe Vulkan functions.
 unsafe fn device_supports_extension(
     physical_device: vk::PhysicalDevice,
     extension_name: &CStr,
@@ -91,10 +81,6 @@ unsafe fn device_supports_extension(
     false
 }
 
-/// Check if an extension is already enabled in the create info
-///
-/// # Safety
-/// The caller must ensure create_info contains valid pointers.
 unsafe fn extension_already_enabled(create_info: &vk::DeviceCreateInfo, extension_name: &CStr) -> bool {
     if create_info.enabled_extension_count == 0 || create_info.pp_enabled_extension_names.is_null() {
         return false;
@@ -119,7 +105,6 @@ unsafe fn extension_already_enabled(create_info: &vk::DeviceCreateInfo, extensio
     false
 }
 
-/// The hooked vkCreateDevice function
 extern "system" fn hooked_vk_create_device(
     physical_device: usize,
     p_create_info: *const c_void,
@@ -209,7 +194,6 @@ extern "system" fn hooked_vk_create_device(
     }
 }
 
-/// Install the Vulkan hook. Should be called during GDExtension Core initialization.
 pub fn install_vulkan_hook() {
     if HOOK_INSTALLED.swap(true, Ordering::SeqCst) {
         eprintln!("[VulkanHook/Windows] Hook already installed");
