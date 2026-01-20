@@ -106,6 +106,100 @@ pub fn get_subprocess_path() -> CefResult<PathBuf> {
         .map_err(CefError::from)
 }
 
+#[cfg(unix)]
+pub fn ensure_executable_permissions() -> CefResult<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let paths_to_make_executable = get_executable_paths()?;
+
+    for path in paths_to_make_executable {
+        if !path.exists() {
+            godot::global::godot_warn!(
+                "[CefInit] Executable not found, skipping: {}",
+                path.display()
+            );
+            continue;
+        }
+
+        let metadata = std::fs::metadata(&path).map_err(|e| {
+            CefError::ResourceNotFound(format!("Failed to get metadata for {}: {}", path.display(), e))
+        })?;
+
+        let mut permissions = metadata.permissions();
+        let current_mode = permissions.mode();
+        let new_mode = current_mode | ((current_mode & 0o444) >> 2);
+
+        if current_mode != new_mode {
+            permissions.set_mode(new_mode);
+            std::fs::set_permissions(&path, permissions).map_err(|e| {
+                CefError::InitializationFailed(format!(
+                    "Failed to set executable permissions for {}: {}",
+                    path.display(),
+                    e
+                ))
+            })?;
+            godot::global::godot_print!(
+                "[CefInit] Set executable permissions for: {}",
+                path.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn ensure_executable_permissions() -> CefResult<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn get_executable_paths() -> CefResult<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+
+    let subprocess_path = get_subprocess_path()?;
+    paths.push(subprocess_path.clone());
+
+    #[cfg(target_os = "linux")]
+    {
+        let dylib_path = get_dylib_path_checked()?;
+        let chrome_sandbox = dylib_path.join("../chrome-sandbox");
+        if let Ok(canonical) = chrome_sandbox.canonicalize() {
+            paths.push(canonical);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(frameworks_dir) = subprocess_path
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+        {
+            let helper_variants = [
+                "Godot CEF Helper (GPU)",
+                "Godot CEF Helper (Renderer)",
+                "Godot CEF Helper (Plugin)",
+                "Godot CEF Helper (Alerts)",
+            ];
+
+            for variant in &helper_variants {
+                let variant_path = frameworks_dir
+                    .join(format!("{}.app", variant))
+                    .join("Contents/MacOS")
+                    .join(variant);
+
+                if variant_path.exists() {
+                    paths.push(variant_path);
+                }
+            }
+        }
+    }
+
+    Ok(paths)
+}
+
 /// Attempts to acquire a mutex lock, logging a warning on failure.
 macro_rules! try_lock {
     ($mutex:expr, $context:literal) => {

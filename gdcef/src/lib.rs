@@ -24,6 +24,13 @@ unsafe impl ExtensionLibrary for GodotCef {
         // (e.g., VK_KHR_external_memory_win32 and related Win32 external memory extensions) into Godot's Vulkan device.
         if level == InitStage::Core {
             vulkan_hook::install_vulkan_hook();
+            
+            if let Err(e) = utils::ensure_executable_permissions() {
+                godot::global::godot_warn!(
+                    "[GodotCef] Failed to set executable permissions: {}",
+                    e
+                );
+            }
         }
     }
 }
