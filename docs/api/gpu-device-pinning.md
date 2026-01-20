@@ -120,17 +120,16 @@ This makes CEF "see" only one adapter — the same one Godot is using.
 | Windows (D3D12) | DXGI Hook | ✅ Supported |
 | Windows (Vulkan) | DXGI Hook | ✅ Supported |
 | Linux (Vulkan) | Device UUID matching | ✅ Supported |
-| macOS (Metal) | Not needed | ✅ Single GPU selection by Metal |
+| macOS (Metal) | MTLDevice registryID | ❌ Unsupported |
 
 ### Linux: Device UUID Matching
 
 On Linux, GPU identification uses **Device UUIDs** from Vulkan's `VkPhysicalDeviceIDProperties`. The UUID is passed to the CEF helper, which uses it to select the matching GPU when initializing its Vulkan device.
 
-### macOS: Metal Handles It
+### macOS: MTLDevice registryID
 
-macOS with Metal doesn't require explicit device pinning because:
-- IOSurface handles work across the unified memory architecture
-- Metal device selection is handled by the system
+macOS with Metal doesn't require explicit device pinning in most cases.
+Due to the limitation of the retour library, it is not possible to make hook work on M-series CPUs.
 
 ## Debugging GPU Pinning
 

@@ -257,14 +257,23 @@ jobs:
             --artifacts artifacts \
             --output godot_cef \
             --addon-src addons/godot_cef
-          # Create tar.gz to preserve executable permissions
+          # Create tar.gz to preserve executable permissions and xattr (for macOS)
           tar -czvf godot_cef.tar.gz godot_cef
+          # Create zip for Godot Asset Store
+          zip -r godot_cef.zip godot_cef
 
-      - name: Upload packed addon
+      - name: Upload packed addon (tar.gz)
         uses: actions/upload-artifact@v4
         with:
-          name: godot_cef-addon
+          name: godot_cef-addon-tar
           path: godot_cef.tar.gz
+          retention-days: 30
+
+      - name: Upload packed addon (zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot_cef-addon-zip
+          path: godot_cef.zip
           retention-days: 30
 
   release:
@@ -277,14 +286,23 @@ jobs:
       contents: write
 
     steps:
-      - name: Download packed addon
+      - name: Download packed addon (tar.gz)
         uses: actions/download-artifact@v4
         with:
-          name: godot_cef-addon
+          name: godot_cef-addon-tar
+          path: .
+
+      - name: Download packed addon (zip)
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_cef-addon-zip
           path: .
 
       - name: Rename addon with version
-        run: mv godot_cef.tar.gz godot_cef-${{ github.ref_name }}.tar.gz
+        run: |
+          mv godot_cef.tar.gz godot_cef-${{ github.ref_name }}.tar.gz
+          mv godot_cef.zip godot_cef-${{ github.ref_name }}.zip
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -294,3 +312,4 @@ jobs:
           generate_release_notes: true
           files: |
             godot_cef-${{ github.ref_name }}.tar.gz
+            godot_cef-${{ github.ref_name }}.zip
