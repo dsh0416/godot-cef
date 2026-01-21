@@ -84,6 +84,7 @@ pub struct AcceleratedRenderState {
     pub popup_width: u32,
     pub popup_height: u32,
     pub popup_dirty: bool,
+    pub popup_has_content: bool, // True once popup has received content since being shown
     pub needs_popup_texture: Option<(u32, u32)>, // Deferred popup texture creation
 }
 
@@ -99,6 +100,7 @@ impl AcceleratedRenderState {
             popup_width: 0,
             popup_height: 0,
             popup_dirty: false,
+            popup_has_content: false,
             needs_popup_texture: None,
         }
     }
@@ -159,6 +161,7 @@ impl AcceleratedRenderHandler {
                 match state.importer.import_and_copy(info, popup_rid) {
                     Ok(_) => {
                         state.popup_dirty = true;
+                        state.popup_has_content = true;
                     }
                     Err(e) => {
                         godot::global::godot_error!("[AcceleratedOSR] Failed to import popup texture: {}", e);

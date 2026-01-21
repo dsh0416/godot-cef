@@ -296,11 +296,11 @@ impl CefTexture {
             })
         });
         
-        // Get accelerated render state info (popup_dirty, dimensions)
+        // Get accelerated render state info (popup_dirty, popup_has_content, dimensions)
         let accel_popup_info = if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode {
             render_state.lock().ok().and_then(|state| {
                 if state.popup_rd_rid.is_some() && state.popup_width > 0 && state.popup_height > 0 {
-                    Some((state.popup_dirty, state.popup_width, state.popup_height))
+                    Some((state.popup_dirty, state.popup_has_content, state.popup_width, state.popup_height))
                 } else {
                     None
                 }
@@ -310,7 +310,7 @@ impl CefTexture {
         };
 
         match (popup_visible_info, accel_popup_info) {
-            (Some((x, y, _rect_w, _rect_h)), Some((popup_dirty, tex_width, tex_height))) => {
+            (Some((x, y, _rect_w, _rect_h)), Some((popup_dirty, popup_has_content, tex_width, tex_height))) => {
                 // Create overlay TextureRect if it doesn't exist
                 if self.popup_overlay.is_none() {
                     let mut overlay = TextureRect::new_alloc();
@@ -360,7 +360,9 @@ impl CefTexture {
 
                     overlay.set_position(Vector2::new(local_x, local_y));
                     overlay.set_size(Vector2::new(local_width, local_height));
-                    overlay.set_visible(true);
+                    // Only show overlay if popup has received content since being shown
+                    // This prevents showing stale texture from previous popup
+                    overlay.set_visible(popup_has_content);
                 }
 
                 // Mark popup as clean in accelerated render state
@@ -373,9 +375,15 @@ impl CefTexture {
                 }
             }
             _ => {
-                // Hide popup overlay when popup is not visible
+                // Hide popup overlay and reset popup_has_content when popup is not visible
                 if let Some(overlay) = &mut self.popup_overlay {
                     overlay.set_visible(false);
+                }
+                // Reset popup_has_content so next popup won't show stale content
+                if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode {
+                    if let Ok(mut state) = render_state.lock() {
+                        state.popup_has_content = false;
+                    }
                 }
             }
         }
