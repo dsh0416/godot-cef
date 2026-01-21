@@ -52,6 +52,7 @@ pub struct CefTexture {
     // IME state
     ime_active: bool,
     ime_proxy: Option<Gd<LineEdit>>,
+    ime_focus_regrab_pending: bool,
 
     // Popup state
     popup_overlay: Option<Gd<TextureRect>>,
@@ -78,6 +79,7 @@ impl ITextureRect for CefTexture {
             last_max_fps: 0,
             ime_active: false,
             ime_proxy: None,
+            ime_focus_regrab_pending: false,
             popup_overlay: None,
             popup_texture: None,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -411,6 +413,11 @@ impl CefTexture {
     #[func]
     fn on_ime_proxy_focus_exited(&mut self) {
         self.on_ime_proxy_focus_exited_impl();
+    }
+
+    #[func]
+    fn _check_ime_focus_after_exit(&mut self) {
+        self.check_ime_focus_after_exit_impl();
     }
 
     fn on_focus_enter(&mut self) {

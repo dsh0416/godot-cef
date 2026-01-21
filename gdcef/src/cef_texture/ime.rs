@@ -6,7 +6,7 @@
 use super::CefTexture;
 use cef::{ImplBrowser, ImplBrowserHost};
 use godot::classes::control::{FocusMode, MouseFilter};
-use godot::classes::{DisplayServer, LineEdit};
+use godot::classes::{Control, DisplayServer, LineEdit};
 use godot::prelude::*;
 
 use crate::input;
@@ -125,6 +125,36 @@ impl CefTexture {
     }
 
     pub(super) fn on_ime_proxy_focus_exited_impl(&mut self) {
+        if self.ime_focus_regrab_pending {
+            return;
+        }
+
+        // Defer the check to the next frame when the focus system has settled
+        self.base_mut()
+            .call_deferred("_check_ime_focus_after_exit", &[]);
+    }
+
+    pub(super) fn check_ime_focus_after_exit_impl(&mut self) {
+        if !self.ime_active {
+            return;
+        }
+
+        if let Some(viewport) = self.base().get_viewport()
+            && let Some(focused) = viewport.gui_get_focus_owner()
+        {
+            let self_control = self.base().clone().upcast::<Control>();
+
+            if focused == self_control {
+                self.ime_focus_regrab_pending = true;
+                self.base_mut().release_focus();
+                if let Some(proxy) = self.ime_proxy.as_mut() {
+                    proxy.grab_focus();
+                }
+                self.ime_focus_regrab_pending = false;
+                return;
+            }
+        }
+
         self.deactivate_ime();
     }
 

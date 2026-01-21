@@ -514,6 +514,87 @@ wrap_v8_handler! {
 }
 
 #[derive(Clone)]
+struct OsrImeCaretHandler {
+    frame: Option<Arc<Mutex<Frame>>>,
+}
+
+impl OsrImeCaretHandler {
+    pub fn new(frame: Option<Arc<Mutex<Frame>>>) -> Self {
+        Self { frame }
+    }
+}
+
+impl OsrImeCaretHandlerBuilder {
+    pub(crate) fn build(handler: OsrImeCaretHandler) -> V8Handler {
+        Self::new(handler)
+    }
+}
+
+wrap_v8_handler! {
+    pub(crate) struct OsrImeCaretHandlerBuilder {
+        handler: OsrImeCaretHandler,
+    }
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            _name: Option<&CefStringUtf16>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<cef::V8Value>>,
+            _exception: Option<&mut CefStringUtf16>
+        ) -> i32 {
+            if let Some(arguments) = arguments
+                && arguments.len() >= 3
+                && let Some(Some(x_arg)) = arguments.first()
+                && let Some(Some(y_arg)) = arguments.get(1)
+                && let Some(Some(height_arg)) = arguments.get(2)
+            {
+                let x = x_arg.int_value();
+                let y = y_arg.int_value();
+                let height = height_arg.int_value();
+
+                if let Some(frame) = self.handler.frame.as_ref() {
+                    match frame.lock() {
+                        Ok(frame) => {
+                            let route = CefStringUtf16::from("imeCaretPosition");
+                            let process_message = process_message_create(Some(&route));
+                            if let Some(mut process_message) = process_message {
+                                if let Some(argument_list) = process_message.argument_list() {
+                                    argument_list.set_int(0, x);
+                                    argument_list.set_int(1, y);
+                                    argument_list.set_int(2, height);
+                                }
+
+                                frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+
+                                if let Some(retval) = retval {
+                                    *retval = v8_value_create_bool(true as _);
+                                }
+
+                                return 1;
+                            }
+                        }
+                        Err(_) => {
+                            if let Some(retval) = retval {
+                                *retval = v8_value_create_bool(false as _);
+                            }
+                            return 0;
+                        }
+                    }
+                }
+            }
+
+            if let Some(retval) = retval {
+                *retval = v8_value_create_bool(false as _);
+            }
+
+            0
+        }
+    }
+}
+
+#[derive(Clone)]
 struct OsrRenderProcessHandler {}
 
 impl OsrRenderProcessHandler {
@@ -533,10 +614,20 @@ wrap_render_process_handler! {
                 let global = context.global();
                 if let Some(global) = global
                     && let Some(frame) = frame {
+                        let frame_arc = Arc::new(Mutex::new(frame.clone()));
+
                         let key: CefStringUtf16 = "sendIpcMessage".to_string().as_str().into();
-                        let mut handler = OsrIpcHandlerBuilder::build(OsrIpcHandler::new(Some(Arc::new(Mutex::new(frame.clone())))));
+                        let mut handler = OsrIpcHandlerBuilder::build(OsrIpcHandler::new(Some(frame_arc.clone())));
                         let mut func = v8_value_create_function(Some(&"sendIpcMessage".into()), Some(&mut handler)).unwrap();
                         global.set_value_bykey(Some(&key), Some(&mut func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
+
+                        let caret_key: CefStringUtf16 = "__sendImeCaretPosition".into();
+                        let mut caret_handler = OsrImeCaretHandlerBuilder::build(OsrImeCaretHandler::new(Some(frame_arc)));
+                        let mut caret_func = v8_value_create_function(Some(&"__sendImeCaretPosition".into()), Some(&mut caret_handler)).unwrap();
+                        global.set_value_bykey(Some(&caret_key), Some(&mut caret_func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
+
+                        let helper_script: CefStringUtf16 = include_str!("ime_helper.js").into();
+                        frame.execute_java_script(Some(&helper_script), None, 0);
                     }
             }
         }
@@ -554,9 +645,11 @@ wrap_render_process_handler! {
 
                         if let Some(frame) = frame {
                             frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-                            return;
+                            let report_script: CefStringUtf16 = "if(window.__activateImeTracking)window.__activateImeTracking();".into();
+                            frame.execute_java_script(Some(&report_script), None, 0);
                         }
                     }
+                    return;
                 }
 
             // send to the browser process to deactivate IME
@@ -569,6 +662,8 @@ wrap_render_process_handler! {
 
                 if let Some(frame) = frame {
                     frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+                    let deactivate_script: CefStringUtf16 = "if(window.__deactivateImeTracking)window.__deactivateImeTracking();".into();
+                    frame.execute_java_script(Some(&deactivate_script), None, 0);
                 }
             }
         }

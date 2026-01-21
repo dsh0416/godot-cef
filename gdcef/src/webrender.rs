@@ -796,6 +796,7 @@ fn on_process_message_received(
     message: Option<&mut ProcessMessage>,
     message_queue: &MessageQueue,
     ime_enable_queue: &ImeEnableQueue,
+    ime_composition_queue: &ImeCompositionQueue,
 ) -> i32 {
     let Some(message) = message else { return 0 };
     let route = CefStringUtf16::from(&message.name()).to_string();
@@ -819,6 +820,20 @@ fn on_process_message_received(
                 }
             }
         }
+        "imeCaretPosition" => {
+            if let Some(args) = message.argument_list() {
+                let x = args.int(0);
+                let y = args.int(1);
+                let height = args.int(2);
+                if let Ok(mut queue) = ime_composition_queue.lock() {
+                    *queue = Some(ImeCompositionRange {
+                        caret_x: x,
+                        caret_y: y,
+                        caret_height: height,
+                    });
+                }
+            }
+        }
         _ => {}
     }
 
@@ -839,6 +854,7 @@ pub(crate) struct ClientHandlers {
 pub(crate) struct ClientIpcQueues {
     pub message_queue: MessageQueue,
     pub ime_enable_queue: ImeEnableQueue,
+    pub ime_composition_queue: ImeCompositionQueue,
 }
 
 wrap_client! {
@@ -879,7 +895,7 @@ wrap_client! {
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            on_process_message_received(browser, frame, source_process, message, &self.ipc.message_queue, &self.ipc.ime_enable_queue)
+            on_process_message_received(browser, frame, source_process, message, &self.ipc.message_queue, &self.ipc.ime_enable_queue, &self.ipc.ime_composition_queue)
         }
     }
 }
@@ -917,7 +933,7 @@ impl SoftwareClientImpl {
         let handlers = build_client_handlers(
             SoftwareOsrHandler::build(
                 render_handler,
-                queues.ime_composition_queue,
+                queues.ime_composition_queue.clone(),
                 queues.drag_event_queue.clone(),
             ),
             cursor_type,
@@ -930,6 +946,7 @@ impl SoftwareClientImpl {
         let ipc = ClientIpcQueues {
             message_queue: queues.message_queue,
             ime_enable_queue: queues.ime_enable_queue,
+            ime_composition_queue: queues.ime_composition_queue,
         };
         Self::new(handlers, ipc)
     }
@@ -973,7 +990,7 @@ wrap_client! {
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            on_process_message_received(browser, frame, source_process, message, &self.ipc.message_queue, &self.ipc.ime_enable_queue)
+            on_process_message_received(browser, frame, source_process, message, &self.ipc.message_queue, &self.ipc.ime_enable_queue, &self.ipc.ime_composition_queue)
         }
     }
 }
@@ -987,7 +1004,7 @@ impl AcceleratedClientImpl {
         let handlers = build_client_handlers(
             AcceleratedOsrHandler::build(
                 render_handler,
-                queues.ime_composition_queue,
+                queues.ime_composition_queue.clone(),
                 queues.drag_event_queue.clone(),
             ),
             cursor_type,
@@ -1000,6 +1017,7 @@ impl AcceleratedClientImpl {
         let ipc = ClientIpcQueues {
             message_queue: queues.message_queue,
             ime_enable_queue: queues.ime_enable_queue,
+            ime_composition_queue: queues.ime_composition_queue,
         };
         Self::new(handlers, ipc)
     }
