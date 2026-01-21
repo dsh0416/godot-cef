@@ -79,13 +79,12 @@ pub struct AcceleratedRenderState {
     pub dst_width: u32,
     pub dst_height: u32,
     pub needs_resize: Option<(u32, u32)>,
-    // Popup texture state
     pub popup_rd_rid: Option<Rid>,
     pub popup_width: u32,
     pub popup_height: u32,
     pub popup_dirty: bool,
-    pub popup_has_content: bool, // True once popup has received content since being shown
-    pub needs_popup_texture: Option<(u32, u32)>, // Deferred popup texture creation
+    pub popup_has_content: bool,
+    pub needs_popup_texture: Option<(u32, u32)>,
 }
 
 impl AcceleratedRenderState {
@@ -137,7 +136,6 @@ impl AcceleratedRenderHandler {
     ) {
         let Some(info) = info else { return };
         if type_ == PaintElementType::POPUP {
-            // Handle POPUP type - import to separate popup texture
             let src_width = info.extra.coded_size.width as u32;
             let src_height = info.extra.coded_size.height as u32;
 
@@ -148,19 +146,16 @@ impl AcceleratedRenderHandler {
                 return;
             };
 
-            // Check if we have a popup texture of the correct size
             let need_new_texture = match state.popup_rd_rid {
                 None => true,
                 Some(_) => state.popup_width != src_width || state.popup_height != src_height,
             };
 
             if need_new_texture {
-                // Defer texture creation to main thread, skip this frame
                 state.needs_popup_texture = Some((src_width, src_height));
                 return;
             }
 
-            // Import popup texture
             if let Some(popup_rid) = state.popup_rd_rid {
                 match state.importer.import_and_copy(info, popup_rid) {
                     Ok(_) => {
@@ -179,7 +174,7 @@ impl AcceleratedRenderHandler {
         }
 
         if type_ != PaintElementType::VIEW {
-            return; // Unknown type
+            return;
         }
 
         let src_width = info.extra.coded_size.width as u32;

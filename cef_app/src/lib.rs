@@ -49,24 +49,16 @@ impl FrameBuffer {
     }
 }
 
-/// Popup state for <select> dropdowns and other browser popups.
 #[derive(Default, Clone)]
 pub struct PopupState {
-    /// Whether the popup is currently visible.
     pub visible: bool,
-    /// Popup position and size in view coordinates.
     pub rect: PopupRect,
-    /// Popup pixel buffer (RGBA).
     pub buffer: Vec<u8>,
-    /// Popup width in pixels.
     pub width: u32,
-    /// Popup height in pixels.
     pub height: u32,
-    /// Whether the popup buffer has been updated and needs redraw.
     pub dirty: bool,
 }
 
-/// Popup rectangle in view coordinates.
 #[derive(Default, Clone, Copy)]
 pub struct PopupRect {
     pub x: i32,
@@ -80,11 +72,9 @@ impl PopupState {
         Self::default()
     }
 
-    /// Show or hide the popup.
     pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
         if !visible {
-            // Clear buffer when hiding to free memory
             self.buffer.clear();
             self.width = 0;
             self.height = 0;
@@ -92,7 +82,6 @@ impl PopupState {
         self.dirty = true;
     }
 
-    /// Update the popup rectangle (position and size).
     pub fn set_rect(&mut self, x: i32, y: i32, width: i32, height: i32) {
         self.rect = PopupRect {
             x,
@@ -100,9 +89,9 @@ impl PopupState {
             width,
             height,
         };
+        self.dirty = true;
     }
 
-    /// Update the popup buffer with new RGBA pixel data.
     pub fn update_buffer(&mut self, data: Vec<u8>, width: u32, height: u32) {
         self.buffer = data;
         self.width = width;
@@ -110,7 +99,6 @@ impl PopupState {
         self.dirty = true;
     }
 
-    /// Mark the popup as consumed (not dirty).
     pub fn mark_clean(&mut self) {
         self.dirty = false;
     }

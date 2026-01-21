@@ -98,6 +98,20 @@ fn compute_screen_point(
     true as _
 }
 
+fn handle_popup_show(popup_state: &Arc<Mutex<cef_app::PopupState>>, show: ::std::os::raw::c_int) {
+    if let Ok(mut state) = popup_state.lock() {
+        state.set_visible(show != 0);
+    }
+}
+
+fn handle_popup_size(popup_state: &Arc<Mutex<cef_app::PopupState>>, rect: Option<&Rect>) {
+    if let Some(rect) = rect
+        && let Ok(mut state) = popup_state.lock()
+    {
+        state.set_rect(rect.x, rect.y, rect.width, rect.height);
+    }
+}
+
 wrap_render_handler! {
     pub struct SoftwareOsrHandler {
         handler: cef_app::OsrRenderHandler,
@@ -133,9 +147,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             show: ::std::os::raw::c_int,
         ) {
-            if let Ok(mut popup_state) = self.handler.popup_state.lock() {
-                popup_state.set_visible(show != 0);
-            }
+            handle_popup_show(&self.handler.popup_state, show);
         }
 
         fn on_popup_size(
@@ -143,11 +155,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             rect: Option<&Rect>,
         ) {
-            if let Some(rect) = rect
-                && let Ok(mut popup_state) = self.handler.popup_state.lock()
-            {
-                popup_state.set_rect(rect.x, rect.y, rect.width, rect.height);
-            }
+            handle_popup_size(&self.handler.popup_state, rect);
         }
 
         fn on_paint(
@@ -241,9 +249,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             show: ::std::os::raw::c_int,
         ) {
-            if let Ok(mut popup_state) = self.handler.popup_state.lock() {
-                popup_state.set_visible(show != 0);
-            }
+            handle_popup_show(&self.handler.popup_state, show);
         }
 
         fn on_popup_size(
@@ -251,11 +257,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             rect: Option<&Rect>,
         ) {
-            if let Some(rect) = rect
-                && let Ok(mut popup_state) = self.handler.popup_state.lock()
-            {
-                popup_state.set_rect(rect.x, rect.y, rect.width, rect.height);
-            }
+            handle_popup_size(&self.handler.popup_state, rect);
         }
 
         fn on_accelerated_paint(
@@ -277,8 +279,6 @@ wrap_render_handler! {
             width: ::std::os::raw::c_int,
             height: ::std::os::raw::c_int,
         ) {
-            // For accelerated rendering, on_paint is only called for popups
-            // (the main view uses on_accelerated_paint)
             if type_ == PaintElementType::POPUP
                 && !buffer.is_null()
                 && width > 0

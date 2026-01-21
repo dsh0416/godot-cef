@@ -63,11 +63,25 @@ impl CefTexture {
         self.ime_active = false;
         self.ime_proxy = None;
 
-        // Cleanup popup overlay
         if let Some(mut overlay) = self.popup_overlay.take() {
             overlay.queue_free();
         }
         self.popup_texture = None;
+
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+        {
+            if let Some(texture_2d_rd) = &mut self.popup_texture_2d_rd {
+                texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
+            }
+            self.popup_texture_2d_rd = None;
+
+            if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode
+                && let Ok(mut state) = render_state.lock()
+                && let Some(popup_rid) = state.popup_rd_rid.take()
+            {
+                render::free_rd_texture(popup_rid);
+            }
+        }
 
         crate::cef_init::cef_release();
     }

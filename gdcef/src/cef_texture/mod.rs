@@ -53,10 +53,9 @@ pub struct CefTexture {
     ime_active: bool,
     ime_proxy: Option<Gd<LineEdit>>,
 
-    // Popup overlay for accelerated rendering (software rendering composites directly)
+    // Popup state
     popup_overlay: Option<Gd<TextureRect>>,
     popup_texture: Option<Gd<ImageTexture>>,
-    // GPU texture for accelerated popup rendering
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     popup_texture_2d_rd: Option<Gd<godot::classes::Texture2Drd>>,
 }
