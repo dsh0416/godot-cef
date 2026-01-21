@@ -65,6 +65,39 @@ pub struct ConsoleMessageEvent {
 /// Queue for console messages from the browser to Godot.
 pub type ConsoleMessageQueue = Arc<Mutex<VecDeque<ConsoleMessageEvent>>>;
 
+#[derive(Debug, Clone, Default)]
+pub struct DragDataInfo {
+    pub is_link: bool,
+    pub is_file: bool,
+    pub is_fragment: bool,
+    pub link_url: String,
+    pub link_title: String,
+    pub fragment_text: String,
+    pub fragment_html: String,
+    pub file_names: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum DragEvent {
+    Started {
+        drag_data: DragDataInfo,
+        x: i32,
+        y: i32,
+        allowed_ops: u32,
+    },
+    UpdateCursor { operation: u32 },
+    Entered { drag_data: DragDataInfo, mask: u32 },
+}
+
+pub type DragEventQueue = Arc<Mutex<VecDeque<DragEvent>>>;
+
+#[derive(Debug, Clone, Default)]
+pub struct DragState {
+    pub is_drag_over: bool,
+    pub is_dragging_from_browser: bool,
+    pub allowed_ops: u32,
+}
+
 /// Rendering mode for the CEF browser.
 ///
 /// Determines whether the browser uses software (CPU) rendering or
@@ -123,4 +156,8 @@ pub struct App {
     pub ime_composition_range: Option<ImeCompositionQueue>,
     /// Queue for console messages from the browser.
     pub console_message_queue: Option<ConsoleMessageQueue>,
+    /// Queue for drag events from the browser.
+    pub drag_event_queue: Option<DragEventQueue>,
+    /// Current drag state for this browser.
+    pub drag_state: DragState,
 }

@@ -5,9 +5,9 @@ use wide::{i8x16, u8x16};
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
-    ConsoleMessageEvent, ConsoleMessageQueue, ImeCompositionQueue, ImeCompositionRange,
-    ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue, TitleChangeQueue,
-    UrlChangeQueue,
+    ConsoleMessageEvent, ConsoleMessageQueue, DragDataInfo, DragEvent, DragEventQueue,
+    ImeCompositionQueue, ImeCompositionRange, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue,
+    MessageQueue, TitleChangeQueue, UrlChangeQueue,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -20,6 +20,7 @@ pub(crate) struct ClientQueues {
     pub ime_enable_queue: ImeEnableQueue,
     pub ime_composition_queue: ImeCompositionQueue,
     pub console_message_queue: ConsoleMessageQueue,
+    pub drag_event_queue: DragEventQueue,
 }
 
 /// Swizzle indices for BGRA -> RGBA conversion.
@@ -116,6 +117,7 @@ wrap_render_handler! {
     pub struct SoftwareOsrHandler {
         handler: cef_app::OsrRenderHandler,
         ime_composition_queue: ImeCompositionQueue,
+        drag_event_queue: DragEventQueue,
     }
 
     impl RenderHandler {
@@ -202,6 +204,40 @@ wrap_render_handler! {
                     });
                 }
         }
+
+        fn start_dragging(
+            &self,
+            _browser: Option<&mut Browser>,
+            drag_data: Option<&mut DragData>,
+            allowed_ops: DragOperationsMask,
+            x: ::std::os::raw::c_int,
+            y: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            if let Some(drag_data) = drag_data {
+                let drag_info = extract_drag_data_info(drag_data);
+                if let Ok(mut queue) = self.drag_event_queue.lock() {
+                    queue.push_back(DragEvent::Started {
+                        drag_data: drag_info,
+                        x,
+                        y,
+                        allowed_ops: allowed_ops.as_ref().0,
+                    });
+                }
+            }
+            1
+        }
+
+        fn update_drag_cursor(
+            &self,
+            _browser: Option<&mut Browser>,
+            operation: DragOperationsMask,
+        ) {
+            if let Ok(mut queue) = self.drag_event_queue.lock() {
+                queue.push_back(DragEvent::UpdateCursor {
+                    operation: operation.as_ref().0,
+                });
+            }
+        }
     }
 }
 
@@ -209,8 +245,9 @@ impl SoftwareOsrHandler {
     pub fn build(
         handler: cef_app::OsrRenderHandler,
         ime_composition_queue: ImeCompositionQueue,
+        drag_event_queue: DragEventQueue,
     ) -> cef::RenderHandler {
-        Self::new(handler, ime_composition_queue)
+        Self::new(handler, ime_composition_queue, drag_event_queue)
     }
 }
 
@@ -218,6 +255,7 @@ wrap_render_handler! {
     pub struct AcceleratedOsrHandler {
         handler: PlatformAcceleratedRenderHandler,
         ime_composition_queue: ImeCompositionQueue,
+        drag_event_queue: DragEventQueue,
     }
 
     impl RenderHandler {
@@ -311,6 +349,40 @@ wrap_render_handler! {
                     });
                 }
         }
+
+        fn start_dragging(
+            &self,
+            _browser: Option<&mut Browser>,
+            drag_data: Option<&mut DragData>,
+            allowed_ops: DragOperationsMask,
+            x: ::std::os::raw::c_int,
+            y: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            if let Some(drag_data) = drag_data {
+                let drag_info = extract_drag_data_info(drag_data);
+                if let Ok(mut queue) = self.drag_event_queue.lock() {
+                    queue.push_back(DragEvent::Started {
+                        drag_data: drag_info,
+                        x,
+                        y,
+                        allowed_ops: allowed_ops.as_ref().0,
+                    });
+                }
+            }
+            1
+        }
+
+        fn update_drag_cursor(
+            &self,
+            _browser: Option<&mut Browser>,
+            operation: DragOperationsMask,
+        ) {
+            if let Ok(mut queue) = self.drag_event_queue.lock() {
+                queue.push_back(DragEvent::UpdateCursor {
+                    operation: operation.as_ref().0,
+                });
+            }
+        }
     }
 }
 
@@ -318,8 +390,9 @@ impl AcceleratedOsrHandler {
     pub fn build(
         handler: PlatformAcceleratedRenderHandler,
         ime_composition_queue: ImeCompositionQueue,
+        drag_event_queue: DragEventQueue,
     ) -> cef::RenderHandler {
-        Self::new(handler, ime_composition_queue)
+        Self::new(handler, ime_composition_queue, drag_event_queue)
     }
 }
 
@@ -358,6 +431,95 @@ macro_rules! handle_cursor_change {
         }
         false as i32
     }};
+}
+
+fn extract_drag_data_info(drag_data: &impl ImplDragData) -> DragDataInfo {
+    let is_link = drag_data.is_link() != 0;
+    let is_file = drag_data.is_file() != 0;
+    let is_fragment = drag_data.is_fragment() != 0;
+
+    let link_url = if is_link {
+        let s = drag_data.link_url();
+        CefStringUtf16::from(&s).to_string()
+    } else {
+        String::new()
+    };
+
+    let link_title = if is_link {
+        let s = drag_data.link_title();
+        CefStringUtf16::from(&s).to_string()
+    } else {
+        String::new()
+    };
+
+    let fragment_text = if is_fragment {
+        let s = drag_data.fragment_text();
+        CefStringUtf16::from(&s).to_string()
+    } else {
+        String::new()
+    };
+
+    let fragment_html = if is_fragment {
+        let s = drag_data.fragment_html();
+        CefStringUtf16::from(&s).to_string()
+    } else {
+        String::new()
+    };
+
+    let file_names = if is_file {
+        let name = drag_data.file_name();
+        let name_str = CefStringUtf16::from(&name).to_string();
+        if name_str.is_empty() {
+            Vec::new()
+        } else {
+            vec![name_str]
+        }
+    } else {
+        Vec::new()
+    };
+
+    DragDataInfo {
+        is_link,
+        is_file,
+        is_fragment,
+        link_url,
+        link_title,
+        fragment_text,
+        fragment_html,
+        file_names,
+    }
+}
+
+wrap_drag_handler! {
+    pub(crate) struct DragHandlerImpl {
+        drag_event_queue: DragEventQueue,
+    }
+
+    impl DragHandler {
+        fn on_drag_enter(
+            &self,
+            _browser: Option<&mut Browser>,
+            drag_data: Option<&mut DragData>,
+            mask: DragOperationsMask,
+        ) -> ::std::os::raw::c_int {
+            if let Some(drag_data) = drag_data {
+                let drag_info = extract_drag_data_info(drag_data);
+                if let Ok(mut queue) = self.drag_event_queue.lock() {
+                    queue.push_back(DragEvent::Entered {
+                        drag_data: drag_info,
+                        mask: mask.as_ref().0,
+                    });
+                }
+            }
+            0
+        }
+    }
+}
+
+impl DragHandlerImpl {
+    pub fn build(drag_event_queue: DragEventQueue) -> cef::DragHandler {
+        Self::new(drag_event_queue)
+    }
 }
 
 wrap_display_handler! {
@@ -647,36 +809,51 @@ fn on_process_message_received(
     0
 }
 
+#[derive(Clone)]
+pub(crate) struct ClientHandlers {
+    pub render_handler: cef::RenderHandler,
+    pub display_handler: cef::DisplayHandler,
+    pub context_menu_handler: cef::ContextMenuHandler,
+    pub life_span_handler: cef::LifeSpanHandler,
+    pub load_handler: cef::LoadHandler,
+    pub drag_handler: cef::DragHandler,
+}
+
+#[derive(Clone)]
+pub(crate) struct ClientIpcQueues {
+    pub message_queue: MessageQueue,
+    pub ime_enable_queue: ImeEnableQueue,
+}
+
 wrap_client! {
     pub(crate) struct SoftwareClientImpl {
-        render_handler: cef::RenderHandler,
-        display_handler: cef::DisplayHandler,
-        context_menu_handler: cef::ContextMenuHandler,
-        life_span_handler: cef::LifeSpanHandler,
-        load_handler: cef::LoadHandler,
-        message_queue: MessageQueue,
-        ime_enable_queue: ImeEnableQueue,
+        handlers: ClientHandlers,
+        ipc: ClientIpcQueues,
     }
 
     impl Client {
         fn render_handler(&self) -> Option<cef::RenderHandler> {
-            Some(self.render_handler.clone())
+            Some(self.handlers.render_handler.clone())
         }
 
         fn display_handler(&self) -> Option<cef::DisplayHandler> {
-            Some(self.display_handler.clone())
+            Some(self.handlers.display_handler.clone())
         }
 
         fn context_menu_handler(&self) -> Option<cef::ContextMenuHandler> {
-            Some(self.context_menu_handler.clone())
+            Some(self.handlers.context_menu_handler.clone())
         }
 
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
-            Some(self.life_span_handler.clone())
+            Some(self.handlers.life_span_handler.clone())
         }
 
         fn load_handler(&self) -> Option<cef::LoadHandler> {
-            Some(self.load_handler.clone())
+            Some(self.handlers.load_handler.clone())
+        }
+
+        fn drag_handler(&self) -> Option<cef::DragHandler> {
+            Some(self.handlers.drag_handler.clone())
         }
 
         fn on_process_message_received(
@@ -686,34 +863,33 @@ wrap_client! {
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            on_process_message_received(browser, frame, source_process, message, &self.message_queue, &self.ime_enable_queue)
+            on_process_message_received(browser, frame, source_process, message, &self.ipc.message_queue, &self.ipc.ime_enable_queue)
         }
     }
 }
 
-fn build_client_common(
+fn build_client_handlers(
+    render_handler: cef::RenderHandler,
     cursor_type: Arc<Mutex<CursorType>>,
     url_change_queue: UrlChangeQueue,
     title_change_queue: TitleChangeQueue,
     loading_state_queue: LoadingStateQueue,
     console_message_queue: ConsoleMessageQueue,
-) -> (
-    cef::DisplayHandler,
-    cef::ContextMenuHandler,
-    cef::LifeSpanHandler,
-    cef::LoadHandler,
-) {
-    (
-        DisplayHandlerImpl::build(
+    drag_event_queue: DragEventQueue,
+) -> ClientHandlers {
+    ClientHandlers {
+        render_handler,
+        display_handler: DisplayHandlerImpl::build(
             cursor_type,
             url_change_queue,
             title_change_queue,
             console_message_queue,
         ),
-        ContextMenuHandlerImpl::build(),
-        LifeSpanHandlerImpl::build(),
-        LoadHandlerImpl::build(loading_state_queue),
-    )
+        context_menu_handler: ContextMenuHandlerImpl::build(),
+        life_span_handler: LifeSpanHandlerImpl::build(),
+        load_handler: LoadHandlerImpl::build(loading_state_queue),
+        drag_handler: DragHandlerImpl::build(drag_event_queue),
+    }
 }
 
 impl SoftwareClientImpl {
@@ -722,56 +898,56 @@ impl SoftwareClientImpl {
         queues: ClientQueues,
     ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
-        let (display_handler, context_menu_handler, life_span_handler, load_handler) =
-            build_client_common(
-                cursor_type.clone(),
-                queues.url_change_queue,
-                queues.title_change_queue,
-                queues.loading_state_queue,
-                queues.console_message_queue,
-            );
-        Self::new(
-            SoftwareOsrHandler::build(render_handler, queues.ime_composition_queue),
-            display_handler,
-            context_menu_handler,
-            life_span_handler,
-            load_handler,
-            queues.message_queue,
-            queues.ime_enable_queue,
-        )
+        let handlers = build_client_handlers(
+            SoftwareOsrHandler::build(
+                render_handler,
+                queues.ime_composition_queue,
+                queues.drag_event_queue.clone(),
+            ),
+            cursor_type,
+            queues.url_change_queue,
+            queues.title_change_queue,
+            queues.loading_state_queue,
+            queues.console_message_queue,
+            queues.drag_event_queue,
+        );
+        let ipc = ClientIpcQueues {
+            message_queue: queues.message_queue,
+            ime_enable_queue: queues.ime_enable_queue,
+        };
+        Self::new(handlers, ipc)
     }
 }
 
 wrap_client! {
     pub(crate) struct AcceleratedClientImpl {
-        render_handler: cef::RenderHandler,
-        display_handler: cef::DisplayHandler,
-        context_menu_handler: cef::ContextMenuHandler,
-        life_span_handler: cef::LifeSpanHandler,
-        load_handler: cef::LoadHandler,
-        message_queue: MessageQueue,
-        ime_enable_queue: ImeEnableQueue,
+        handlers: ClientHandlers,
+        ipc: ClientIpcQueues,
     }
 
     impl Client {
         fn render_handler(&self) -> Option<cef::RenderHandler> {
-            Some(self.render_handler.clone())
+            Some(self.handlers.render_handler.clone())
         }
 
         fn display_handler(&self) -> Option<cef::DisplayHandler> {
-            Some(self.display_handler.clone())
+            Some(self.handlers.display_handler.clone())
         }
 
         fn context_menu_handler(&self) -> Option<cef::ContextMenuHandler> {
-            Some(self.context_menu_handler.clone())
+            Some(self.handlers.context_menu_handler.clone())
         }
 
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
-            Some(self.life_span_handler.clone())
+            Some(self.handlers.life_span_handler.clone())
         }
 
         fn load_handler(&self) -> Option<cef::LoadHandler> {
-            Some(self.load_handler.clone())
+            Some(self.handlers.load_handler.clone())
+        }
+
+        fn drag_handler(&self) -> Option<cef::DragHandler> {
+            Some(self.handlers.drag_handler.clone())
         }
 
         fn on_process_message_received(
@@ -781,7 +957,7 @@ wrap_client! {
             source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            on_process_message_received(browser, frame, source_process, message, &self.message_queue, &self.ime_enable_queue)
+            on_process_message_received(browser, frame, source_process, message, &self.ipc.message_queue, &self.ipc.ime_enable_queue)
         }
     }
 }
@@ -792,23 +968,24 @@ impl AcceleratedClientImpl {
         cursor_type: Arc<Mutex<CursorType>>,
         queues: ClientQueues,
     ) -> cef::Client {
-        let (display_handler, context_menu_handler, life_span_handler, load_handler) =
-            build_client_common(
-                cursor_type.clone(),
-                queues.url_change_queue,
-                queues.title_change_queue,
-                queues.loading_state_queue,
-                queues.console_message_queue,
-            );
-        Self::new(
-            AcceleratedOsrHandler::build(render_handler, queues.ime_composition_queue),
-            display_handler,
-            context_menu_handler,
-            life_span_handler,
-            load_handler,
-            queues.message_queue,
-            queues.ime_enable_queue,
-        )
+        let handlers = build_client_handlers(
+            AcceleratedOsrHandler::build(
+                render_handler,
+                queues.ime_composition_queue,
+                queues.drag_event_queue.clone(),
+            ),
+            cursor_type,
+            queues.url_change_queue,
+            queues.title_change_queue,
+            queues.loading_state_queue,
+            queues.console_message_queue,
+            queues.drag_event_queue,
+        );
+        let ipc = ClientIpcQueues {
+            message_queue: queues.message_queue,
+            ime_enable_queue: queues.ime_enable_queue,
+        };
+        Self::new(handlers, ipc)
     }
 }
 

@@ -3,6 +3,7 @@ mod browser;
 mod cef_init;
 mod cef_texture;
 mod cursor;
+mod drag;
 mod error;
 mod input;
 mod queue_processing;

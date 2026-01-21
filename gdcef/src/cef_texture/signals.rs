@@ -5,7 +5,8 @@
 use super::CefTexture;
 use godot::prelude::*;
 
-use crate::browser::LoadingStateEvent;
+use crate::browser::{DragEvent, LoadingStateEvent};
+use crate::drag::DragDataInfo;
 use crate::queue_processing::drain_queue;
 
 impl CefTexture {
@@ -98,6 +99,48 @@ impl CefTexture {
                     event.line.to_variant(),
                 ],
             );
+        }
+    }
+
+    pub(super) fn process_drag_event_queue(&mut self) {
+        let Some(queue) = &self.app.drag_event_queue else {
+            return;
+        };
+
+        for event in drain_queue(queue) {
+            match event {
+                DragEvent::Started {
+                    drag_data,
+                    x,
+                    y,
+                    allowed_ops,
+                } => {
+                    let drag_info = DragDataInfo::from_internal(&drag_data);
+                    let position = Vector2::new(x as f32, y as f32);
+                    self.base_mut().emit_signal(
+                        "drag_started",
+                        &[
+                            drag_info.to_variant(),
+                            position.to_variant(),
+                            (allowed_ops as i32).to_variant(),
+                        ],
+                    );
+                    self.app.drag_state.is_dragging_from_browser = true;
+                    self.app.drag_state.allowed_ops = allowed_ops;
+                }
+                DragEvent::UpdateCursor { operation } => {
+                    self.base_mut()
+                        .emit_signal("drag_cursor_updated", &[(operation as i32).to_variant()]);
+                }
+                DragEvent::Entered { drag_data, mask } => {
+                    let drag_info = DragDataInfo::from_internal(&drag_data);
+                    self.base_mut().emit_signal(
+                        "drag_entered",
+                        &[drag_info.to_variant(), (mask as i32).to_variant()],
+                    );
+                    self.app.drag_state.is_drag_over = true;
+                }
+            }
         }
     }
 }

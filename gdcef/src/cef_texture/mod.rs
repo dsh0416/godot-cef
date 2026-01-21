@@ -3,7 +3,7 @@ mod ime;
 mod rendering;
 mod signals;
 
-use cef::{self, ImplBrowser, ImplBrowserHost, ImplFrame, do_message_loop_work};
+use cef::{self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, do_message_loop_work};
 use cef_app::SecurityConfig;
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
@@ -134,6 +134,15 @@ impl CefTexture {
     #[signal]
     fn console_message(level: u32, message: GString, source: GString, line: i32);
 
+    #[signal]
+    fn drag_started(drag_data: Gd<crate::drag::DragDataInfo>, position: Vector2, allowed_ops: i32);
+
+    #[signal]
+    fn drag_cursor_updated(operation: i32);
+
+    #[signal]
+    fn drag_entered(drag_data: Gd<crate::drag::DragDataInfo>, mask: i32);
+
     #[func]
     fn on_ready(&mut self) {
         use godot::classes::control::FocusMode;
@@ -172,6 +181,7 @@ impl CefTexture {
         self.process_title_change_queue();
         self.process_loading_state_queue();
         self.process_console_message_queue();
+        self.process_drag_event_queue();
         self.process_ime_enable_queue();
         self.process_ime_composition_queue();
         self.process_ime_position();
@@ -425,5 +435,135 @@ impl CefTexture {
 
     fn get_device_scale_factor(&self) -> f32 {
         crate::utils::get_display_scale_factor()
+    }
+
+    #[func]
+    pub fn drag_enter(&mut self, file_paths: Array<GString>, position: Vector2, allowed_ops: i32) {
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+
+        let Some(mut drag_data) = cef::drag_data_create() else {
+            return;
+        };
+
+        for path in file_paths.iter_shared() {
+            let path_str: cef::CefStringUtf16 = path.to_string().as_str().into();
+            drag_data.add_file(Some(&path_str), None);
+        }
+
+        let mouse_event = input::create_mouse_event(
+            position,
+            self.get_pixel_scale_factor(),
+            self.get_device_scale_factor(),
+            0,
+        );
+
+        let ops =
+            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops as u32));
+
+        host.drag_target_drag_enter(Some(&mut drag_data), Some(&mouse_event), ops);
+
+        self.app.drag_state.is_drag_over = true;
+        self.app.drag_state.allowed_ops = allowed_ops as u32;
+    }
+
+    #[func]
+    pub fn drag_over(&mut self, position: Vector2, allowed_ops: i32) {
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+
+        let mouse_event = input::create_mouse_event(
+            position,
+            self.get_pixel_scale_factor(),
+            self.get_device_scale_factor(),
+            0,
+        );
+
+        let ops =
+            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops as u32));
+
+        host.drag_target_drag_over(Some(&mouse_event), ops);
+    }
+
+    #[func]
+    pub fn drag_leave(&mut self) {
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+
+        host.drag_target_drag_leave();
+
+        self.app.drag_state.is_drag_over = false;
+    }
+
+    #[func]
+    pub fn drag_drop(&mut self, position: Vector2) {
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+
+        let mouse_event = input::create_mouse_event(
+            position,
+            self.get_pixel_scale_factor(),
+            self.get_device_scale_factor(),
+            0,
+        );
+
+        host.drag_target_drop(Some(&mouse_event));
+
+        self.app.drag_state.is_drag_over = false;
+    }
+
+    #[func]
+    pub fn drag_source_ended(&mut self, position: Vector2, operation: i32) {
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+
+        let op =
+            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(operation as u32));
+
+        host.drag_source_ended_at(position.x as i32, position.y as i32, op);
+
+        self.app.drag_state.is_dragging_from_browser = false;
+    }
+
+    #[func]
+    pub fn drag_source_system_ended(&mut self) {
+        let Some(browser) = self.app.browser.as_mut() else {
+            return;
+        };
+        let Some(host) = browser.host() else {
+            return;
+        };
+
+        host.drag_source_system_drag_ended();
+    }
+
+    #[func]
+    pub fn is_dragging_from_browser(&self) -> bool {
+        self.app.drag_state.is_dragging_from_browser
+    }
+
+    #[func]
+    pub fn is_drag_over(&self) -> bool {
+        self.app.drag_state.is_drag_over
     }
 }
