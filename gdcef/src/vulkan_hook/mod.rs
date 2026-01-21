@@ -8,20 +8,23 @@
 //! - Linux: `VK_EXT_external_memory_dma_buf` for DMA-Buf sharing
 //! - macOS: `VK_EXT_metal_objects` for IOSurface sharing (not yet supported - retour lacks ARM64)
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod windows;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod linux;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 pub use windows::install_vulkan_hook;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub use linux::install_vulkan_hook;
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+)))]
 pub fn install_vulkan_hook() {
     // No-op on other platforms for now
-    // macOS: retour doesn't support ARM64
+    // retour doesn't support platforms other than x86_64
 }

@@ -21,7 +21,7 @@ pub static AmdPowerXpressRequestHighPerformance: u32 = 0x00000001;
 
 mod utils;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod dxgi_hook;
 
 #[cfg(target_os = "linux")]
@@ -45,7 +45,7 @@ fn main() -> std::process::ExitCode {
         cef_app::load_sandbox_from_path(&framework_path, args.as_main_args());
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
     {
         use cef_app::AdapterLuid;
 

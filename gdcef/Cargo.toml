@@ -31,7 +31,12 @@ ash = { workspace = true }
 retour = { workspace = true }
 libloading = { workspace = true }
 
+[target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
+retour = { workspace = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 ash = { workspace = true }
-retour = { workspace = true }
 libloading = { workspace = true }
+
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+retour = { workspace = true }

@@ -218,4 +218,3 @@ The LUID is queried fresh each time the application starts, so this is handled a
 
 - [Vulkan Support](./vulkan-support.md) — External memory extension injection
 - [Properties](./properties.md) — `enable_accelerated_osr` configuration
-
