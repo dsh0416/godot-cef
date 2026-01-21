@@ -216,11 +216,16 @@ wrap_render_handler! {
             if let Some(drag_data) = drag_data {
                 let drag_info = extract_drag_data_info(drag_data);
                 if let Ok(mut queue) = self.drag_event_queue.lock() {
+                    #[cfg(target_os = "windows")]
+                    let allowed_ops: u32 = allowed_ops.as_ref().0;
+                    #[cfg(not(target_os = "windows"))]
+                    let allowed_ops: u32 = allowed_ops.as_ref().0 as u32;
+
                     queue.push_back(DragEvent::Started {
                         drag_data: drag_info,
                         x,
                         y,
-                        allowed_ops: allowed_ops.as_ref().0,
+                        allowed_ops,
                     });
                 }
             }
@@ -233,9 +238,12 @@ wrap_render_handler! {
             operation: DragOperationsMask,
         ) {
             if let Ok(mut queue) = self.drag_event_queue.lock() {
-                queue.push_back(DragEvent::UpdateCursor {
-                    operation: operation.as_ref().0,
-                });
+                #[cfg(target_os = "windows")]
+                let operation: u32 = operation.as_ref().0;
+                #[cfg(not(target_os = "windows"))]
+                let operation: u32 = operation.as_ref().0 as u32;
+
+                queue.push_back(DragEvent::UpdateCursor { operation });
             }
         }
     }
@@ -361,11 +369,16 @@ wrap_render_handler! {
             if let Some(drag_data) = drag_data {
                 let drag_info = extract_drag_data_info(drag_data);
                 if let Ok(mut queue) = self.drag_event_queue.lock() {
+                    #[cfg(target_os = "windows")]
+                    let allowed_ops: u32 = allowed_ops.as_ref().0;
+                    #[cfg(not(target_os = "windows"))]
+                    let allowed_ops: u32 = allowed_ops.as_ref().0 as u32;
+
                     queue.push_back(DragEvent::Started {
                         drag_data: drag_info,
                         x,
                         y,
-                        allowed_ops: allowed_ops.as_ref().0,
+                        allowed_ops,
                     });
                 }
             }
@@ -378,9 +391,12 @@ wrap_render_handler! {
             operation: DragOperationsMask,
         ) {
             if let Ok(mut queue) = self.drag_event_queue.lock() {
-                queue.push_back(DragEvent::UpdateCursor {
-                    operation: operation.as_ref().0,
-                });
+                #[cfg(target_os = "windows")]
+                let operation: u32 = operation.as_ref().0;
+                #[cfg(not(target_os = "windows"))]
+                let operation: u32 = operation.as_ref().0 as u32;
+
+                queue.push_back(DragEvent::UpdateCursor { operation });
             }
         }
     }
@@ -505,9 +521,14 @@ wrap_drag_handler! {
             if let Some(drag_data) = drag_data {
                 let drag_info = extract_drag_data_info(drag_data);
                 if let Ok(mut queue) = self.drag_event_queue.lock() {
+                    #[cfg(target_os = "windows")]
+                    let mask: u32 = mask.as_ref().0;
+                    #[cfg(not(target_os = "windows"))]
+                    let mask: u32 = mask.as_ref().0 as u32;
+
                     queue.push_back(DragEvent::Entered {
                         drag_data: drag_info,
-                        mask: mask.as_ref().0,
+                        mask,
                     });
                 }
             }
