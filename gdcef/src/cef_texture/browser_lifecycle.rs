@@ -60,6 +60,7 @@ impl CefTexture {
         self.app.ime_composition_range = None;
         self.app.console_message_queue = None;
         self.app.drag_event_queue = None;
+        self.app.drag_state = Default::default();
 
         self.ime_active = false;
         self.ime_proxy = None;

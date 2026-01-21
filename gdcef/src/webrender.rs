@@ -113,6 +113,49 @@ fn handle_popup_size(popup_state: &Arc<Mutex<cef_app::PopupState>>, rect: Option
     }
 }
 
+/// Helper to convert DragOperationsMask to u32 in a cross-platform way.
+fn drag_ops_to_u32(ops: DragOperationsMask) -> u32 {
+    #[cfg(target_os = "windows")]
+    {
+        ops.as_ref().0 as u32
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        ops.as_ref().0
+    }
+}
+
+/// Common helper for start_dragging implementation.
+fn handle_start_dragging(
+    drag_data: Option<&mut DragData>,
+    allowed_ops: DragOperationsMask,
+    x: ::std::os::raw::c_int,
+    y: ::std::os::raw::c_int,
+    drag_event_queue: &DragEventQueue,
+) -> ::std::os::raw::c_int {
+    if let Some(drag_data) = drag_data {
+        let drag_info = extract_drag_data_info(drag_data);
+        if let Ok(mut queue) = drag_event_queue.lock() {
+            queue.push_back(DragEvent::Started {
+                drag_data: drag_info,
+                x,
+                y,
+                allowed_ops: drag_ops_to_u32(allowed_ops),
+            });
+        }
+    }
+    1
+}
+
+/// Common helper for update_drag_cursor implementation.
+fn handle_update_drag_cursor(operation: DragOperationsMask, drag_event_queue: &DragEventQueue) {
+    if let Ok(mut queue) = drag_event_queue.lock() {
+        queue.push_back(DragEvent::UpdateCursor {
+            operation: drag_ops_to_u32(operation),
+        });
+    }
+}
+
 wrap_render_handler! {
     pub struct SoftwareOsrHandler {
         handler: cef_app::OsrRenderHandler,
@@ -213,23 +256,7 @@ wrap_render_handler! {
             x: ::std::os::raw::c_int,
             y: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
-            if let Some(drag_data) = drag_data {
-                let drag_info = extract_drag_data_info(drag_data);
-                if let Ok(mut queue) = self.drag_event_queue.lock() {
-                    #[cfg(target_os = "windows")]
-                    let allowed_ops: u32 = allowed_ops.as_ref().0 as u32;
-                    #[cfg(not(target_os = "windows"))]
-                    let allowed_ops: u32 = allowed_ops.as_ref().0;
-
-                    queue.push_back(DragEvent::Started {
-                        drag_data: drag_info,
-                        x,
-                        y,
-                        allowed_ops,
-                    });
-                }
-            }
-            1
+            handle_start_dragging(drag_data, allowed_ops, x, y, &self.drag_event_queue)
         }
 
         fn update_drag_cursor(
@@ -237,14 +264,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             operation: DragOperationsMask,
         ) {
-            if let Ok(mut queue) = self.drag_event_queue.lock() {
-                #[cfg(target_os = "windows")]
-                let operation: u32 = operation.as_ref().0 as u32;
-                #[cfg(not(target_os = "windows"))]
-                let operation: u32 = operation.as_ref().0;
-
-                queue.push_back(DragEvent::UpdateCursor { operation });
-            }
+            handle_update_drag_cursor(operation, &self.drag_event_queue);
         }
     }
 }
@@ -366,23 +386,7 @@ wrap_render_handler! {
             x: ::std::os::raw::c_int,
             y: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
-            if let Some(drag_data) = drag_data {
-                let drag_info = extract_drag_data_info(drag_data);
-                if let Ok(mut queue) = self.drag_event_queue.lock() {
-                    #[cfg(target_os = "windows")]
-                    let allowed_ops: u32 = allowed_ops.as_ref().0 as u32;
-                    #[cfg(not(target_os = "windows"))]
-                    let allowed_ops: u32 = allowed_ops.as_ref().0;
-
-                    queue.push_back(DragEvent::Started {
-                        drag_data: drag_info,
-                        x,
-                        y,
-                        allowed_ops,
-                    });
-                }
-            }
-            1
+            handle_start_dragging(drag_data, allowed_ops, x, y, &self.drag_event_queue)
         }
 
         fn update_drag_cursor(
@@ -390,14 +394,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             operation: DragOperationsMask,
         ) {
-            if let Ok(mut queue) = self.drag_event_queue.lock() {
-                #[cfg(target_os = "windows")]
-                let operation: u32 = operation.as_ref().0 as u32;
-                #[cfg(not(target_os = "windows"))]
-                let operation: u32 = operation.as_ref().0;
-
-                queue.push_back(DragEvent::UpdateCursor { operation });
-            }
+            handle_update_drag_cursor(operation, &self.drag_event_queue);
         }
     }
 }

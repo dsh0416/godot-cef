@@ -5,7 +5,7 @@ CefTexture provides automatic Input Method Editor (IME) support for text input i
 ## How it Works
 
 - When an input field gains focus in CEF, Godot's native IME is automatically activated
-- CEF would returns the proper position of the text cursor
+- CEF returns the proper position of the text cursor
 - The IME candidate window is positioned near the text cursor in the browser
 - Composition text is forwarded to CEF in real-time
 - When the input field loses focus, IME is automatically deactivated
