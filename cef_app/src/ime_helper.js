@@ -11,6 +11,84 @@
         return false;
     }
 
+    // CSS properties to copy for accurate mirror element measurement
+    const MIRROR_PROPERTIES = [
+        'direction', 'boxSizing', 'width', 'height', 'overflowX', 'overflowY',
+        'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+        'borderStyle', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+        'fontStyle', 'fontVariant', 'fontWeight', 'fontStretch', 'fontSize',
+        'fontSizeAdjust', 'lineHeight', 'fontFamily', 'textAlign', 'textTransform',
+        'textIndent', 'textDecoration', 'letterSpacing', 'wordSpacing',
+        'tabSize', 'MozTabSize', 'whiteSpace', 'wordWrap', 'wordBreak'
+    ];
+
+    // Calculate caret coordinates for INPUT/TEXTAREA using mirror element technique
+    function getCaretCoordinates(element, position) {
+        const isInput = element.tagName === 'INPUT';
+        const style = window.getComputedStyle(element);
+
+        // Create mirror div
+        const mirror = document.createElement('div');
+        mirror.id = '__ime_mirror';
+        document.body.appendChild(mirror);
+
+        const mirrorStyle = mirror.style;
+        mirrorStyle.position = 'absolute';
+        mirrorStyle.visibility = 'hidden';
+        mirrorStyle.whiteSpace = isInput ? 'nowrap' : 'pre-wrap';
+        mirrorStyle.wordWrap = isInput ? 'normal' : 'break-word';
+
+        // Copy computed styles to mirror
+        MIRROR_PROPERTIES.forEach(function(prop) {
+            if (prop === 'whiteSpace' || prop === 'wordWrap') return; // Already set above
+            mirrorStyle[prop] = style[prop];
+        });
+
+        // For INPUT elements, disable height constraint to prevent clipping
+        if (isInput) {
+            mirrorStyle.height = 'auto';
+            mirrorStyle.overflowY = 'visible';
+        }
+
+        // Position mirror at same location as element (for accurate font rendering)
+        const elRect = element.getBoundingClientRect();
+        mirrorStyle.left = elRect.left + window.scrollX + 'px';
+        mirrorStyle.top = elRect.top + window.scrollY + 'px';
+
+        // Copy text content up to caret position
+        const textBeforeCaret = element.value.substring(0, position);
+        
+        // Use textContent for proper handling of special characters and line breaks
+        // Replace spaces with non-breaking spaces to preserve trailing spaces
+        mirror.textContent = textBeforeCaret;
+        
+        // If text ends with newline, add a placeholder to ensure line height is measured
+        if (textBeforeCaret.endsWith('\n')) {
+            mirror.textContent += '\u200b'; // Zero-width space
+        }
+
+        // Create caret marker span
+        const marker = document.createElement('span');
+        marker.textContent = '\u200b'; // Zero-width space as marker
+        mirror.appendChild(marker);
+
+        // Get marker position
+        const markerRect = marker.getBoundingClientRect();
+        const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
+
+        // Calculate coordinates relative to viewport, accounting for scroll within element
+        const coordinates = {
+            x: markerRect.left - element.scrollLeft,
+            y: markerRect.top - element.scrollTop,
+            height: lineHeight
+        };
+
+        // Clean up
+        document.body.removeChild(mirror);
+
+        return coordinates;
+    }
+
     window.__reportCaretBounds = function() {
         try {
             const el = document.activeElement;
@@ -31,31 +109,7 @@
                 }
             } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
                 const pos = el.selectionStart || 0;
-                const text = el.value.substring(0, pos);
-                const style = window.getComputedStyle(el);
-
-                const measurer = document.createElement('span');
-                measurer.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;' +
-                    'font:' + style.font + ';' +
-                    'font-size:' + style.fontSize + ';' +
-                    'font-family:' + style.fontFamily + ';' +
-                    'letter-spacing:' + style.letterSpacing + ';';
-                measurer.textContent = text || '\u200b';
-                document.body.appendChild(measurer);
-
-                const textWidth = measurer.offsetWidth;
-                document.body.removeChild(measurer);
-
-                const elRect = el.getBoundingClientRect();
-                const paddingLeft = parseFloat(style.paddingLeft) || 0;
-                const borderLeft = parseFloat(style.borderLeftWidth) || 0;
-                const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
-
-                rect = {
-                    x: elRect.left + paddingLeft + borderLeft + textWidth,
-                    y: elRect.top + parseFloat(style.paddingTop || 0) + parseFloat(style.borderTopWidth || 0),
-                    height: lineHeight
-                };
+                rect = getCaretCoordinates(el, pos);
             }
 
             if (rect && (rect.width !== undefined || rect.x !== undefined)) {
