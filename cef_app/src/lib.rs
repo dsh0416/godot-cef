@@ -513,7 +513,6 @@ wrap_v8_handler! {
     }
 }
 
-/// V8 handler for sending IME caret position from JS to the browser process.
 #[derive(Clone)]
 struct OsrImeCaretHandler {
     frame: Option<Arc<Mutex<Frame>>>,
@@ -545,10 +544,9 @@ wrap_v8_handler! {
             retval: Option<&mut Option<cef::V8Value>>,
             _exception: Option<&mut CefStringUtf16>
         ) -> i32 {
-            // Expect 3 integer arguments: x, y, height
             if let Some(arguments) = arguments
                 && arguments.len() >= 3
-                && let Some(Some(x_arg)) = arguments.get(0)
+                && let Some(Some(x_arg)) = arguments.first()
                 && let Some(Some(y_arg)) = arguments.get(1)
                 && let Some(Some(height_arg)) = arguments.get(2)
             {
@@ -610,19 +608,16 @@ wrap_render_process_handler! {
                     && let Some(frame) = frame {
                         let frame_arc = Arc::new(Mutex::new(frame.clone()));
 
-                        // Register sendIpcMessage
                         let key: CefStringUtf16 = "sendIpcMessage".to_string().as_str().into();
                         let mut handler = OsrIpcHandlerBuilder::build(OsrIpcHandler::new(Some(frame_arc.clone())));
                         let mut func = v8_value_create_function(Some(&"sendIpcMessage".into()), Some(&mut handler)).unwrap();
                         global.set_value_bykey(Some(&key), Some(&mut func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
 
-                        // Register __sendImeCaretPosition(x, y, height)
                         let caret_key: CefStringUtf16 = "__sendImeCaretPosition".into();
                         let mut caret_handler = OsrImeCaretHandlerBuilder::build(OsrImeCaretHandler::new(Some(frame_arc)));
                         let mut caret_func = v8_value_create_function(Some(&"__sendImeCaretPosition".into()), Some(&mut caret_handler)).unwrap();
                         global.set_value_bykey(Some(&caret_key), Some(&mut caret_func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
 
-                        // Inject the __reportCaretBounds helper function with event listeners
                         let helper_script: CefStringUtf16 = include_str!("ime_helper.js").into();
                         frame.execute_java_script(Some(&helper_script), None, 0);
                     }
@@ -642,8 +637,6 @@ wrap_render_process_handler! {
 
                         if let Some(frame) = frame {
                             frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-
-                            // Activate IME tracking and report initial caret position
                             let report_script: CefStringUtf16 = "if(window.__activateImeTracking)window.__activateImeTracking();".into();
                             frame.execute_java_script(Some(&report_script), None, 0);
                         }
@@ -661,8 +654,6 @@ wrap_render_process_handler! {
 
                 if let Some(frame) = frame {
                     frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-
-                    // Deactivate IME tracking
                     let deactivate_script: CefStringUtf16 = "if(window.__deactivateImeTracking)window.__deactivateImeTracking();".into();
                     frame.execute_java_script(Some(&deactivate_script), None, 0);
                 }

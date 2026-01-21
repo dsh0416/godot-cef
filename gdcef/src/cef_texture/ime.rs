@@ -125,47 +125,36 @@ impl CefTexture {
     }
 
     pub(super) fn on_ime_proxy_focus_exited_impl(&mut self) {
-        // If we're in the middle of re-grabbing focus, ignore this event to prevent recursion
         if self.ime_focus_regrab_pending {
             return;
         }
 
-        // The focus system is in a transitional state when focus_exited fires.
-        // gui_get_focus_owner() returns None because the new focus hasn't been set yet.
-        // We defer the check to the next frame when the focus system has settled.
+        // Defer the check to the next frame when the focus system has settled
         self.base_mut()
             .call_deferred("_check_ime_focus_after_exit", &[]);
     }
 
-    /// Called deferred after focus_exited to check if we should keep IME active.
-    /// This runs in the next frame when the focus system has settled.
     pub(super) fn check_ime_focus_after_exit_impl(&mut self) {
-        // If IME was already deactivated by something else, don't do anything
         if !self.ime_active {
             return;
         }
 
-        // Check if focus went to the parent CefTexture (e.g., user clicked to reposition cursor)
-        if let Some(viewport) = self.base().get_viewport() {
-            if let Some(focused) = viewport.gui_get_focus_owner() {
-                let self_control = self.base().clone().upcast::<Control>();
+        if let Some(viewport) = self.base().get_viewport()
+            && let Some(focused) = viewport.gui_get_focus_owner()
+        {
+            let self_control = self.base().clone().upcast::<Control>();
 
-                // If focus went to this CefTexture, re-grab focus on the proxy to keep IME active
-                if focused == self_control {
-                    // Set the guard flag before grabbing focus
-                    self.ime_focus_regrab_pending = true;
-                    // Release focus from CefTexture first to avoid notification issues
-                    self.base_mut().release_focus();
-                    if let Some(proxy) = self.ime_proxy.as_mut() {
-                        proxy.grab_focus();
-                    }
-                    self.ime_focus_regrab_pending = false;
-                    return;
+            if focused == self_control {
+                self.ime_focus_regrab_pending = true;
+                self.base_mut().release_focus();
+                if let Some(proxy) = self.ime_proxy.as_mut() {
+                    proxy.grab_focus();
                 }
+                self.ime_focus_regrab_pending = false;
+                return;
             }
         }
 
-        // Focus went somewhere else, deactivate IME
         self.deactivate_ime();
     }
 
