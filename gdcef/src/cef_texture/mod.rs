@@ -462,6 +462,10 @@ impl CefTexture {
             0,
         );
 
+        #[cfg(target_os = "windows")]
+        let ops =
+            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops));
+        #[cfg(not(target_os = "windows"))]
         let ops =
             cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops as u32));
 
@@ -487,6 +491,10 @@ impl CefTexture {
             0,
         );
 
+        #[cfg(target_os = "windows")]
+        let ops =
+            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops));
+        #[cfg(not(target_os = "windows"))]
         let ops =
             cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops as u32));
 
@@ -537,6 +545,10 @@ impl CefTexture {
             return;
         };
 
+        #[cfg(target_os = "windows")]
+        let op =
+            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(operation));
+        #[cfg(not(target_os = "windows"))]
         let op =
             cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(operation as u32));
 
