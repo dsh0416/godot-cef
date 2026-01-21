@@ -217,9 +217,9 @@ wrap_render_handler! {
                 let drag_info = extract_drag_data_info(drag_data);
                 if let Ok(mut queue) = self.drag_event_queue.lock() {
                     #[cfg(target_os = "windows")]
-                    let allowed_ops: u32 = allowed_ops.as_ref().0;
-                    #[cfg(not(target_os = "windows"))]
                     let allowed_ops: u32 = allowed_ops.as_ref().0 as u32;
+                    #[cfg(not(target_os = "windows"))]
+                    let allowed_ops: u32 = allowed_ops.as_ref().0;
 
                     queue.push_back(DragEvent::Started {
                         drag_data: drag_info,
@@ -239,9 +239,9 @@ wrap_render_handler! {
         ) {
             if let Ok(mut queue) = self.drag_event_queue.lock() {
                 #[cfg(target_os = "windows")]
-                let operation: u32 = operation.as_ref().0;
-                #[cfg(not(target_os = "windows"))]
                 let operation: u32 = operation.as_ref().0 as u32;
+                #[cfg(not(target_os = "windows"))]
+                let operation: u32 = operation.as_ref().0;
 
                 queue.push_back(DragEvent::UpdateCursor { operation });
             }
@@ -370,9 +370,9 @@ wrap_render_handler! {
                 let drag_info = extract_drag_data_info(drag_data);
                 if let Ok(mut queue) = self.drag_event_queue.lock() {
                     #[cfg(target_os = "windows")]
-                    let allowed_ops: u32 = allowed_ops.as_ref().0;
-                    #[cfg(not(target_os = "windows"))]
                     let allowed_ops: u32 = allowed_ops.as_ref().0 as u32;
+                    #[cfg(not(target_os = "windows"))]
+                    let allowed_ops: u32 = allowed_ops.as_ref().0;
 
                     queue.push_back(DragEvent::Started {
                         drag_data: drag_info,
@@ -392,9 +392,9 @@ wrap_render_handler! {
         ) {
             if let Ok(mut queue) = self.drag_event_queue.lock() {
                 #[cfg(target_os = "windows")]
-                let operation: u32 = operation.as_ref().0;
-                #[cfg(not(target_os = "windows"))]
                 let operation: u32 = operation.as_ref().0 as u32;
+                #[cfg(not(target_os = "windows"))]
+                let operation: u32 = operation.as_ref().0;
 
                 queue.push_back(DragEvent::UpdateCursor { operation });
             }
@@ -522,9 +522,9 @@ wrap_drag_handler! {
                 let drag_info = extract_drag_data_info(drag_data);
                 if let Ok(mut queue) = self.drag_event_queue.lock() {
                     #[cfg(target_os = "windows")]
-                    let mask: u32 = mask.as_ref().0;
-                    #[cfg(not(target_os = "windows"))]
                     let mask: u32 = mask.as_ref().0 as u32;
+                    #[cfg(not(target_os = "windows"))]
+                    let mask: u32 = mask.as_ref().0;
 
                     queue.push_back(DragEvent::Entered {
                         drag_data: drag_info,
@@ -622,8 +622,6 @@ wrap_display_handler! {
         ) -> ::std::os::raw::c_int {
             let message_str = message.map(|m| m.to_string()).unwrap_or_default();
             let source_str = source.map(|s| s.to_string()).unwrap_or_default();
-            // level.get_raw() returns a u32 on macOS and Linux,
-            // but a i32 on Windows.
             #[cfg(target_os = "windows")]
             let level: u32 = level.get_raw() as u32;
             #[cfg(not(target_os = "windows"))]
