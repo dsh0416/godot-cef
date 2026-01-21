@@ -85,8 +85,13 @@ pub enum DragEvent {
         y: i32,
         allowed_ops: u32,
     },
-    UpdateCursor { operation: u32 },
-    Entered { drag_data: DragDataInfo, mask: u32 },
+    UpdateCursor {
+        operation: u32,
+    },
+    Entered {
+        drag_data: DragDataInfo,
+        mask: u32,
+    },
 }
 
 pub type DragEventQueue = Arc<Mutex<VecDeque<DragEvent>>>;
