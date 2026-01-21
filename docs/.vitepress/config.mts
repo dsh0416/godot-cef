@@ -22,6 +22,7 @@ export default defineConfig({
             { text: 'Methods', link: '/api/methods' },
             { text: 'Signals', link: '/api/signals' },
             { text: 'IME Support', link: '/api/ime-support' },
+            { text: 'Drag and Drop', link: '/api/drag-and-drop' },
             { text: 'Vulkan Support', link: '/api/vulkan-support' },
             { text: 'GPU Device Pinning', link: '/api/gpu-device-pinning' }
           ]

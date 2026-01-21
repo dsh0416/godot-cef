@@ -120,6 +120,66 @@ func _on_console_message(level: int, message: String, source: String, line: int)
         push_error("JS Error: %s at %s:%d" % [message, source, line])
 ```
 
+## `drag_started(drag_data: DragDataInfo, position: Vector2, allowed_ops: int)`
+
+Emitted when the user starts dragging content from the web page (e.g., an image, link, or selected text). Use this to handle browser-initiated drags in your game.
+
+**Parameters:**
+- `drag_data`: A `DragDataInfo` object containing information about what's being dragged
+- `position`: The starting position of the drag in local coordinates
+- `allowed_ops`: Bitmask of allowed drag operations (see `DragOperation` constants)
+
+```gdscript
+func _ready():
+    cef_texture.drag_started.connect(_on_drag_started)
+
+func _on_drag_started(drag_data: DragDataInfo, position: Vector2, allowed_ops: int):
+    if drag_data.is_link:
+        print("Dragging link: ", drag_data.link_url)
+        # Start custom drag handling in your game
+    elif drag_data.is_fragment:
+        print("Dragging text: ", drag_data.fragment_text)
+```
+
+## `drag_cursor_updated(operation: int)`
+
+Emitted when the drag cursor should change based on the current drop target. Use this to update visual feedback during drag operations.
+
+**Parameters:**
+- `operation`: The drag operation that would occur if dropped (see `DragOperation` constants)
+
+```gdscript
+func _ready():
+    cef_texture.drag_cursor_updated.connect(_on_drag_cursor_updated)
+
+func _on_drag_cursor_updated(operation: int):
+    match operation:
+        DragOperation.COPY:
+            Input.set_default_cursor_shape(Input.CURSOR_DRAG)
+        DragOperation.NONE:
+            Input.set_default_cursor_shape(Input.CURSOR_FORBIDDEN)
+```
+
+## `drag_entered(drag_data: DragDataInfo, mask: int)`
+
+Emitted when a drag operation enters the CefTexture from an external source.
+
+**Parameters:**
+- `drag_data`: A `DragDataInfo` object containing information about what's being dragged
+- `mask`: Bitmask of allowed operations
+
+```gdscript
+func _ready():
+    cef_texture.drag_entered.connect(_on_drag_entered)
+
+func _on_drag_entered(drag_data: DragDataInfo, mask: int):
+    print("Drag entered browser area")
+```
+
+::: tip
+For comprehensive drag-and-drop documentation including methods for handling Godot → CEF drags, see the [Drag and Drop](./drag-and-drop.md) page.
+:::
+
 ## Signal Usage Patterns
 
 ### Loading State Management

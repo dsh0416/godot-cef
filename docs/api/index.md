@@ -25,6 +25,7 @@ The `CefTexture` node extends `TextureRect` and provides a Chromium-based web br
 - **Bidirectional communication** between Godot and JavaScript
 - **Input handling** including mouse, keyboard, and IME support
 - **Navigation controls** and browser state management
+- **Drag-and-drop** between Godot and web content
 
 ## Limitations
 
@@ -50,6 +51,7 @@ These parameters are passed as command-line switches to the CEF subprocess durin
 - [**Methods**](./methods.md) - Available methods for controlling the browser
 - [**Signals**](./signals.md) - Events emitted by the CefTexture node
 - [**IME Support**](./ime-support.md) - Input Method Editor integration
+- [**Drag and Drop**](./drag-and-drop.md) - Bidirectional drag-and-drop support
 
 ## Basic Usage Example
 
