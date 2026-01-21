@@ -62,9 +62,15 @@
                 const x = Math.round(rect.x || rect.left || 0);
                 const y = Math.round(rect.y || rect.top || 0);
                 const height = Math.round(rect.height || 20);
-                window.__sendImeCaretPosition(x, y, height);
+                if (typeof window.__sendImeCaretPosition === 'function') {
+                    window.__sendImeCaretPosition(x, y, height);
+                }
             }
-        } catch (e) {}
+        } catch (e) {
+            if (typeof console !== 'undefined' && typeof console.error === 'function') {
+                console.error('IME helper: error while reporting caret bounds:', e);
+            }
+        }
     };
 
     window.__activateImeTracking = function() {

@@ -555,24 +555,32 @@ wrap_v8_handler! {
                 let height = height_arg.int_value();
 
                 if let Some(frame) = self.handler.frame.as_ref() {
-                    let frame = frame.lock().unwrap();
+                    match frame.lock() {
+                        Ok(frame) => {
+                            let route = CefStringUtf16::from("imeCaretPosition");
+                            let process_message = process_message_create(Some(&route));
+                            if let Some(mut process_message) = process_message {
+                                if let Some(argument_list) = process_message.argument_list() {
+                                    argument_list.set_int(0, x);
+                                    argument_list.set_int(1, y);
+                                    argument_list.set_int(2, height);
+                                }
 
-                    let route = CefStringUtf16::from("imeCaretPosition");
-                    let process_message = process_message_create(Some(&route));
-                    if let Some(mut process_message) = process_message {
-                        if let Some(argument_list) = process_message.argument_list() {
-                            argument_list.set_int(0, x);
-                            argument_list.set_int(1, y);
-                            argument_list.set_int(2, height);
+                                frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+
+                                if let Some(retval) = retval {
+                                    *retval = v8_value_create_bool(true as _);
+                                }
+
+                                return 1;
+                            }
                         }
-
-                        frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-
-                        if let Some(retval) = retval {
-                            *retval = v8_value_create_bool(true as _);
+                        Err(_) => {
+                            if let Some(retval) = retval {
+                                *retval = v8_value_create_bool(false as _);
+                            }
+                            return 0;
                         }
-
-                        return 1;
                     }
                 }
             }
