@@ -140,22 +140,26 @@ impl AcceleratedRenderHandler {
             // Handle POPUP type - import to separate popup texture
             let src_width = info.extra.coded_size.width as u32;
             let src_height = info.extra.coded_size.height as u32;
-            
-            let Some(render_state_arc) = &self.render_state else { return };
-            let Ok(mut state) = render_state_arc.lock() else { return };
-            
+
+            let Some(render_state_arc) = &self.render_state else {
+                return;
+            };
+            let Ok(mut state) = render_state_arc.lock() else {
+                return;
+            };
+
             // Check if we have a popup texture of the correct size
             let need_new_texture = match state.popup_rd_rid {
                 None => true,
                 Some(_) => state.popup_width != src_width || state.popup_height != src_height,
             };
-            
+
             if need_new_texture {
                 // Defer texture creation to main thread, skip this frame
                 state.needs_popup_texture = Some((src_width, src_height));
                 return;
             }
-            
+
             // Import popup texture
             if let Some(popup_rid) = state.popup_rd_rid {
                 match state.importer.import_and_copy(info, popup_rid) {
@@ -164,13 +168,16 @@ impl AcceleratedRenderHandler {
                         state.popup_has_content = true;
                     }
                     Err(e) => {
-                        godot::global::godot_error!("[AcceleratedOSR] Failed to import popup texture: {}", e);
+                        godot::global::godot_error!(
+                            "[AcceleratedOSR] Failed to import popup texture: {}",
+                            e
+                        );
                     }
                 }
             }
             return;
         }
-        
+
         if type_ != PaintElementType::VIEW {
             return; // Unknown type
         }

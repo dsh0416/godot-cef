@@ -173,11 +173,10 @@ wrap_render_handler! {
                 if let Ok(mut frame_buffer) = self.handler.frame_buffer.lock() {
                     frame_buffer.update(rgba_data, width, height);
                 }
-            } else if type_ == PaintElementType::POPUP {
-                if let Ok(mut popup_state) = self.handler.popup_state.lock() {
+            } else if type_ == PaintElementType::POPUP
+                && let Ok(mut popup_state) = self.handler.popup_state.lock() {
                     popup_state.update_buffer(rgba_data, width, height);
                 }
-            }
         }
 
         fn on_ime_composition_range_changed(

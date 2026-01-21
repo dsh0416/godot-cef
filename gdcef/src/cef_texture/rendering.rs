@@ -10,28 +10,36 @@ use crate::browser::RenderMode;
 use crate::utils::get_display_scale_factor;
 use crate::{cursor, render};
 
-/// Composite a popup buffer onto the main buffer at the specified position.
-/// Both buffers are RGBA format.
-fn composite_popup(
-    dst: &mut [u8],
-    dst_width: u32,
-    dst_height: u32,
-    src: &[u8],
-    src_width: u32,
-    src_height: u32,
+/// Destination buffer for compositing
+struct DestBuffer<'a> {
+    data: &'a mut [u8],
+    width: u32,
+    height: u32,
+}
+
+/// Popup buffer with position information for compositing
+struct PopupBuffer<'a> {
+    data: &'a [u8],
+    width: u32,
+    height: u32,
     x: i32,
     y: i32,
-) {
+}
+
+/// Composite a popup buffer onto the main buffer at the specified position.
+/// Both buffers are RGBA format.
+fn composite_popup(dst: &mut DestBuffer, popup: &PopupBuffer) {
     // Clamp popup position to valid range
-    let start_x = x.max(0) as u32;
-    let start_y = y.max(0) as u32;
+    let start_x = popup.x.max(0) as u32;
+    let start_y = popup.y.max(0) as u32;
 
     // Calculate how much of the popup is visible
-    let skip_x = if x < 0 { (-x) as u32 } else { 0 };
-    let skip_y = if y < 0 { (-y) as u32 } else { 0 };
+    let skip_x = if popup.x < 0 { (-popup.x) as u32 } else { 0 };
+    let skip_y = if popup.y < 0 { (-popup.y) as u32 } else { 0 };
 
-    let visible_width = (src_width.saturating_sub(skip_x)).min(dst_width.saturating_sub(start_x));
-    let visible_height = (src_height.saturating_sub(skip_y)).min(dst_height.saturating_sub(start_y));
+    let visible_width = (popup.width.saturating_sub(skip_x)).min(dst.width.saturating_sub(start_x));
+    let visible_height =
+        (popup.height.saturating_sub(skip_y)).min(dst.height.saturating_sub(start_y));
 
     if visible_width == 0 || visible_height == 0 {
         return;
@@ -42,14 +50,16 @@ fn composite_popup(
         let src_row = skip_y + row;
         let dst_row = start_y + row;
 
-        let src_row_start = ((src_row * src_width + skip_x) * 4) as usize;
-        let dst_row_start = ((dst_row * dst_width + start_x) * 4) as usize;
+        let src_row_start = ((src_row * popup.width + skip_x) * 4) as usize;
+        let dst_row_start = ((dst_row * dst.width + start_x) * 4) as usize;
 
         let copy_bytes = (visible_width * 4) as usize;
 
-        if src_row_start + copy_bytes <= src.len() && dst_row_start + copy_bytes <= dst.len() {
-            dst[dst_row_start..dst_row_start + copy_bytes]
-                .copy_from_slice(&src[src_row_start..src_row_start + copy_bytes]);
+        if src_row_start + copy_bytes <= popup.data.len()
+            && dst_row_start + copy_bytes <= dst.data.len()
+        {
+            dst.data[dst_row_start..dst_row_start + copy_bytes]
+                .copy_from_slice(&popup.data[src_row_start..src_row_start + copy_bytes]);
         }
     }
 }
@@ -152,7 +162,9 @@ impl CefTexture {
             });
 
             let popup_visible = popup_info.is_some();
-            let popup_dirty = popup_info.as_ref().is_some_and(|(_, _, _, _, _, dirty)| *dirty);
+            let popup_dirty = popup_info
+                .as_ref()
+                .is_some_and(|(_, _, _, _, _, dirty)| *dirty);
 
             // We need to update the texture if:
             // - The main frame buffer changed (fb.dirty)
@@ -174,33 +186,40 @@ impl CefTexture {
             let display_scale = get_display_scale_factor();
 
             // Composite popup onto main buffer if visible
-            let final_data = if let Some((popup_buffer, popup_width, popup_height, popup_x, popup_y, _)) = popup_info {
-                let mut composited = fb.data.clone();
-                let scaled_x = (popup_x as f32 * display_scale) as i32;
-                let scaled_y = (popup_y as f32 * display_scale) as i32;
-                composite_popup(
-                    &mut composited,
-                    fb.width,
-                    fb.height,
-                    &popup_buffer,
-                    popup_width,
-                    popup_height,
-                    scaled_x,
-                    scaled_y,
-                );
-                // Mark popup as clean (we've consumed its dirty state)
-                if let Some(ps) = &self.app.popup_state {
-                    if let Ok(mut popup) = ps.lock() {
+            let final_data =
+                if let Some((popup_buffer, popup_width, popup_height, popup_x, popup_y, _)) =
+                    popup_info
+                {
+                    let mut composited = fb.data.clone();
+                    let scaled_x = (popup_x as f32 * display_scale) as i32;
+                    let scaled_y = (popup_y as f32 * display_scale) as i32;
+                    composite_popup(
+                        &mut DestBuffer {
+                            data: &mut composited,
+                            width: fb.width,
+                            height: fb.height,
+                        },
+                        &PopupBuffer {
+                            data: &popup_buffer,
+                            width: popup_width,
+                            height: popup_height,
+                            x: scaled_x,
+                            y: scaled_y,
+                        },
+                    );
+                    // Mark popup as clean (we've consumed its dirty state)
+                    if let Some(ps) = &self.app.popup_state
+                        && let Ok(mut popup) = ps.lock()
+                    {
                         popup.mark_clean();
                     }
-                }
-                composited
-            } else if popup_visible {
-                // Popup is visible but we couldn't get its data - shouldn't happen
-                fb.data.clone()
-            } else {
-                fb.data.clone()
-            };
+                    composited
+                } else if popup_visible {
+                    // Popup is visible but we couldn't get its data - shouldn't happen
+                    fb.data.clone()
+                } else {
+                    fb.data.clone()
+                };
 
             let byte_array = PackedByteArray::from(final_data.as_slice());
 
@@ -254,28 +273,31 @@ impl CefTexture {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode {
             // Check if we need to create a popup texture
-            if let Ok(mut state) = render_state.lock() {
-                if let Some((new_w, new_h)) = state.needs_popup_texture.take() {
-                    // Free old popup texture if it exists
-                    if let Some(old_rid) = state.popup_rd_rid {
-                        render::free_rd_texture(old_rid);
+            if let Ok(mut state) = render_state.lock()
+                && let Some((new_w, new_h)) = state.needs_popup_texture.take()
+            {
+                // Free old popup texture if it exists
+                if let Some(old_rid) = state.popup_rd_rid {
+                    render::free_rd_texture(old_rid);
+                }
+
+                // Create new popup RD texture
+                match render::create_rd_texture(new_w as i32, new_h as i32) {
+                    Ok((new_rid, new_texture_2d_rd)) => {
+                        state.popup_rd_rid = Some(new_rid);
+                        state.popup_width = new_w;
+                        state.popup_height = new_h;
+                        self.popup_texture_2d_rd = Some(new_texture_2d_rd);
                     }
-                    
-                    // Create new popup RD texture
-                    match render::create_rd_texture(new_w as i32, new_h as i32) {
-                        Ok((new_rid, new_texture_2d_rd)) => {
-                            state.popup_rd_rid = Some(new_rid);
-                            state.popup_width = new_w;
-                            state.popup_height = new_h;
-                            self.popup_texture_2d_rd = Some(new_texture_2d_rd);
-                        }
-                        Err(e) => {
-                            godot::global::godot_error!("[CefTexture] Failed to create popup texture: {}", e);
-                        }
+                    Err(e) => {
+                        godot::global::godot_error!(
+                            "[CefTexture] Failed to create popup texture: {}",
+                            e
+                        );
                     }
                 }
             }
-            
+
             self.update_popup_overlay();
         }
     }
@@ -289,18 +311,30 @@ impl CefTexture {
         let popup_visible_info = self.app.popup_state.as_ref().and_then(|ps| {
             ps.lock().ok().and_then(|popup| {
                 if popup.visible {
-                    Some((popup.rect.x, popup.rect.y, popup.rect.width, popup.rect.height))
+                    Some((
+                        popup.rect.x,
+                        popup.rect.y,
+                        popup.rect.width,
+                        popup.rect.height,
+                    ))
                 } else {
                     None
                 }
             })
         });
-        
+
         // Get accelerated render state info (popup_dirty, popup_has_content, dimensions)
-        let accel_popup_info = if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode {
+        let accel_popup_info = if let Some(RenderMode::Accelerated { render_state, .. }) =
+            &self.app.render_mode
+        {
             render_state.lock().ok().and_then(|state| {
                 if state.popup_rd_rid.is_some() && state.popup_width > 0 && state.popup_height > 0 {
-                    Some((state.popup_dirty, state.popup_has_content, state.popup_width, state.popup_height))
+                    Some((
+                        state.popup_dirty,
+                        state.popup_has_content,
+                        state.popup_width,
+                        state.popup_height,
+                    ))
                 } else {
                     None
                 }
@@ -310,7 +344,10 @@ impl CefTexture {
         };
 
         match (popup_visible_info, accel_popup_info) {
-            (Some((x, y, _rect_w, _rect_h)), Some((popup_dirty, popup_has_content, tex_width, tex_height))) => {
+            (
+                Some((x, y, _rect_w, _rect_h)),
+                Some((popup_dirty, popup_has_content, tex_width, tex_height)),
+            ) => {
                 // Create overlay TextureRect if it doesn't exist
                 if self.popup_overlay.is_none() {
                     let mut overlay = TextureRect::new_alloc();
@@ -324,18 +361,21 @@ impl CefTexture {
                 // Get CefTexture size and render size for coordinate mapping
                 let display_scale = get_display_scale_factor();
                 let cef_texture_size = self.base().get_size();
-                
+
                 // Get the render size that was passed to CEF
-                let render_size = self.app.render_size.as_ref().map(|s| {
-                    s.lock().ok().map(|sz| (sz.width, sz.height))
-                }).flatten().unwrap_or((0.0, 0.0));
+                let render_size = self
+                    .app
+                    .render_size
+                    .as_ref()
+                    .and_then(|s| s.lock().ok().map(|sz| (sz.width, sz.height)))
+                    .unwrap_or((0.0, 0.0));
 
                 // Set the Texture2DRD on the overlay (GPU texture)
                 if let Some(overlay) = &mut self.popup_overlay {
                     if let Some(texture_2d_rd) = &self.popup_texture_2d_rd {
                         overlay.set_texture(texture_2d_rd);
                     }
-                    
+
                     // CEF's view_rect reports (render_size / display_scale) to CEF as the DIP size.
                     // Popup coordinates are in that DIP space. To map to CefTexture's coordinate
                     // space, we need to scale by: cef_texture_size / DIP_size
@@ -351,7 +391,7 @@ impl CefTexture {
                     } else {
                         display_scale
                     };
-                    
+
                     let local_x = x as f32 * scale_x;
                     let local_y = y as f32 * scale_y;
                     // Texture size needs similar scaling
@@ -366,12 +406,12 @@ impl CefTexture {
                 }
 
                 // Mark popup as clean in accelerated render state
-                if popup_dirty {
-                    if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode {
-                        if let Ok(mut state) = render_state.lock() {
-                            state.popup_dirty = false;
-                        }
-                    }
+                if popup_dirty
+                    && let Some(RenderMode::Accelerated { render_state, .. }) =
+                        &self.app.render_mode
+                    && let Ok(mut state) = render_state.lock()
+                {
+                    state.popup_dirty = false;
                 }
             }
             _ => {
@@ -380,10 +420,10 @@ impl CefTexture {
                     overlay.set_visible(false);
                 }
                 // Reset popup_has_content so next popup won't show stale content
-                if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode {
-                    if let Ok(mut state) = render_state.lock() {
-                        state.popup_has_content = false;
-                    }
+                if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode
+                    && let Ok(mut state) = render_state.lock()
+                {
+                    state.popup_has_content = false;
                 }
             }
         }
