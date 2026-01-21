@@ -67,14 +67,12 @@ jobs:
           mkdir -p artifacts/universal-apple-darwin
           cp -R "target/release/Godot CEF.app" "artifacts/universal-apple-darwin/"
           cp -R "target/release/Godot CEF.framework" "artifacts/universal-apple-darwin/"
-          # Create tar.gz to preserve executable permissions
-          tar -czvf artifacts/universal-apple-darwin.tar.gz -C artifacts universal-apple-darwin
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: gdcef-universal-apple-darwin
-          path: artifacts/universal-apple-darwin.tar.gz
+          path: artifacts/universal-apple-darwin
           retention-days: 30
 
   build-windows:
@@ -215,14 +213,12 @@ jobs:
           cp target/release/v8_context_snapshot.bin artifacts/x86_64-unknown-linux-gnu/
           cp target/release/chrome-sandbox artifacts/x86_64-unknown-linux-gnu/
           cp -r target/release/locales artifacts/x86_64-unknown-linux-gnu/
-          # Create tar.gz to preserve executable permissions
-          tar -czvf artifacts/x86_64-unknown-linux-gnu.tar.gz -C artifacts x86_64-unknown-linux-gnu
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: gdcef-x86_64-unknown-linux-gnu
-          path: artifacts/x86_64-unknown-linux-gnu.tar.gz
+          path: artifacts/x86_64-unknown-linux-gnu
           retention-days: 30
 
   pack:
@@ -242,37 +238,19 @@ jobs:
         with:
           path: artifacts
 
-      - name: Extract tarred artifacts
-        run: |
-          # Extract macOS artifacts (preserves executable permissions)
-          tar -xzvf artifacts/gdcef-universal-apple-darwin/universal-apple-darwin.tar.gz -C artifacts/gdcef-universal-apple-darwin --strip-components=1
-          rm artifacts/gdcef-universal-apple-darwin/universal-apple-darwin.tar.gz
-          # Extract Linux artifacts (preserves executable permissions)
-          tar -xzvf artifacts/gdcef-x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu.tar.gz -C artifacts/gdcef-x86_64-unknown-linux-gnu --strip-components=1
-          rm artifacts/gdcef-x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu.tar.gz
-
       - name: Pack Godot addon
         run: |
           cargo xtask pack \
             --artifacts artifacts \
             --output godot_cef \
             --addon-src addons/godot_cef
-          # Create tar.gz to preserve executable permissions and xattr (for macOS)
-          tar -czvf godot_cef.tar.gz godot_cef
           # Create zip for Godot Asset Store
           zip -r godot_cef.zip godot_cef
 
-      - name: Upload packed addon (tar.gz)
+      - name: Upload packed addon
         uses: actions/upload-artifact@v4
         with:
-          name: godot_cef-addon-tar
-          path: godot_cef.tar.gz
-          retention-days: 30
-
-      - name: Upload packed addon (zip)
-        uses: actions/upload-artifact@v4
-        with:
-          name: godot_cef-addon-zip
+          name: godot_cef-addon
           path: godot_cef.zip
           retention-days: 30
 
@@ -286,22 +264,14 @@ jobs:
       contents: write
 
     steps:
-      - name: Download packed addon (tar.gz)
+      - name: Download packed addon
         uses: actions/download-artifact@v4
         with:
-          name: godot_cef-addon-tar
-          path: .
-
-      - name: Download packed addon (zip)
-        uses: actions/download-artifact@v4
-        with:
-          name: godot_cef-addon-zip
+          name: godot_cef-addon
           path: .
 
       - name: Rename addon with version
-        run: |
-          mv godot_cef.tar.gz godot_cef-${{ github.ref_name }}.tar.gz
-          mv godot_cef.zip godot_cef-${{ github.ref_name }}.zip
+        run: mv godot_cef.zip godot_cef-${{ github.ref_name }}.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -310,6 +280,4 @@ jobs:
           draft: true # release is draft until it is manually published
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
-          files: |
-            godot_cef-${{ github.ref_name }}.tar.gz
-            godot_cef-${{ github.ref_name }}.zip
+          files: godot_cef-${{ github.ref_name }}.zip
