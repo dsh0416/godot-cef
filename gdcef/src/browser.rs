@@ -3,7 +3,7 @@
 //! This module contains the core state types used by CefTexture for managing
 //! the browser instance and rendering mode.
 
-use cef_app::{CursorType, FrameBuffer, PhysicalSize};
+use cef_app::{CursorType, FrameBuffer, PhysicalSize, PopupState};
 use godot::classes::{ImageTexture, Texture2Drd};
 use godot::prelude::*;
 use std::collections::VecDeque;
@@ -88,6 +88,9 @@ pub enum RenderMode {
     },
 }
 
+/// Shared popup state for <select> dropdowns and other browser popups.
+pub type PopupStateQueue = Arc<Mutex<PopupState>>;
+
 /// CEF browser state and shared resources.
 ///
 /// Contains the browser handle and resources shared with CEF handlers via Arc<Mutex>.
@@ -104,6 +107,8 @@ pub struct App {
     pub device_scale_factor: Option<Arc<Mutex<f32>>>,
     /// Shared cursor type from CEF.
     pub cursor_type: Option<Arc<Mutex<CursorType>>>,
+    /// Shared popup state for <select> dropdowns.
+    pub popup_state: Option<PopupStateQueue>,
     /// Queue for IPC messages from the browser.
     pub message_queue: Option<MessageQueue>,
     /// Queue for URL change notifications from the browser.

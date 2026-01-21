@@ -128,10 +128,32 @@ wrap_render_handler! {
             compute_screen_point(view_x, view_y, screen_x, screen_y)
         }
 
+        fn on_popup_show(
+            &self,
+            _browser: Option<&mut Browser>,
+            show: ::std::os::raw::c_int,
+        ) {
+            if let Ok(mut popup_state) = self.handler.popup_state.lock() {
+                popup_state.set_visible(show != 0);
+            }
+        }
+
+        fn on_popup_size(
+            &self,
+            _browser: Option<&mut Browser>,
+            rect: Option<&Rect>,
+        ) {
+            if let Some(rect) = rect
+                && let Ok(mut popup_state) = self.handler.popup_state.lock()
+            {
+                popup_state.set_rect(rect.x, rect.y, rect.width, rect.height);
+            }
+        }
+
         fn on_paint(
             &self,
             _browser: Option<&mut Browser>,
-            _type_: PaintElementType,
+            type_: PaintElementType,
             _dirty_rects: Option<&[Rect]>,
             buffer: *const u8,
             width: ::std::os::raw::c_int,
@@ -147,8 +169,14 @@ wrap_render_handler! {
             let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
             let rgba_data = bgra_to_rgba(bgra_data);
 
-            if let Ok(mut frame_buffer) = self.handler.frame_buffer.lock() {
-                frame_buffer.update(rgba_data, width, height);
+            if type_ == PaintElementType::VIEW {
+                if let Ok(mut frame_buffer) = self.handler.frame_buffer.lock() {
+                    frame_buffer.update(rgba_data, width, height);
+                }
+            } else if type_ == PaintElementType::POPUP {
+                if let Ok(mut popup_state) = self.handler.popup_state.lock() {
+                    popup_state.update_buffer(rgba_data, width, height);
+                }
             }
         }
 
@@ -209,6 +237,28 @@ wrap_render_handler! {
             compute_screen_point(view_x, view_y, screen_x, screen_y)
         }
 
+        fn on_popup_show(
+            &self,
+            _browser: Option<&mut Browser>,
+            show: ::std::os::raw::c_int,
+        ) {
+            if let Ok(mut popup_state) = self.handler.popup_state.lock() {
+                popup_state.set_visible(show != 0);
+            }
+        }
+
+        fn on_popup_size(
+            &self,
+            _browser: Option<&mut Browser>,
+            rect: Option<&Rect>,
+        ) {
+            if let Some(rect) = rect
+                && let Ok(mut popup_state) = self.handler.popup_state.lock()
+            {
+                popup_state.set_rect(rect.x, rect.y, rect.width, rect.height);
+            }
+        }
+
         fn on_accelerated_paint(
             &self,
             _browser: Option<&mut Browser>,
@@ -222,12 +272,29 @@ wrap_render_handler! {
         fn on_paint(
             &self,
             _browser: Option<&mut Browser>,
-            _type_: PaintElementType,
+            type_: PaintElementType,
             _dirty_rects: Option<&[Rect]>,
-            _buffer: *const u8,
-            _width: ::std::os::raw::c_int,
-            _height: ::std::os::raw::c_int,
+            buffer: *const u8,
+            width: ::std::os::raw::c_int,
+            height: ::std::os::raw::c_int,
         ) {
+            // For accelerated rendering, on_paint is only called for popups
+            // (the main view uses on_accelerated_paint)
+            if type_ == PaintElementType::POPUP
+                && !buffer.is_null()
+                && width > 0
+                && height > 0
+            {
+                let width = width as u32;
+                let height = height as u32;
+                let buffer_size = (width * height * 4) as usize;
+                let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
+                let rgba_data = bgra_to_rgba(bgra_data);
+
+                if let Ok(mut popup_state) = self.handler.popup_state.lock() {
+                    popup_state.update_buffer(rgba_data, width, height);
+                }
+            }
         }
 
         fn on_ime_composition_range_changed(

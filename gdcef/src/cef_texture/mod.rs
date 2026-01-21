@@ -8,8 +8,8 @@ use cef_app::SecurityConfig;
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
-    ITextureRect, InputEvent, InputEventKey, InputEventMouseButton, InputEventMouseMotion,
-    InputEventPanGesture, LineEdit, TextureRect,
+    ITextureRect, ImageTexture, InputEvent, InputEventKey, InputEventMouseButton,
+    InputEventMouseMotion, InputEventPanGesture, LineEdit, TextureRect,
 };
 use godot::prelude::*;
 
@@ -52,6 +52,13 @@ pub struct CefTexture {
     // IME state
     ime_active: bool,
     ime_proxy: Option<Gd<LineEdit>>,
+
+    // Popup overlay for accelerated rendering (software rendering composites directly)
+    popup_overlay: Option<Gd<TextureRect>>,
+    popup_texture: Option<Gd<ImageTexture>>,
+    // GPU texture for accelerated popup rendering
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    popup_texture_2d_rd: Option<Gd<godot::classes::Texture2Drd>>,
 }
 
 #[godot_api]
@@ -72,6 +79,10 @@ impl ITextureRect for CefTexture {
             last_max_fps: 0,
             ime_active: false,
             ime_proxy: None,
+            popup_overlay: None,
+            popup_texture: None,
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            popup_texture_2d_rd: None,
         }
     }
 

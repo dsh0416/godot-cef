@@ -11,7 +11,7 @@ use crate::accelerated_osr::{
 };
 use crate::browser::{
     ConsoleMessageQueue, ImeCompositionQueue, ImeEnableQueue, LoadingStateQueue, MessageQueue,
-    RenderMode, TitleChangeQueue, UrlChangeQueue,
+    PopupStateQueue, RenderMode, TitleChangeQueue, UrlChangeQueue,
 };
 use crate::error::CefError;
 use crate::{render, res_protocol, webrender};
@@ -51,6 +51,7 @@ impl CefTexture {
         self.app.render_size = None;
         self.app.device_scale_factor = None;
         self.app.cursor_type = None;
+        self.app.popup_state = None;
         self.app.message_queue = None;
         self.app.url_change_queue = None;
         self.app.title_change_queue = None;
@@ -61,6 +62,12 @@ impl CefTexture {
 
         self.ime_active = false;
         self.ime_proxy = None;
+
+        // Cleanup popup overlay
+        if let Some(mut overlay) = self.popup_overlay.take() {
+            overlay.queue_free();
+        }
+        self.popup_texture = None;
 
         crate::cef_init::cef_release();
     }
@@ -170,6 +177,7 @@ impl CefTexture {
         let render_size = render_handler.get_size();
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
+        let popup_state: PopupStateQueue = render_handler.get_popup_state();
         let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
         let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
         let title_change_queue: TitleChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
@@ -215,6 +223,7 @@ impl CefTexture {
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
+        self.app.popup_state = Some(popup_state);
         self.app.message_queue = Some(message_queue);
         self.app.url_change_queue = Some(url_change_queue);
         self.app.title_change_queue = Some(title_change_queue);
@@ -274,6 +283,7 @@ impl CefTexture {
         let render_size = render_handler.get_size();
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
+        let popup_state: PopupStateQueue = render_handler.get_popup_state();
         let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
         let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
         let title_change_queue: TitleChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
@@ -324,6 +334,7 @@ impl CefTexture {
         self.app.render_size = Some(render_size);
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
+        self.app.popup_state = Some(popup_state);
         self.app.message_queue = Some(message_queue);
         self.app.url_change_queue = Some(url_change_queue);
         self.app.title_change_queue = Some(title_change_queue);

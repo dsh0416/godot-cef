@@ -79,6 +79,12 @@ pub struct AcceleratedRenderState {
     pub dst_width: u32,
     pub dst_height: u32,
     pub needs_resize: Option<(u32, u32)>,
+    // Popup texture state
+    pub popup_rd_rid: Option<Rid>,
+    pub popup_width: u32,
+    pub popup_height: u32,
+    pub popup_dirty: bool,
+    pub needs_popup_texture: Option<(u32, u32)>, // Deferred popup texture creation
 }
 
 impl AcceleratedRenderState {
@@ -89,6 +95,11 @@ impl AcceleratedRenderState {
             dst_width: width,
             dst_height: height,
             needs_resize: None,
+            popup_rd_rid: None,
+            popup_width: 0,
+            popup_height: 0,
+            popup_dirty: false,
+            needs_popup_texture: None,
         }
     }
 }
@@ -98,6 +109,7 @@ pub struct AcceleratedRenderHandler {
     pub device_scale_factor: Arc<Mutex<f32>>,
     pub size: Arc<Mutex<cef_app::PhysicalSize<f32>>>,
     pub cursor_type: Arc<Mutex<cef_app::CursorType>>,
+    pub popup_state: Arc<Mutex<cef_app::PopupState>>,
     render_state: Option<Arc<Mutex<AcceleratedRenderState>>>,
 }
 
@@ -107,6 +119,7 @@ impl AcceleratedRenderHandler {
             device_scale_factor: Arc::new(Mutex::new(device_scale_factor)),
             size: Arc::new(Mutex::new(size)),
             cursor_type: Arc::new(Mutex::new(cef_app::CursorType::default())),
+            popup_state: Arc::new(Mutex::new(cef_app::PopupState::new())),
             render_state: None,
         }
     }
@@ -121,8 +134,42 @@ impl AcceleratedRenderHandler {
         info: Option<&AcceleratedPaintInfo>,
     ) {
         let Some(info) = info else { return };
-        if type_ != PaintElementType::default() {
+        if type_ == PaintElementType::POPUP {
+            // Handle POPUP type - import to separate popup texture
+            let src_width = info.extra.coded_size.width as u32;
+            let src_height = info.extra.coded_size.height as u32;
+            
+            let Some(render_state_arc) = &self.render_state else { return };
+            let Ok(mut state) = render_state_arc.lock() else { return };
+            
+            // Check if we have a popup texture of the correct size
+            let need_new_texture = match state.popup_rd_rid {
+                None => true,
+                Some(_) => state.popup_width != src_width || state.popup_height != src_height,
+            };
+            
+            if need_new_texture {
+                // Defer texture creation to main thread, skip this frame
+                state.needs_popup_texture = Some((src_width, src_height));
+                return;
+            }
+            
+            // Import popup texture
+            if let Some(popup_rid) = state.popup_rd_rid {
+                match state.importer.import_and_copy(info, popup_rid) {
+                    Ok(_) => {
+                        state.popup_dirty = true;
+                    }
+                    Err(e) => {
+                        godot::global::godot_error!("[AcceleratedOSR] Failed to import popup texture: {}", e);
+                    }
+                }
+            }
             return;
+        }
+        
+        if type_ != PaintElementType::VIEW {
+            return; // Unknown type
         }
 
         let src_width = info.extra.coded_size.width as u32;
@@ -172,6 +219,10 @@ impl AcceleratedRenderHandler {
 
     pub fn get_cursor_type(&self) -> Arc<Mutex<cef_app::CursorType>> {
         self.cursor_type.clone()
+    }
+
+    pub fn get_popup_state(&self) -> Arc<Mutex<cef_app::PopupState>> {
+        self.popup_state.clone()
     }
 }
 
