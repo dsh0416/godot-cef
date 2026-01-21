@@ -10,7 +10,7 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 [![GitHub Issues](https://img.shields.io/github/issues/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/issues)
 [![GitHub Pull Requests](https://img.shields.io/github/issues-pr/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/pulls)
 
-## ✨ Features
+## Features
 
 - **Web Rendering in Godot** — Display any web content as a texture using the `CefTexture` node (extends `TextureRect`)
 - **Accelerated Off-Screen Rendering** — GPU-accelerated rendering using platform-native graphics APIs for maximum performance
@@ -93,7 +93,7 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 
 </details>
 
-## 🛠️ Building from Source
+## Building from Source
 
 For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
@@ -117,7 +117,7 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 
 See the `addons/godot_cef/godot_cef.gdextension` file for the complete list of required files per platform.
 
-## ⚖️ Comparison with Similar Projects
+## Comparison with Similar Projects
 
 | Feature | **Godot CEF** (this project) | [godot_wry](https://github.com/doceazedo/godot_wry) | [gdcef](https://github.com/Lecrapouille/gdcef) |
 |---------|------------------------------|-----------------------------------------------------|------------------------------------------------|
