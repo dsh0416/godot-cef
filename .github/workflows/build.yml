@@ -240,14 +240,13 @@ jobs:
 
       - name: Pack Godot addon
         run: |
-          # Create addons folder structure for Godot Asset Store
-          mkdir -p addons
+          # Use staging directory to avoid deleting source addon files
           cargo xtask pack \
             --artifacts artifacts \
-            --output addons/godot_cef \
+            --output dist/addons/godot_cef \
             --addon-src addons/godot_cef
           # Create zip for Godot Asset Store (contains addons/godot_cef/)
-          zip -r godot_cef.zip addons
+          cd dist && zip -r ../godot_cef.zip addons
 
       - name: Upload packed addon
         uses: actions/upload-artifact@v4
