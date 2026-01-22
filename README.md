@@ -181,3 +181,7 @@ See [LICENSE](LICENSE) for details.
 - [CEF (Chromium Embedded Framework)](https://bitbucket.org/chromiumembedded/cef)
 - [godot-rust](https://github.com/godot-rust/gdext)
 - [cef-rs](https://github.com/tauri-apps/cef-rs)
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=dsh0416/godot-cef&type=timeline&legend=top-left)](https://www.star-history.com/#dsh0416/godot-cef&type=timeline&legend=top-left)
