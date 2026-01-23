@@ -12,15 +12,12 @@ type PfnVkGetMemoryWin32HandlePropertiesKHR = unsafe extern "system" fn(
     p_memory_win32_handle_properties: *mut vk::MemoryWin32HandlePropertiesKHR<'_>,
 ) -> vk::Result;
 
-const FRAME_BUFFER_COUNT: usize = 2;
-
 pub struct VulkanTextureImporter {
     device: vk::Device,
     command_pool: vk::CommandPool,
-    command_buffers: [vk::CommandBuffer; FRAME_BUFFER_COUNT],
-    fences: [vk::Fence; FRAME_BUFFER_COUNT],
+    command_buffer: vk::CommandBuffer,
+    fence: vk::Fence,
     queue: vk::Queue,
-    current_frame: usize,
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
     cached_memory_type_index: Option<u32>,
     imported_image: Option<ImportedVulkanImage>,
@@ -117,20 +114,19 @@ impl VulkanTextureImporter {
             return None;
         }
 
-        // Allocate double-buffered command buffers
+        // Allocate command buffer
         let alloc_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(FRAME_BUFFER_COUNT as u32);
+            .command_buffer_count(1);
 
-        let mut command_buffers: [vk::CommandBuffer; FRAME_BUFFER_COUNT] =
-            unsafe { std::mem::zeroed() };
+        let mut command_buffer: vk::CommandBuffer = unsafe { std::mem::zeroed() };
         let result = unsafe {
-            (fns.allocate_command_buffers)(device, &alloc_info, command_buffers.as_mut_ptr())
+            (fns.allocate_command_buffers)(device, &alloc_info, &mut command_buffer)
         };
         if result != vk::Result::SUCCESS {
             godot_error!(
-                "[AcceleratedOSR/Vulkan] Failed to allocate command buffers: {:?}",
+                "[AcceleratedOSR/Vulkan] Failed to allocate command buffer: {:?}",
                 result
             );
             unsafe {
@@ -139,44 +135,36 @@ impl VulkanTextureImporter {
             return None;
         }
 
-        // Create double-buffered fences (start signaled so first wait doesn't block)
+        // Create fence (start signaled so first reset doesn't fail)
         let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-        let mut fences: [vk::Fence; FRAME_BUFFER_COUNT] = unsafe { std::mem::zeroed() };
-        for i in 0..FRAME_BUFFER_COUNT {
-            let result = unsafe {
-                (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fences[i])
-            };
-            if result != vk::Result::SUCCESS {
-                godot_error!(
-                    "[AcceleratedOSR/Vulkan] Failed to create fence: {:?}",
-                    result
-                );
-                for fence in fences.iter().take(i) {
-                    unsafe {
-                        (fns.destroy_fence)(device, *fence, std::ptr::null());
-                    }
-                }
-                unsafe {
-                    (fns.destroy_command_pool)(device, command_pool, std::ptr::null());
-                }
-                return None;
+        let mut fence: vk::Fence = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fence)
+        };
+        if result != vk::Result::SUCCESS {
+            godot_error!(
+                "[AcceleratedOSR/Vulkan] Failed to create fence: {:?}",
+                result
+            );
+            unsafe {
+                (fns.destroy_command_pool)(device, command_pool, std::ptr::null());
             }
+            return None;
         }
 
         // Keep library loaded for the lifetime of the importer
         std::mem::forget(lib);
 
         godot_print!(
-            "[AcceleratedOSR/Vulkan] Using Godot's Vulkan device for accelerated OSR (double-buffered)"
+            "[AcceleratedOSR/Vulkan] Using Godot's Vulkan device for accelerated OSR"
         );
 
         Some(Self {
             device,
             command_pool,
-            command_buffers,
+            command_buffer,
             queue,
-            fences,
-            current_frame: 0,
+            fence,
             get_memory_win32_handle_properties: fns.get_memory_win32_handle_properties,
             cached_memory_type_index: None,
             imported_image: None,
@@ -258,15 +246,6 @@ impl VulkanTextureImporter {
         info: &cef::AcceleratedPaintInfo,
         dst_rd_rid: Rid,
     ) -> Result<(), String> {
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-
-        // Get current frame index and wait for its previous use to complete
-        let frame_idx = self.current_frame;
-        let fence = self.fences[frame_idx];
-
-        // Wait for THIS frame's previous use to complete (allows other frame to be in-flight)
-        let _ = unsafe { (fns.wait_for_fences)(self.device, 1, &fence, vk::TRUE, u64::MAX) };
-
         let handle = HANDLE(info.shared_texture_handle);
         if handle.is_invalid() {
             return Err("Source handle is invalid".into());
@@ -300,10 +279,7 @@ impl VulkanTextureImporter {
         };
 
         // Copy from imported image to Godot's texture
-        self.submit_copy(src_image, dst_image, width, height, frame_idx)?;
-
-        // Advance to next frame for double buffering
-        self.current_frame = (self.current_frame + 1) % FRAME_BUFFER_COUNT;
+        self.submit_copy(src_image, dst_image, width, height)?;
 
         Ok(())
     }
@@ -454,14 +430,13 @@ impl VulkanTextureImporter {
         dst: vk::Image,
         width: u32,
         height: u32,
-        frame_idx: usize,
     ) -> Result<(), String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
 
-        let fence = self.fences[frame_idx];
-        let cmd_buffer = self.command_buffers[frame_idx];
+        let fence = self.fence;
+        let cmd_buffer = self.command_buffer;
 
-        // Reset fence and command buffer for this frame
+        // Reset fence and command buffer
         let _ = unsafe { (fns.reset_fences)(self.device, 1, &fence) };
         let _ =
             unsafe { (fns.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty()) };
@@ -582,11 +557,14 @@ impl VulkanTextureImporter {
 
         let _ = unsafe { (fns.end_command_buffer)(cmd_buffer) };
 
-        // Submit without waiting - we'll wait at the start of the next frame's use of this slot
+        // Submit and wait for completion to avoid race condition with Godot's rendering
         let submit_info =
             vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
 
         let _ = unsafe { (fns.queue_submit)(self.queue, 1, &submit_info, fence) };
+
+        // Wait for the copy to complete (matches D3D12 behavior)
+        let _ = unsafe { (fns.wait_for_fences)(self.device, 1, &fence, vk::TRUE, u64::MAX) };
 
         Ok(())
     }
@@ -605,13 +583,13 @@ impl VulkanTextureImporter {
 
 impl Drop for VulkanTextureImporter {
     fn drop(&mut self) {
-        // Wait for all in-flight copies to complete before cleanup
+        // Wait for in-flight copy to complete before cleanup
         if let Some(fns) = VULKAN_FNS.get() {
             let _ = unsafe {
                 (fns.wait_for_fences)(
                     self.device,
-                    FRAME_BUFFER_COUNT as u32,
-                    self.fences.as_ptr(),
+                    1,
+                    &self.fence,
                     vk::TRUE,
                     u64::MAX,
                 )
@@ -622,9 +600,7 @@ impl Drop for VulkanTextureImporter {
 
         if let Some(fns) = VULKAN_FNS.get() {
             unsafe {
-                for fence in &self.fences {
-                    (fns.destroy_fence)(self.device, *fence, std::ptr::null());
-                }
+                (fns.destroy_fence)(self.device, self.fence, std::ptr::null());
                 (fns.destroy_command_pool)(self.device, self.command_pool, std::ptr::null());
             }
         }
