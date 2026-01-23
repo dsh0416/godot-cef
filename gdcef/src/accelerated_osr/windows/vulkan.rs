@@ -18,6 +18,8 @@ pub struct VulkanTextureImporter {
     command_buffer: vk::CommandBuffer,
     fence: vk::Fence,
     queue: vk::Queue,
+    queue_family_index: u32,
+    uses_separate_queue: bool,
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
     cached_memory_type_index: Option<u32>,
     imported_image: Option<ImportedVulkanImage>,
@@ -84,20 +86,41 @@ impl VulkanTextureImporter {
         // Load function pointers using the device
         let fns = VULKAN_FNS.get_or_init(|| Self::load_vulkan_functions(&lib, device));
 
-        // We need to find the physical device. Use the queue to infer it's valid.
-        // Godot uses queue family 0 for graphics by default.
-        let queue_family_index = 0u32;
+        // Get physical device from Godot to query queue families
+        let physical_device_ptr =
+            rd.get_driver_resource(DriverResource::PHYSICAL_DEVICE, Rid::Invalid, 0);
+        let physical_device: vk::PhysicalDevice = if physical_device_ptr != 0 {
+            unsafe { std::mem::transmute(physical_device_ptr) }
+        } else {
+            vk::PhysicalDevice::null()
+        };
+
+        // Try to find a separate queue for our copy operations
+        // This avoids synchronization issues with Godot's main graphics queue
+        let (queue_family_index, queue_index, uses_separate_queue) =
+            Self::find_copy_queue(&lib, physical_device, fns);
+
         let mut queue: vk::Queue = unsafe { std::mem::zeroed() };
         unsafe {
-            (fns.get_device_queue)(device, queue_family_index, 0, &mut queue);
+            (fns.get_device_queue)(device, queue_family_index, queue_index, &mut queue);
         }
 
         if queue == vk::Queue::null() {
-            godot_error!("[AcceleratedOSR/Vulkan] Failed to get graphics queue");
+            // Fall back to queue 0 if our preferred queue isn't available
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] Preferred queue not available, falling back to queue 0"
+            );
+            unsafe {
+                (fns.get_device_queue)(device, 0, 0, &mut queue);
+            }
+        }
+
+        if queue == vk::Queue::null() {
+            godot_error!("[AcceleratedOSR/Vulkan] Failed to get any Vulkan queue");
             return None;
         }
 
-        // Create command pool
+        // Create command pool for our queue family
         let pool_info = vk::CommandPoolCreateInfo::default()
             .queue_family_index(queue_family_index)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
@@ -155,15 +178,25 @@ impl VulkanTextureImporter {
         // Keep library loaded for the lifetime of the importer
         std::mem::forget(lib);
 
-        godot_print!(
-            "[AcceleratedOSR/Vulkan] Using Godot's Vulkan device for accelerated OSR"
-        );
+        if uses_separate_queue {
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] Using separate queue (family={}, index={}) for texture copies",
+                queue_family_index,
+                queue_index
+            );
+        } else {
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] Using shared graphics queue - may have sync issues under load"
+            );
+        }
 
         Some(Self {
             device,
             command_pool,
             command_buffer,
             queue,
+            queue_family_index,
+            uses_separate_queue,
             fence,
             get_memory_win32_handle_properties: fns.get_memory_win32_handle_properties,
             cached_memory_type_index: None,
@@ -239,6 +272,85 @@ impl VulkanTextureImporter {
                 PfnVkGetMemoryWin32HandlePropertiesKHR
             ),
         }
+    }
+
+    /// Try to find a separate queue for copy operations to avoid conflicts with Godot's graphics queue.
+    /// Returns (queue_family_index, queue_index, uses_separate_queue).
+    fn find_copy_queue(
+        lib: &libloading::Library,
+        physical_device: vk::PhysicalDevice,
+        _fns: &VulkanFunctions,
+    ) -> (u32, u32, bool) {
+        // Default to Godot's graphics queue (family 0, queue 0)
+        let default = (0u32, 0u32, false);
+
+        if physical_device == vk::PhysicalDevice::null() {
+            return default;
+        }
+
+        // Load instance function to query queue families
+        type GetPhysicalDeviceQueueFamilyProperties = unsafe extern "system" fn(
+            physical_device: vk::PhysicalDevice,
+            p_queue_family_property_count: *mut u32,
+            p_queue_family_properties: *mut vk::QueueFamilyProperties,
+        );
+
+        let get_queue_family_props: GetPhysicalDeviceQueueFamilyProperties = unsafe {
+            match lib.get(b"vkGetPhysicalDeviceQueueFamilyProperties\0") {
+                Ok(f) => *f,
+                Err(_) => return default,
+            }
+        };
+
+        // Query number of queue families
+        let mut family_count: u32 = 0;
+        unsafe {
+            get_queue_family_props(physical_device, &mut family_count, std::ptr::null_mut());
+        }
+
+        if family_count == 0 {
+            return default;
+        }
+
+        // Get queue family properties
+        let mut family_props = vec![vk::QueueFamilyProperties::default(); family_count as usize];
+        unsafe {
+            get_queue_family_props(physical_device, &mut family_count, family_props.as_mut_ptr());
+        }
+
+        // Strategy 1: Try to get queue index 1 from graphics family (family 0)
+        // Many GPUs have multiple queues in the graphics family
+        if !family_props.is_empty() && family_props[0].queue_count > 1 {
+            // Try queue index 1 in graphics family
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] Graphics family has {} queues, trying queue index 1",
+                family_props[0].queue_count
+            );
+            return (0, 1, true);
+        }
+
+        // Strategy 2: Find a dedicated transfer queue family
+        for (idx, props) in family_props.iter().enumerate() {
+            let has_transfer = props.queue_flags.contains(vk::QueueFlags::TRANSFER);
+            let has_graphics = props.queue_flags.contains(vk::QueueFlags::GRAPHICS);
+            let has_compute = props.queue_flags.contains(vk::QueueFlags::COMPUTE);
+
+            // Prefer a transfer-only or transfer+compute family (not graphics)
+            if has_transfer && !has_graphics && props.queue_count > 0 {
+                godot_print!(
+                    "[AcceleratedOSR/Vulkan] Found dedicated transfer queue family {} (compute={})",
+                    idx,
+                    has_compute
+                );
+                return (idx as u32, 0, true);
+            }
+        }
+
+        // Strategy 3: Fall back to graphics queue 0
+        godot_print!(
+            "[AcceleratedOSR/Vulkan] No separate queue available, using shared graphics queue"
+        );
+        default
     }
 
     pub fn import_and_copy(
@@ -530,11 +642,19 @@ impl VulkanTextureImporter {
         }
 
         // Transition destination to SHADER_READ_ONLY for sampling
+        // If using a different queue family, we need to release ownership
+        let (src_family, dst_family) = if self.uses_separate_queue && self.queue_family_index != 0 {
+            // Release ownership from our transfer queue to graphics queue (family 0)
+            (self.queue_family_index, 0u32)
+        } else {
+            (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
+        };
+
         let final_barrier = vk::ImageMemoryBarrier::default()
             .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
             .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .src_queue_family_index(src_family)
+            .dst_queue_family_index(dst_family)
             .image(dst)
             .subresource_range(subresource_range)
             .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
@@ -557,13 +677,13 @@ impl VulkanTextureImporter {
 
         let _ = unsafe { (fns.end_command_buffer)(cmd_buffer) };
 
-        // Submit and wait for completion to avoid race condition with Godot's rendering
+        // Submit and wait for completion
         let submit_info =
             vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
 
         let _ = unsafe { (fns.queue_submit)(self.queue, 1, &submit_info, fence) };
 
-        // Wait for the copy to complete (matches D3D12 behavior)
+        // Wait for the copy to complete to ensure texture is ready for Godot
         let _ = unsafe { (fns.wait_for_fences)(self.device, 1, &fence, vk::TRUE, u64::MAX) };
 
         Ok(())
