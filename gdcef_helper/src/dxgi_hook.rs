@@ -220,20 +220,17 @@ unsafe extern "system" fn hooked_enum_adapter_by_luid(
     }
 
     // Check if the requested LUID matches our target
-    if let Some(target_luid) = get_target_luid() {
-        if adapter_luid.HighPart == target_luid.HighPart
-            && adapter_luid.LowPart == target_luid.LowPart
-        {
-            unsafe {
-                let original_ptr = ORIGINAL_ENUM_ADAPTER_BY_LUID.load(Ordering::SeqCst);
-                if original_ptr.is_null() {
-                    return HRESULT::from_win32(
-                        windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0,
-                    );
-                }
-                let original: EnumAdapterByLuidFn = std::mem::transmute(original_ptr);
-                return original(this, adapter_luid, riid, pp_adapter);
+    if let Some(target_luid) = get_target_luid()
+        && adapter_luid.HighPart == target_luid.HighPart
+        && adapter_luid.LowPart == target_luid.LowPart
+    {
+        unsafe {
+            let original_ptr = ORIGINAL_ENUM_ADAPTER_BY_LUID.load(Ordering::SeqCst);
+            if original_ptr.is_null() {
+                return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
             }
+            let original: EnumAdapterByLuidFn = std::mem::transmute(original_ptr);
+            return original(this, adapter_luid, riid, pp_adapter);
         }
     }
 
