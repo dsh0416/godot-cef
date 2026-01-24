@@ -272,15 +272,20 @@ unsafe extern "system" fn hooked_enum_adapter_by_gpu_preference(
     }
 
     unsafe {
-        // Always prefer using the original EnumAdapterByGpuPreference to honor the riid parameter.
-        // Using EnumAdapters1 would return IDXGIAdapter1, ignoring the caller's requested interface.
-        let original_pref_ptr = ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE.load(Ordering::SeqCst);
-        if !original_pref_ptr.is_null() {
-            let original: EnumAdapterByGpuPreferenceFn = std::mem::transmute(original_pref_ptr);
-            return original(this, target_index, gpu_preference, riid, pp_adapter);
+        // Use EnumAdapterByLuid to return the target adapter by LUID.
+        // We cannot use target_index with EnumAdapterByGpuPreference because target_index was
+        // derived from EnumAdapters1 ordering, while EnumAdapterByGpuPreference enumerates
+        // adapters in an order that varies based on gpu_preference.
+        // EnumAdapterByLuid directly looks up by LUID and honors the riid parameter.
+        let original_luid_ptr = ORIGINAL_ENUM_ADAPTER_BY_LUID.load(Ordering::SeqCst);
+        if let Some(target_luid) = get_target_luid()
+            && !original_luid_ptr.is_null()
+        {
+            let original_luid: EnumAdapterByLuidFn = std::mem::transmute(original_luid_ptr);
+            return original_luid(this, *target_luid, riid, pp_adapter);
         }
 
-        // Fallback: use EnumAdapters1 and QueryInterface to the requested interface
+        // Fallback: use EnumAdapters1 (where target_index is valid) and QueryInterface to riid
         let original_enum1_ptr = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
         if original_enum1_ptr.is_null() {
             return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
