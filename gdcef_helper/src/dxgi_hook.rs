@@ -18,11 +18,13 @@ use std::sync::{Mutex, OnceLock};
 
 use retour::static_detour;
 use windows::Win32::Foundation::LUID;
-use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, IDXGIFactory1, IDXGIFactory2};
+use windows::Win32::Graphics::Dxgi::{
+    IDXGIAdapter1, IDXGIFactory1, IDXGIFactory2, IDXGIFactory4, IDXGIFactory6,
+};
 use windows::Win32::System::Memory::{
     PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
 };
-use windows::core::{GUID, HRESULT, Interface};
+use windows::core::{GUID, HRESULT, IUnknown, Interface};
 
 static TARGET_LUID: OnceLock<LUID> = OnceLock::new();
 static HOOKS_INSTALLED: OnceLock<bool> = OnceLock::new();
@@ -245,7 +247,7 @@ unsafe extern "system" fn hooked_enum_adapter_by_luid(
 unsafe extern "system" fn hooked_enum_adapter_by_gpu_preference(
     this: *mut c_void,
     adapter_index: u32,
-    _gpu_preference: i32,
+    gpu_preference: i32,
     riid: *const GUID,
     pp_adapter: *mut *mut c_void,
 ) -> HRESULT {
@@ -259,7 +261,7 @@ unsafe extern "system" fn hooked_enum_adapter_by_gpu_preference(
                 return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
             }
             let original: EnumAdapterByGpuPreferenceFn = std::mem::transmute(original_ptr);
-            return original(this, adapter_index, _gpu_preference, riid, pp_adapter);
+            return original(this, adapter_index, gpu_preference, riid, pp_adapter);
         }
     }
 
@@ -270,17 +272,29 @@ unsafe extern "system" fn hooked_enum_adapter_by_gpu_preference(
     }
 
     unsafe {
-        let original_ptr = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
-        if original_ptr.is_null() {
-            let original_pref_ptr = ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE.load(Ordering::SeqCst);
-            if original_pref_ptr.is_null() {
-                return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
-            }
+        // Always prefer using the original EnumAdapterByGpuPreference to honor the riid parameter.
+        // Using EnumAdapters1 would return IDXGIAdapter1, ignoring the caller's requested interface.
+        let original_pref_ptr = ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE.load(Ordering::SeqCst);
+        if !original_pref_ptr.is_null() {
             let original: EnumAdapterByGpuPreferenceFn = std::mem::transmute(original_pref_ptr);
-            return original(this, target_index, _gpu_preference, riid, pp_adapter);
+            return original(this, target_index, gpu_preference, riid, pp_adapter);
         }
-        let original: EnumAdaptersFn = std::mem::transmute(original_ptr);
-        original(this, target_index, pp_adapter)
+
+        // Fallback: use EnumAdapters1 and QueryInterface to the requested interface
+        let original_enum1_ptr = ORIGINAL_ENUM_ADAPTERS1.load(Ordering::SeqCst);
+        if original_enum1_ptr.is_null() {
+            return HRESULT::from_win32(windows::Win32::Foundation::ERROR_INVALID_FUNCTION.0);
+        }
+
+        let original_enum1: EnumAdaptersFn = std::mem::transmute(original_enum1_ptr);
+        let mut temp_adapter: *mut c_void = std::ptr::null_mut();
+        let hr = original_enum1(this, target_index, &mut temp_adapter);
+        if hr.is_err() || temp_adapter.is_null() {
+            return hr;
+        }
+
+        let adapter_unknown = IUnknown::from_raw(temp_adapter);
+        adapter_unknown.query(riid, pp_adapter)
     }
 }
 
@@ -427,28 +441,32 @@ unsafe fn patch_factory_vtable(factory_ptr: *mut c_void) -> bool {
             eprintln!("[DXGI Hook] Failed to patch EnumAdapters1 vtable slot");
         }
 
-        // Patch EnumAdapterByLuid (IDXGIFactory4)
-        let enum_adapter_by_luid_ok = patch_vtable_slot(
-            vtable,
-            ENUM_ADAPTER_BY_LUID_VTABLE_INDEX,
-            &ORIGINAL_ENUM_ADAPTER_BY_LUID,
-            hooked_enum_adapter_by_luid as *mut c_void,
-        );
-        if !enum_adapter_by_luid_ok {
-            eprintln!("[DXGI Hook] Note: EnumAdapterByLuid not available (requires IDXGIFactory4)");
-        }
+        // Patch EnumAdapterByLuid/EnumAdapterByGpuPreference only if supported
+        let factory_unknown = IUnknown::from_raw_borrowed(&factory_ptr);
+        if let Some(factory_unknown) = factory_unknown {
+            if factory_unknown.cast::<IDXGIFactory4>().is_ok() {
+                let enum_adapter_by_luid_ok = patch_vtable_slot(
+                    vtable,
+                    ENUM_ADAPTER_BY_LUID_VTABLE_INDEX,
+                    &ORIGINAL_ENUM_ADAPTER_BY_LUID,
+                    hooked_enum_adapter_by_luid as *mut c_void,
+                );
+                if !enum_adapter_by_luid_ok {
+                    eprintln!("[DXGI Hook] Failed to patch EnumAdapterByLuid vtable slot");
+                }
+            }
 
-        // Patch EnumAdapterByGpuPreference (IDXGIFactory6)
-        let enum_adapter_by_gpu_preference_ok = patch_vtable_slot(
-            vtable,
-            ENUM_ADAPTER_BY_GPU_PREFERENCE_VTABLE_INDEX,
-            &ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE,
-            hooked_enum_adapter_by_gpu_preference as *mut c_void,
-        );
-        if !enum_adapter_by_gpu_preference_ok {
-            eprintln!(
-                "[DXGI Hook] Note: EnumAdapterByGpuPreference not available (requires IDXGIFactory6)"
-            );
+            if factory_unknown.cast::<IDXGIFactory6>().is_ok() {
+                let enum_adapter_by_gpu_preference_ok = patch_vtable_slot(
+                    vtable,
+                    ENUM_ADAPTER_BY_GPU_PREFERENCE_VTABLE_INDEX,
+                    &ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE,
+                    hooked_enum_adapter_by_gpu_preference as *mut c_void,
+                );
+                if !enum_adapter_by_gpu_preference_ok {
+                    eprintln!("[DXGI Hook] Failed to patch EnumAdapterByGpuPreference vtable slot");
+                }
+            }
         }
 
         enum_adapters_ok || enum_adapters1_ok
