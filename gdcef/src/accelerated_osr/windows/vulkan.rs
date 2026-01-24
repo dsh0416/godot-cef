@@ -20,7 +20,6 @@ pub struct PendingVulkanCopy {
     duplicated_handle: HANDLE,
     width: u32,
     height: u32,
-    dst_rd_rid: Rid,
 }
 
 impl Drop for PendingVulkanCopy {
@@ -402,11 +401,7 @@ impl VulkanTextureImporter {
     /// Queue a copy operation for deferred processing.
     /// This method returns immediately after duplicating the handle.
     /// Call `process_pending_copy()` later to actually perform the GPU work.
-    pub fn queue_copy(
-        &mut self,
-        info: &cef::AcceleratedPaintInfo,
-        dst_rd_rid: Rid,
-    ) -> Result<(), String> {
+    pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
         let handle = HANDLE(info.shared_texture_handle);
         if handle.is_invalid() {
             return Err("Source handle is invalid".into());
@@ -418,9 +413,6 @@ impl VulkanTextureImporter {
         if width == 0 || height == 0 {
             return Err(format!("Invalid source dimensions: {}x{}", width, height));
         }
-        if !dst_rd_rid.is_valid() {
-            return Err("Destination RID is invalid".into());
-        }
 
         // Duplicate the handle so we own it - this is fast and non-blocking
         let duplicated_handle = duplicate_win32_handle(handle)?;
@@ -430,7 +422,6 @@ impl VulkanTextureImporter {
             duplicated_handle,
             width,
             height,
-            dst_rd_rid,
         });
 
         Ok(())
@@ -444,11 +435,16 @@ impl VulkanTextureImporter {
 
     /// Process the pending copy operation. This does the actual GPU work.
     /// Should be called from Godot's main loop, not from CEF callbacks.
-    pub fn process_pending_copy(&mut self) -> Result<(), String> {
+    /// The dst_rd_rid is passed at processing time so resize can update the destination.
+    pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         let pending = match self.pending_copy.take() {
             Some(p) => p,
             None => return Ok(()), // Nothing to do
         };
+
+        if !dst_rd_rid.is_valid() {
+            return Err("Destination RID is invalid".into());
+        }
 
         // Wait for any previous in-flight copy to complete before reusing resources
         if self.copy_in_flight {
@@ -469,7 +465,7 @@ impl VulkanTextureImporter {
                 .get_rendering_device()
                 .ok_or("Failed to get RenderingDevice")?;
 
-            let image_ptr = rd.get_driver_resource(DriverResource::TEXTURE, pending.dst_rd_rid, 0);
+            let image_ptr = rd.get_driver_resource(DriverResource::TEXTURE, dst_rd_rid, 0);
             if image_ptr == 0 {
                 return Err("Failed to get destination Vulkan image".into());
             }

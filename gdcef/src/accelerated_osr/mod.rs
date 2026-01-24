@@ -108,12 +108,13 @@ impl AcceleratedRenderState {
     }
 
     /// Process any pending copy operation. Call this from Godot's main loop.
+    /// Uses the current dst_rd_rid, so this should be called AFTER any resize.
     pub fn process_pending_copy(&mut self) -> Result<(), String> {
         if !self.has_pending_copy {
             return Ok(());
         }
 
-        self.importer.process_pending_copy()?;
+        self.importer.process_pending_copy(self.dst_rd_rid)?;
         self.has_pending_copy = false;
         Ok(())
     }
@@ -180,8 +181,8 @@ impl AcceleratedRenderHandler {
             if let Some(popup_rid) = state.popup_rd_rid {
                 let result = state
                     .importer
-                    .queue_copy(info, popup_rid)
-                    .and_then(|_| state.importer.process_pending_copy())
+                    .queue_copy(info)
+                    .and_then(|_| state.importer.process_pending_copy(popup_rid))
                     .and_then(|_| state.importer.wait_for_copy());
 
                 match result {
@@ -221,14 +222,15 @@ impl AcceleratedRenderHandler {
         // Check if texture dimensions changed - defer resize to main loop
         if src_width != state.dst_width || src_height != state.dst_height {
             state.needs_resize = Some((src_width, src_height));
-            // Can't copy to mismatched texture, skip this frame
-            return;
+            // Note: we still queue the copy below to capture this frame.
+            // The frame will be processed AFTER resize in update_texture().
         }
 
         // Queue the copy operation (fast - just duplicates handle)
         // The actual GPU work will be done in process_pending_copy()
-        let dst_rid = state.dst_rd_rid;
-        match state.importer.queue_copy(info, dst_rid) {
+        // We queue even during resize to capture the frame - dst_rd_rid will be
+        // passed at processing time after any resize is complete.
+        match state.importer.queue_copy(info) {
             Ok(_) => {
                 state.has_pending_copy = true;
             }
@@ -290,15 +292,11 @@ impl GodotTextureImporter {
         None
     }
 
-    pub fn queue_copy(
-        &mut self,
-        _info: &AcceleratedPaintInfo,
-        _dst_rd_rid: Rid,
-    ) -> Result<(), String> {
+    pub fn queue_copy(&mut self, _info: &AcceleratedPaintInfo) -> Result<(), String> {
         Err("Accelerated OSR not supported on this platform".to_string())
     }
 
-    pub fn process_pending_copy(&mut self) -> Result<(), String> {
+    pub fn process_pending_copy(&mut self, _dst_rd_rid: Rid) -> Result<(), String> {
         Err("Accelerated OSR not supported on this platform".to_string())
     }
 

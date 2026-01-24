@@ -14,6 +14,30 @@ use objc2_metal::{
 };
 use std::ffi::c_void;
 
+/// Pending copy operation queued from on_accelerated_paint callback.
+pub struct PendingMetalCopy {
+    /// Retained IOSurface (we own this reference)
+    io_surface: *mut c_void,
+    width: u32,
+    height: u32,
+    format: cef::sys::cef_color_type_t,
+}
+
+impl Drop for PendingMetalCopy {
+    fn drop(&mut self) {
+        if !self.io_surface.is_null() {
+            // Release our retained reference to the IOSurface
+            unsafe { CFRelease(self.io_surface) };
+        }
+    }
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFRetain(cf: *mut c_void) -> *mut c_void;
+    fn CFRelease(cf: *mut c_void);
+}
+
 /// Wrapper type for IOSurfaceRef with correct Objective-C type encoding.
 /// Metal's `newTextureWithDescriptor:iosurface:plane:` expects `^{__IOSurface=}` encoding.
 #[repr(transparent)]
@@ -183,6 +207,8 @@ pub struct GodotTextureImporter {
     metal_importer: NativeTextureImporter,
     current_metal_texture: Option<Retained<AnyObject>>,
     current_texture_rid: Option<Rid>,
+    /// Pending copy operation to be processed later
+    pending_copy: Option<PendingMetalCopy>,
 }
 
 impl GodotTextureImporter {
@@ -203,14 +229,14 @@ impl GodotTextureImporter {
             metal_importer,
             current_metal_texture: None,
             current_texture_rid: None,
+            pending_copy: None,
         })
     }
 
-    pub fn import_and_copy(
-        &mut self,
-        info: &AcceleratedPaintInfo,
-        dst_rd_rid: Rid,
-    ) -> Result<(), String> {
+    /// Queue a copy operation for deferred processing.
+    /// This method returns immediately after retaining the IOSurface.
+    /// Call `process_pending_copy()` later to actually perform the GPU work.
+    pub fn queue_copy(&mut self, info: &AcceleratedPaintInfo) -> Result<(), String> {
         let io_surface = info.shared_texture_io_surface;
         if io_surface.is_null() {
             return Err("Source IOSurface is null".into());
@@ -222,16 +248,46 @@ impl GodotTextureImporter {
         if width == 0 || height == 0 {
             return Err(format!("Invalid source dimensions: {}x{}", width, height));
         }
+
+        // Retain the IOSurface to extend its lifetime beyond the callback
+        let retained_surface = unsafe { CFRetain(io_surface) };
+
+        // Replace any existing pending copy (drop the old one, which releases its IOSurface)
+        self.pending_copy = Some(PendingMetalCopy {
+            io_surface: retained_surface,
+            width,
+            height,
+            format: *info.format.as_ref(),
+        });
+
+        Ok(())
+    }
+
+    /// Returns true if there's a pending copy operation waiting to be processed.
+    #[allow(dead_code)]
+    pub fn has_pending_copy(&self) -> bool {
+        self.pending_copy.is_some()
+    }
+
+    /// Process the pending copy operation. This does the actual GPU work.
+    /// Should be called from Godot's main loop, not from CEF callbacks.
+    /// The dst_rd_rid is passed at processing time so resize can update the destination.
+    pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
+        let pending = match self.pending_copy.take() {
+            Some(p) => p,
+            None => return Ok(()), // Nothing to do
+        };
+
         if !dst_rd_rid.is_valid() {
             return Err("Destination RID is invalid".into());
         }
 
         // Create Metal texture from IOSurface (source)
         let src_metal_texture = self.metal_importer.import_io_surface(
-            io_surface,
-            width,
-            height,
-            *info.format.as_ref(),
+            pending.io_surface,
+            pending.width,
+            pending.height,
+            pending.format,
         )?;
 
         // Get destination Metal texture from Godot's RenderingDevice
@@ -257,15 +313,30 @@ impl GodotTextureImporter {
 
         let dst_texture_ref = unsafe { &*dst_texture_ptr };
 
-        self.metal_importer
-            .copy_texture(&src_metal_texture, dst_texture_ref, width, height)?;
+        self.metal_importer.copy_texture(
+            &src_metal_texture,
+            dst_texture_ref,
+            pending.width,
+            pending.height,
+        )?;
 
+        // pending is dropped here, which releases the IOSurface
+        Ok(())
+    }
+
+    /// Wait for any in-flight copy to complete.
+    /// On Metal, copies are synchronous (waitUntilCompleted), so this is a no-op.
+    #[allow(dead_code)]
+    pub fn wait_for_copy(&mut self) -> Result<(), String> {
         Ok(())
     }
 }
 
 impl Drop for GodotTextureImporter {
     fn drop(&mut self) {
+        // Drop pending copy (will release its IOSurface)
+        self.pending_copy = None;
+
         let mut rs = RenderingServer::singleton();
         if let Some(rid) = self.current_texture_rid.take() {
             rs.free_rid(rid);

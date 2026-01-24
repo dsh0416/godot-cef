@@ -14,6 +14,34 @@ use std::os::fd::RawFd;
 /// DRM format modifier indicating invalid/linear modifier
 const DRM_FORMAT_MOD_INVALID: u64 = 0x00ffffffffffffff;
 
+/// Pending copy operation queued from on_accelerated_paint callback.
+pub struct PendingLinuxCopy {
+    /// Duplicated file descriptors for each plane (we own these)
+    fds: Vec<RawFd>,
+    /// Stride (pitch) for each plane
+    strides: Vec<u32>,
+    /// Offset for each plane
+    offsets: Vec<u64>,
+    /// DRM format modifier
+    modifier: u64,
+    /// Vulkan format to use
+    format: vk::Format,
+    /// Image dimensions
+    width: u32,
+    height: u32,
+}
+
+impl Drop for PendingLinuxCopy {
+    fn drop(&mut self) {
+        // Close our duplicated file descriptors
+        for fd in &self.fds {
+            if *fd >= 0 {
+                unsafe { libc::close(*fd) };
+            }
+        }
+    }
+}
+
 /// Parameters for DMA-BUF import extracted from AcceleratedPaintInfo
 struct DmaBufImportParams {
     /// File descriptors for each plane
@@ -49,13 +77,15 @@ pub struct VulkanTextureImporter {
     get_memory_fd_properties: PfnVkGetMemoryFdPropertiesKHR,
     cached_memory_type_index: Option<u32>,
     imported_image: Option<ImportedVulkanImage>,
+    /// Pending copy operation to be processed later
+    pending_copy: Option<PendingLinuxCopy>,
+    /// Whether there's a GPU operation in flight (submitted but not waited on)
+    copy_in_flight: bool,
 }
 
 struct ImportedVulkanImage {
-    fd_value: RawFd,
     image: vk::Image,
     memory: vk::DeviceMemory,
-    extent: vk::Extent2D,
 }
 
 struct VulkanFunctions {
@@ -230,6 +260,8 @@ impl VulkanTextureImporter {
             get_memory_fd_properties: fns.get_memory_fd_properties,
             cached_memory_type_index: None,
             imported_image: None,
+            pending_copy: None,
+            copy_in_flight: false,
         })
     }
 
@@ -381,11 +413,10 @@ impl VulkanTextureImporter {
         default
     }
 
-    pub fn import_and_copy(
-        &mut self,
-        info: &cef::AcceleratedPaintInfo,
-        dst_rd_rid: Rid,
-    ) -> Result<(), String> {
+    /// Queue a copy operation for deferred processing.
+    /// This method returns immediately after duplicating the file descriptors.
+    /// Call `process_pending_copy()` later to actually perform the GPU work.
+    pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
         // Extract DMA-BUF parameters from all planes
         let plane_count = info.plane_count as usize;
         if plane_count == 0 {
@@ -404,7 +435,16 @@ impl VulkanTextureImporter {
             if plane.fd < 0 {
                 return Err(format!("Invalid fd for plane {}: {}", i, plane.fd));
             }
-            fds.push(plane.fd);
+            // Duplicate the fd to extend its lifetime beyond the callback
+            let dup_fd = unsafe { libc::dup(plane.fd) };
+            if dup_fd < 0 {
+                // Close any fds we already duplicated
+                for fd in &fds {
+                    unsafe { libc::close(*fd) };
+                }
+                return Err(format!("Failed to duplicate fd for plane {}", i));
+            }
+            fds.push(dup_fd);
             strides.push(plane.stride);
             offsets.push(plane.offset);
         }
@@ -413,19 +453,18 @@ impl VulkanTextureImporter {
         let height = info.extra.coded_size.height as u32;
 
         if width == 0 || height == 0 {
+            // Close duplicated fds on error
+            for fd in &fds {
+                unsafe { libc::close(*fd) };
+            }
             return Err(format!("Invalid source dimensions: {}x{}", width, height));
-        }
-        if !dst_rd_rid.is_valid() {
-            return Err("Destination RID is invalid".into());
         }
 
         // Convert CEF color format to Vulkan format
-        // Note: CEF format names are reversed from DRM perspective
-        // CEF_COLOR_TYPE_RGBA_8888 -> DRM_FORMAT_ABGR8888 -> VK_FORMAT_R8G8B8A8
-        // CEF_COLOR_TYPE_BGRA_8888 -> DRM_FORMAT_ARGB8888 -> VK_FORMAT_B8G8R8A8
         let format = cef_format_to_vulkan(&info.format);
 
-        let params = DmaBufImportParams {
+        // Replace any existing pending copy (drop the old one, which closes its fds)
+        self.pending_copy = Some(PendingLinuxCopy {
             fds,
             strides,
             offsets,
@@ -433,6 +472,44 @@ impl VulkanTextureImporter {
             format,
             width,
             height,
+        });
+
+        Ok(())
+    }
+
+    /// Returns true if there's a pending copy operation waiting to be processed.
+    #[allow(dead_code)]
+    pub fn has_pending_copy(&self) -> bool {
+        self.pending_copy.is_some()
+    }
+
+    /// Process the pending copy operation. This does the actual GPU work.
+    /// Should be called from Godot's main loop, not from CEF callbacks.
+    /// The dst_rd_rid is passed at processing time so resize can update the destination.
+    pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
+        let pending = match self.pending_copy.take() {
+            Some(p) => p,
+            None => return Ok(()), // Nothing to do
+        };
+
+        if !dst_rd_rid.is_valid() {
+            return Err("Destination RID is invalid".into());
+        }
+
+        // Wait for any previous in-flight copy to complete before reusing resources
+        if self.copy_in_flight {
+            self.wait_for_copy()?;
+            self.copy_in_flight = false;
+        }
+
+        let params = DmaBufImportParams {
+            fds: pending.fds.clone(),
+            strides: pending.strides.clone(),
+            offsets: pending.offsets.clone(),
+            modifier: pending.modifier,
+            format: pending.format,
+            width: pending.width,
+            height: pending.height,
         };
 
         // Import the DMA-BUF as a Vulkan image
@@ -452,30 +529,40 @@ impl VulkanTextureImporter {
             unsafe { std::mem::transmute(image_ptr) }
         };
 
-        // Copy from imported image to Godot's texture
-        self.submit_copy(src_image, dst_image, width, height)?;
+        // Submit copy command (non-blocking GPU submission)
+        self.submit_copy_async(src_image, dst_image, pending.width, pending.height)?;
+        self.copy_in_flight = true;
 
+        // Note: pending is dropped here, closing the duplicated fds.
+        // The Vulkan memory import takes ownership of fds[0], so we need to
+        // NOT close it. Mark it as -1 to prevent double-close.
+        // Actually, on Linux DMA-BUF import does NOT transfer ownership,
+        // so we do need to close all our dup'd fds.
+
+        Ok(())
+    }
+
+    /// Wait for any in-flight copy to complete.
+    pub fn wait_for_copy(&mut self) -> Result<(), String> {
+        if !self.copy_in_flight {
+            return Ok(());
+        }
+
+        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let result = unsafe {
+            (fns.wait_for_fences)(self.device, 1, &self.fence, vk::TRUE, u64::MAX)
+        };
+        if result != vk::Result::SUCCESS {
+            return Err(format!("Failed to wait for fence: {:?}", result));
+        }
+        self.copy_in_flight = false;
         Ok(())
     }
 
     fn import_dmabuf_to_image(&mut self, params: &DmaBufImportParams) -> Result<vk::Image, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-        let extent = vk::Extent2D {
-            width: params.width,
-            height: params.height,
-        };
 
-        // Check if we can fully reuse existing import (same primary fd AND dimensions)
-        let primary_fd = params.fds[0];
-        if let Some(existing) = &self.imported_image
-            && existing.fd_value == primary_fd
-            && existing.extent == extent
-        {
-            // Cache hit! Reuse everything
-            return Ok(existing.image);
-        }
-
-        // Cache miss - must create new image (VkImage can only be bound once)
+        // Always free previous image - we get new fds every frame
         self.free_imported_image();
 
         // Create new image with external memory flag for DMA-BUF
@@ -544,12 +631,7 @@ impl VulkanTextureImporter {
         // Import memory for this DMA-BUF
         let memory = self.import_memory_for_dmabuf(params, image)?;
 
-        self.imported_image = Some(ImportedVulkanImage {
-            fd_value: primary_fd,
-            image,
-            memory,
-            extent,
-        });
+        self.imported_image = Some(ImportedVulkanImage { image, memory });
         Ok(image)
     }
 
@@ -630,7 +712,9 @@ impl VulkanTextureImporter {
         Some(type_filter.trailing_zeros())
     }
 
-    fn submit_copy(
+    /// Submit a copy command asynchronously (does not wait for completion).
+    /// Call wait_for_copy() to ensure the copy is complete.
+    fn submit_copy_async(
         &mut self,
         src: vk::Image,
         dst: vk::Image,
@@ -771,14 +855,14 @@ impl VulkanTextureImporter {
 
         let _ = unsafe { (fns.end_command_buffer)(cmd_buffer) };
 
-        // Submit and wait for completion
+        // Submit (non-blocking - fence will be signaled when complete)
         let submit_info =
             vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
 
-        let _ = unsafe { (fns.queue_submit)(self.queue, 1, &submit_info, fence) };
-
-        // Wait for the copy to complete to ensure texture is ready for Godot
-        let _ = unsafe { (fns.wait_for_fences)(self.device, 1, &fence, vk::TRUE, u64::MAX) };
+        let result = unsafe { (fns.queue_submit)(self.queue, 1, &submit_info, fence) };
+        if result != vk::Result::SUCCESS {
+            return Err(format!("Failed to submit copy command: {:?}", result));
+        }
 
         Ok(())
     }
@@ -798,17 +882,12 @@ impl VulkanTextureImporter {
 impl Drop for VulkanTextureImporter {
     fn drop(&mut self) {
         // Wait for in-flight copy to complete before cleanup
-        if let Some(fns) = VULKAN_FNS.get() {
-            let _ = unsafe {
-                (fns.wait_for_fences)(
-                    self.device,
-                    1,
-                    &self.fence,
-                    vk::TRUE,
-                    u64::MAX,
-                )
-            };
+        if self.copy_in_flight {
+            let _ = self.wait_for_copy();
         }
+
+        // Drop pending copy (will close its fds)
+        self.pending_copy = None;
 
         self.free_imported_image();
 

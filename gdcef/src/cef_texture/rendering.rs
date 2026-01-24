@@ -228,14 +228,7 @@ impl CefTexture {
                 return;
             };
 
-            // Process any pending copy operation from the CEF callback
-            // This is where the actual GPU work happens (deferred from on_accelerated_paint)
-            if state.has_pending_copy {
-                if let Err(e) = state.process_pending_copy() {
-                    godot::global::godot_error!("[CefTexture] Failed to process pending copy: {}", e);
-                }
-            }
-
+            // Process resize FIRST so that pending copy uses the new texture
             if let Some((new_w, new_h)) = state.needs_resize.take()
                 && new_w > 0
                 && new_h > 0
@@ -256,9 +249,35 @@ impl CefTexture {
                 state.dst_height = new_h;
 
                 *texture_2d_rd = new_texture_2d_rd.clone();
-                drop(state);
 
-                self.base_mut().set_texture(&new_texture_2d_rd);
+                // Don't drop state yet - we still need to process pending copy below
+                // Set the texture on the node after we drop the lock
+            }
+
+            // Process any pending copy operation from the CEF callback
+            // This is where the actual GPU work happens (deferred from on_accelerated_paint)
+            // This uses the current dst_rd_rid which may have been updated by resize above
+            if state.has_pending_copy {
+                if let Err(e) = state.process_pending_copy() {
+                    godot::global::godot_error!("[CefTexture] Failed to process pending copy: {}", e);
+                }
+            }
+
+            // Now we can drop state and update the texture if resize happened
+            let texture_to_set = if state.dst_width > 0 && state.dst_height > 0 {
+                Some(texture_2d_rd.clone())
+            } else {
+                None
+            };
+            drop(state);
+
+            if let Some(tex) = texture_to_set {
+                // Only set if we had a resize this frame
+                // We track this by checking if the texture changed
+                let current_tex = self.base().get_texture();
+                if current_tex.is_none() || current_tex.map(|t| t.get_rid()) != Some(tex.get_rid()) {
+                    self.base_mut().set_texture(&tex);
+                }
             }
         }
 
