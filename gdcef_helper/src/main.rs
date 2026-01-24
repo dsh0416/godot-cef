@@ -21,12 +21,6 @@ pub static AmdPowerXpressRequestHighPerformance: u32 = 0x00000001;
 
 mod utils;
 
-#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-mod dxgi_hook;
-
-#[cfg(target_os = "linux")]
-mod vulkan_select;
-
 fn main() -> std::process::ExitCode {
     #[cfg(target_os = "macos")]
     {
@@ -43,65 +37,6 @@ fn main() -> std::process::ExitCode {
     {
         let framework_path = utils::get_framework_path().expect("Failed to get CEF framework path");
         cef_app::load_sandbox_from_path(&framework_path, args.as_main_args());
-    }
-
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        use cef_app::AdapterLuid;
-
-        let luid_switch = CefString::from("godot-adapter-luid");
-        if cmd.has_switch(Some(&luid_switch)) == 1 {
-            let luid_value = CefString::from(&cmd.switch_value(Some(&luid_switch)));
-            let luid_str = luid_value.to_string();
-
-            if let Some(adapter_luid) = AdapterLuid::from_arg_string(&luid_str) {
-                let luid = windows::Win32::Foundation::LUID {
-                    HighPart: adapter_luid.high,
-                    LowPart: adapter_luid.low,
-                };
-
-                eprintln!(
-                    "[gdcef_helper] Installing DXGI hooks for adapter LUID: {}, {}",
-                    luid.HighPart, luid.LowPart
-                );
-
-                if !dxgi_hook::install_hooks(luid) {
-                    eprintln!("[gdcef_helper] Warning: Failed to install DXGI hooks");
-                }
-            } else {
-                eprintln!(
-                    "[gdcef_helper] Warning: Invalid adapter LUID format: {}",
-                    luid_str
-                );
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        use cef_app::DeviceUuid;
-
-        let uuid_switch = CefString::from("godot-device-uuid");
-        if cmd.has_switch(Some(&uuid_switch)) == 1 {
-            let uuid_value = CefString::from(&cmd.switch_value(Some(&uuid_switch)));
-            let uuid_str = uuid_value.to_string();
-
-            if let Some(device_uuid) = DeviceUuid::from_arg_string(&uuid_str) {
-                eprintln!(
-                    "[gdcef_helper] Selecting Vulkan device by UUID: {}",
-                    uuid_str
-                );
-
-                if !vulkan_select::select_device_by_uuid(device_uuid.bytes) {
-                    eprintln!("[gdcef_helper] Warning: Failed to select Vulkan device by UUID");
-                }
-            } else {
-                eprintln!(
-                    "[gdcef_helper] Warning: Invalid device UUID format: {}",
-                    uuid_str
-                );
-            }
-        }
     }
 
     let switch = CefString::from("type");

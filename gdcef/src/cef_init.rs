@@ -117,30 +117,16 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
         security_config,
     );
 
-    // To make sure CEF uses the correct GPU adapter,
-    // we need to pass the adapter LUID to the subprocesses.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     {
-        use crate::accelerated_osr::get_godot_adapter_luid;
-        if let Some((high, low)) = get_godot_adapter_luid() {
+        use crate::accelerated_osr::get_godot_gpu_device_ids;
+        if let Some((vendor_id, device_id)) = get_godot_gpu_device_ids() {
             godot::global::godot_print!(
-                "[CefInit] Godot adapter LUID: {},{} - will pass to CEF subprocesses",
-                high,
-                low
+                "[CefInit] Godot GPU: vendor=0x{:04x}, device=0x{:04x} - will pass to CEF subprocesses",
+                vendor_id,
+                device_id
             );
-            osr_app = osr_app.with_adapter_luid(high, low);
-        }
-    }
-
-    // On Linux, pass the device UUID to ensure CEF uses the same GPU as Godot.
-    #[cfg(target_os = "linux")]
-    {
-        use crate::accelerated_osr::get_godot_device_uuid;
-        if let Some(uuid) = get_godot_device_uuid() {
-            godot::global::godot_print!(
-                "[CefInit] Godot device UUID retrieved - will pass to CEF subprocesses"
-            );
-            osr_app = osr_app.with_device_uuid(uuid);
+            osr_app = osr_app.with_gpu_device_ids(vendor_id, device_id);
         }
     }
 

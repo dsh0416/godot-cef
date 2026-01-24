@@ -43,21 +43,12 @@ Since Godot doesn't provide an API to request additional Vulkan extensions durin
 - `VK_KHR_external_memory_fd` — File descriptor based sharing
 - `VK_EXT_external_memory_dma_buf` — DMA-BUF sharing for zero-copy transfers
 
-## Windows: DXGI Adapter Hook
+## Multi-GPU Support
 
-On Windows systems with multiple GPUs (e.g., laptops with integrated + discrete graphics), an additional challenge exists: **CEF must use the same GPU adapter as Godot** for texture sharing to work.
-
-The DXGI hook solves this by:
-
-1. Receiving the adapter LUID (Locally Unique Identifier) from Godot's rendering device
-2. Hooking `CreateDXGIFactory1` and `CreateDXGIFactory2` functions
-3. Patching the factory's vtable to redirect `EnumAdapters` and `EnumAdapters1` methods
-4. Making only the target adapter visible at index 0, hiding all others
-
-This ensures CEF's renderer subprocess uses the same GPU as Godot, enabling successful texture sharing.
+On systems with multiple GPUs (e.g., laptops with integrated + discrete graphics), **CEF must use the same GPU as Godot** for texture sharing to work. This is handled via command-line switches (`--gpu-vendor-id` and `--gpu-device-id`) passed to CEF subprocesses.
 
 ::: tip
-For detailed information about how GPU device pinning works, including the vtable patching mechanism and debugging tips, see [GPU Device Pinning](./gpu-device-pinning.md).
+For detailed information about how GPU device pinning works, see [GPU Device Pinning](./gpu-device-pinning.md).
 :::
 
 ## Limitations
@@ -106,9 +97,9 @@ If you experience issues with accelerated rendering, try:
 
 | Platform | Architecture | Vulkan Accelerated OSR | Notes |
 |----------|--------------|------------------------|-------|
-| Windows  | x86_64       | ✅ Supported           | Via `vkCreateDevice` + DXGI hooks |
+| Windows  | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
 | Windows  | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
-| Linux    | x86_64       | ✅ Supported           | Via `vkCreateDevice` hook |
+| Linux    | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
 | Linux    | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
 | macOS    | Any          | ❌ Not applicable      | Use Metal backend instead |
 
@@ -148,7 +139,7 @@ If you see messages about extensions not being supported or hook installation fa
 
 ## See Also
 
-- [GPU Device Pinning](./gpu-device-pinning.md) — Multi-GPU support and DXGI adapter filtering
+- [GPU Device Pinning](./gpu-device-pinning.md) — Multi-GPU support via command-line switches
 - [Properties](./properties.md) — `enable_accelerated_osr` property documentation
 - [GitHub Issue #4](https://github.com/dsh0416/godot-cef/issues/4) — Tracking issue for Vulkan support
 

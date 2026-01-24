@@ -3,7 +3,9 @@ use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
 use std::ffi::c_void;
-use windows::Win32::Foundation::{CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
+use windows::Win32::Foundation::{
+    CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, LUID,
+};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_BARRIER,
     D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
@@ -12,6 +14,7 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator,
     ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
 };
+use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory4};
 use windows::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, INFINITE, WaitForSingleObject,
 };
@@ -438,23 +441,59 @@ impl Drop for D3D12TextureImporter {
     }
 }
 
-pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
+/// Get the GPU vendor and device IDs from Godot's D3D12 device.
+pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     let mut rd = RenderingServer::singleton().get_rendering_device()?;
     let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
 
     if device_ptr == 0 {
-        godot_warn!("[AcceleratedOSR/D3D12] Failed to get D3D12 device for LUID query");
+        godot_warn!("[AcceleratedOSR/D3D12] Failed to get D3D12 device for GPU ID query");
         return None;
     }
 
     let device: ID3D12Device = unsafe { ID3D12Device::from_raw(device_ptr as *mut c_void) };
-    let luid = unsafe { device.GetAdapterLuid() };
-    godot_print!("[AcceleratedOSR/D3D12] Godot adapter LUID: {:?}", luid);
+    let target_luid: LUID = unsafe { device.GetAdapterLuid() };
 
     // Device is from Godot, we don't need to close it
     std::mem::forget(device);
 
-    Some((luid.HighPart, luid.LowPart))
+    let factory: IDXGIFactory4 = unsafe { CreateDXGIFactory1() }.ok()?;
+
+    let mut adapter_index = 0u32;
+    loop {
+        let adapter: IDXGIAdapter1 = match unsafe { factory.EnumAdapters1(adapter_index) } {
+            Ok(a) => a,
+            Err(_) => break, // No more adapters
+        };
+
+        let desc = match unsafe { adapter.GetDesc1() } {
+            Ok(d) => d,
+            Err(_) => {
+                adapter_index += 1;
+                continue;
+            }
+        };
+
+        if desc.AdapterLuid.HighPart == target_luid.HighPart
+            && desc.AdapterLuid.LowPart == target_luid.LowPart
+        {
+            let name = String::from_utf16_lossy(&desc.Description)
+                .trim_end_matches('\0')
+                .to_string();
+            godot_print!(
+                "[AcceleratedOSR/D3D12] Godot GPU: vendor=0x{:04x}, device=0x{:04x}, name={}",
+                desc.VendorId,
+                desc.DeviceId,
+                name
+            );
+            return Some((desc.VendorId, desc.DeviceId));
+        }
+
+        adapter_index += 1;
+    }
+
+    godot_warn!("[AcceleratedOSR/D3D12] Could not find adapter matching LUID");
+    None
 }
 
 unsafe impl Send for D3D12TextureImporter {}

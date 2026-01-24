@@ -123,63 +123,32 @@ pub struct SecurityConfig {
     pub disable_web_security: bool,
 }
 
-/// Adapter LUID (Locally Unique Identifier) for GPU selection on Windows.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct AdapterLuid {
-    pub high: i32,
-    pub low: u32,
-}
-
-impl AdapterLuid {
-    pub fn new(high: i32, low: u32) -> Self {
-        Self { high, low }
-    }
-
-    pub fn to_arg_string(&self) -> String {
-        format!("{},{}", self.high, self.low)
-    }
-
-    pub fn from_arg_string(s: &str) -> Option<Self> {
-        let parts: Vec<&str> = s.split(',').collect();
-        if parts.len() != 2 {
-            return None;
-        }
-        let high = parts[0].parse().ok()?;
-        let low = parts[1].parse().ok()?;
-        Some(Self { high, low })
-    }
-}
-
-/// Device UUID for GPU selection on Linux.
+/// GPU device identifiers for GPU selection across all platforms.
 ///
-/// This 16-byte UUID uniquely identifies a Vulkan physical device and can be
-/// used to ensure CEF subprocesses use the same GPU as Godot.
+/// These vendor and device IDs are passed to CEF via `--gpu-vendor-id` and
+/// `--gpu-device-id` command-line switches to ensure CEF uses the same GPU as Godot.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DeviceUuid {
-    pub bytes: [u8; 16],
+pub struct GpuDeviceIds {
+    pub vendor_id: u32,
+    pub device_id: u32,
 }
 
-impl DeviceUuid {
-    pub fn new(bytes: [u8; 16]) -> Self {
-        Self { bytes }
+impl GpuDeviceIds {
+    pub fn new(vendor_id: u32, device_id: u32) -> Self {
+        Self {
+            vendor_id,
+            device_id,
+        }
     }
 
-    /// Convert to a hex string for passing as command line argument
-    pub fn to_arg_string(&self) -> String {
-        self.bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    /// Format vendor ID as decimal string for command line argument
+    pub fn to_vendor_arg(&self) -> String {
+        format!("{}", self.vendor_id)
     }
 
-    /// Parse from hex string (32 hex characters)
-    pub fn from_arg_string(s: &str) -> Option<Self> {
-        if s.len() != 32 {
-            return None;
-        }
-        let mut bytes = [0u8; 16];
-        for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
-            let hex_str = std::str::from_utf8(chunk).ok()?;
-            bytes[i] = u8::from_str_radix(hex_str, 16).ok()?;
-        }
-        Some(Self { bytes })
+    /// Format device ID as decimal string for command line argument
+    pub fn to_device_arg(&self) -> String {
+        format!("{}", self.device_id)
     }
 }
 
@@ -188,10 +157,8 @@ pub struct OsrApp {
     godot_backend: GodotRenderBackend,
     enable_remote_debugging: bool,
     security_config: SecurityConfig,
-    /// Adapter LUID for GPU selection (Windows only)
-    adapter_luid: Option<AdapterLuid>,
-    /// Device UUID for GPU selection (Linux only)
-    device_uuid: Option<DeviceUuid>,
+    /// GPU device IDs for GPU selection (all platforms)
+    gpu_device_ids: Option<GpuDeviceIds>,
 }
 
 impl Default for OsrApp {
@@ -206,8 +173,7 @@ impl OsrApp {
             godot_backend: GodotRenderBackend::Unknown,
             enable_remote_debugging: false,
             security_config: SecurityConfig::default(),
-            adapter_luid: None,
-            device_uuid: None,
+            gpu_device_ids: None,
         }
     }
 
@@ -216,8 +182,7 @@ impl OsrApp {
             godot_backend,
             enable_remote_debugging: false,
             security_config: SecurityConfig::default(),
-            adapter_luid: None,
-            device_uuid: None,
+            gpu_device_ids: None,
         }
     }
 
@@ -230,8 +195,7 @@ impl OsrApp {
             godot_backend,
             enable_remote_debugging,
             security_config: SecurityConfig::default(),
-            adapter_luid: None,
-            device_uuid: None,
+            gpu_device_ids: None,
         }
     }
 
@@ -244,18 +208,12 @@ impl OsrApp {
             godot_backend,
             enable_remote_debugging,
             security_config,
-            adapter_luid: None,
-            device_uuid: None,
+            gpu_device_ids: None,
         }
     }
 
-    pub fn with_adapter_luid(mut self, high: i32, low: u32) -> Self {
-        self.adapter_luid = Some(AdapterLuid::new(high, low));
-        self
-    }
-
-    pub fn with_device_uuid(mut self, uuid: [u8; 16]) -> Self {
-        self.device_uuid = Some(DeviceUuid::new(uuid));
+    pub fn with_gpu_device_ids(mut self, vendor_id: u32, device_id: u32) -> Self {
+        self.gpu_device_ids = Some(GpuDeviceIds::new(vendor_id, device_id));
         self
     }
 
@@ -271,12 +229,8 @@ impl OsrApp {
         &self.security_config
     }
 
-    pub fn adapter_luid(&self) -> Option<AdapterLuid> {
-        self.adapter_luid
-    }
-
-    pub fn device_uuid(&self) -> Option<DeviceUuid> {
-        self.device_uuid
+    pub fn gpu_device_ids(&self) -> Option<GpuDeviceIds> {
+        self.gpu_device_ids
     }
 }
 
@@ -336,8 +290,7 @@ wrap_app! {
             Some(BrowserProcessHandlerBuilder::build(
                 OsrBrowserProcessHandler::new(
                     self.app.security_config().clone(),
-                    self.app.adapter_luid(),
-                    self.app.device_uuid(),
+                    self.app.gpu_device_ids(),
                 ),
             ))
         }
@@ -360,27 +313,21 @@ impl AppBuilder {
 pub struct OsrBrowserProcessHandler {
     is_cef_ready: RefCell<bool>,
     security_config: SecurityConfig,
-    adapter_luid: Option<AdapterLuid>,
-    device_uuid: Option<DeviceUuid>,
+    gpu_device_ids: Option<GpuDeviceIds>,
 }
 
 impl Default for OsrBrowserProcessHandler {
     fn default() -> Self {
-        Self::new(SecurityConfig::default(), None, None)
+        Self::new(SecurityConfig::default(), None)
     }
 }
 
 impl OsrBrowserProcessHandler {
-    pub fn new(
-        security_config: SecurityConfig,
-        adapter_luid: Option<AdapterLuid>,
-        device_uuid: Option<DeviceUuid>,
-    ) -> Self {
+    pub fn new(security_config: SecurityConfig, gpu_device_ids: Option<GpuDeviceIds>) -> Self {
         Self {
             is_cef_ready: RefCell::new(false),
             security_config,
-            adapter_luid,
-            device_uuid,
+            gpu_device_ids,
         }
     }
 }
@@ -415,19 +362,14 @@ wrap_browser_process_handler! {
             command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
             command_line.append_switch(Some(&"enable-logging=stderr".into()));
 
-            if let Some(luid) = &self.handler.adapter_luid {
-                let luid_str = luid.to_arg_string();
+            if let Some(ids) = &self.handler.gpu_device_ids {
                 command_line.append_switch_with_value(
-                    Some(&"godot-adapter-luid".into()),
-                    Some(&luid_str.as_str().into()),
+                    Some(&"gpu-vendor-id".into()),
+                    Some(&ids.to_vendor_arg().as_str().into()),
                 );
-            }
-
-            if let Some(uuid) = &self.handler.device_uuid {
-                let uuid_str = uuid.to_arg_string();
                 command_line.append_switch_with_value(
-                    Some(&"godot-device-uuid".into()),
-                    Some(&uuid_str.as_str().into()),
+                    Some(&"gpu-device-id".into()),
+                    Some(&ids.to_device_arg().as_str().into()),
                 );
             }
         }

@@ -14,13 +14,15 @@ use std::sync::{Arc, Mutex};
 #[cfg(target_os = "linux")]
 pub use linux::GodotTextureImporter;
 #[cfg(target_os = "linux")]
-pub use linux::get_godot_device_uuid;
+pub use linux::get_godot_gpu_device_ids;
 #[cfg(target_os = "macos")]
 pub use macos::GodotTextureImporter;
+#[cfg(target_os = "macos")]
+pub use macos::get_godot_gpu_device_ids;
 #[cfg(target_os = "windows")]
 pub use windows::GodotTextureImporter;
 #[cfg(target_os = "windows")]
-pub use windows::get_godot_adapter_luid;
+pub use windows::get_godot_gpu_device_ids;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderBackend {

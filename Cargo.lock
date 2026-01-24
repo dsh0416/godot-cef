@@ -668,7 +668,6 @@ dependencies = [
  "cef_app",
  "libloading 0.9.0",
  "process_path",
- "retour",
  "windows",
  "windows-sys 0.61.2",
 ]
