@@ -36,8 +36,15 @@ impl CefTexture {
             // Clear the RD texture RID from the Texture2Drd to break the reference
             // before we free the underlying RD texture.
             texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
-            if let Ok(state) = render_state.lock() {
+            if let Some(popup_texture_2d_rd) = &mut self.popup_texture_2d_rd {
+                popup_texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
+            }
+            if let Ok(mut state) = render_state.lock() {
                 render::free_rd_texture(state.dst_rd_rid);
+                // Also free popup texture RID if it exists
+                if let Some(popup_rid) = state.popup_rd_rid.take() {
+                    render::free_rd_texture(popup_rid);
+                }
             }
         }
 
@@ -72,17 +79,7 @@ impl CefTexture {
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
-            if let Some(texture_2d_rd) = &mut self.popup_texture_2d_rd {
-                texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
-            }
             self.popup_texture_2d_rd = None;
-
-            if let Some(RenderMode::Accelerated { render_state, .. }) = &self.app.render_mode
-                && let Ok(mut state) = render_state.lock()
-                && let Some(popup_rid) = state.popup_rd_rid.take()
-            {
-                render::free_rd_texture(popup_rid);
-            }
         }
 
         crate::cef_init::cef_release();
