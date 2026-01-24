@@ -515,8 +515,6 @@ impl VulkanTextureImporter {
         let result =
             unsafe { (fns.create_image)(self.device, &image_info, std::ptr::null(), &mut image) };
         if result != vk::Result::SUCCESS {
-            // Clean up duplicated handle on failure
-            let _ = unsafe { CloseHandle(duplicated_handle) };
             return Err(format!("Failed to create image: {:?}", result));
         }
 
@@ -524,11 +522,9 @@ impl VulkanTextureImporter {
         let memory = match self.import_memory_for_image(duplicated_handle, image, width, height) {
             Ok(mem) => mem,
             Err(e) => {
-                // Clean up on failure
                 unsafe {
                     (fns.destroy_image)(self.device, image, std::ptr::null());
                 }
-                let _ = unsafe { CloseHandle(duplicated_handle) };
                 return Err(e);
             }
         };
