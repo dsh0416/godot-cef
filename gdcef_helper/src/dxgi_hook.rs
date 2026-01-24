@@ -307,16 +307,18 @@ unsafe fn get_vtable(obj: *mut c_void) -> *mut *mut c_void {
 // IDXGIObject: 4 methods (SetPrivateData, SetPrivateDataInterface, GetPrivateData, GetParent) - indices 3-6
 // IDXGIFactory: 5 methods (EnumAdapters, MakeWindowAssociation, GetWindowAssociation, CreateSwapChain, CreateSoftwareAdapter) - indices 7-11
 // IDXGIFactory1: 2 methods (EnumAdapters1, IsCurrent) - indices 12-13
-// IDXGIFactory2: 4 methods (IsWindowedStereoEnabled, CreateSwapChainForHwnd, CreateSwapChainForCoreWindow,
-//                          GetSharedResourceAdapterLuid, RegisterStereoStatusWindow, ...) - indices 14-17
-// IDXGIFactory3: 1 method (GetCreationFlags) - index 18
-// IDXGIFactory4: 2 methods (EnumAdapterByLuid, EnumWarpAdapter) - indices 19-20
-// IDXGIFactory5: 1 method (CheckFeatureSupport) - index 21
-// IDXGIFactory6: 2 methods (EnumAdapterByGpuPreference, RegisterAdaptersChangedEvent) - indices 22-23
+// IDXGIFactory2: 11 methods (IsWindowedStereoEnabled, CreateSwapChainForHwnd, CreateSwapChainForCoreWindow,
+//                           GetSharedResourceAdapterLuid, RegisterStereoStatusWindow, RegisterStereoStatusEvent,
+//                           UnregisterStereoStatus, RegisterOcclusionStatusWindow, RegisterOcclusionStatusEvent,
+//                           UnregisterOcclusionStatus, CreateSwapChainForComposition) - indices 14-24
+// IDXGIFactory3: 1 method (GetCreationFlags) - index 25
+// IDXGIFactory4: 2 methods (EnumAdapterByLuid, EnumWarpAdapter) - indices 26-27
+// IDXGIFactory5: 1 method (CheckFeatureSupport) - index 28
+// IDXGIFactory6: 2 methods (EnumAdapterByGpuPreference, RegisterAdaptersChangedEvent) - indices 29-30
 const ENUM_ADAPTERS_VTABLE_INDEX: usize = 7;
 const ENUM_ADAPTERS1_VTABLE_INDEX: usize = 12;
-const ENUM_ADAPTER_BY_LUID_VTABLE_INDEX: usize = 19;
-const ENUM_ADAPTER_BY_GPU_PREFERENCE_VTABLE_INDEX: usize = 22;
+const ENUM_ADAPTER_BY_LUID_VTABLE_INDEX: usize = 26;
+const ENUM_ADAPTER_BY_GPU_PREFERENCE_VTABLE_INDEX: usize = 29;
 
 struct MemoryProtectionGuard {
     address: *const c_void,

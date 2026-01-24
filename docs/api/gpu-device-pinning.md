@@ -84,9 +84,10 @@ COM interfaces like `IDXGIFactory` use virtual function tables (vtables). We pat
 |--------------|--------|-----------------|
 | 7 | `EnumAdapters` | Redirect to our filter |
 | 12 | `EnumAdapters1` | Redirect to our filter |
-| 19 | `EnumAdapterByLuid` | Block non-target LUIDs (IDXGIFactory4) |
-| 22 | `EnumAdapterByGpuPreference` | Always return target adapter (IDXGIFactory6) |
+| 19 | `EnumAdapterByLuid` | Block non-target LUIDs (only when the factory supports `IDXGIFactory4`) |
+| 22 | `EnumAdapterByGpuPreference` | Always return target adapter (only when the factory supports `IDXGIFactory6`) |
 
+**Important:** The indices for `EnumAdapterByLuid` and `EnumAdapterByGpuPreference` are only valid when the created DXGI factory successfully exposes `IDXGIFactory4`/`IDXGIFactory6` (for example, via `QueryInterface`). On older DXGI versions these methods do not exist, so patching must be conditional on obtaining those newer interfaces to avoid out-of-bounds vtable access.
 The patched methods implement adapter filtering:
 
 ```
