@@ -458,7 +458,7 @@ impl VulkanTextureImporter {
     }
 
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
-        let pending = match self.pending_copy.take() {
+        let mut pending = match self.pending_copy.take() {
             Some(p) => p,
             None => return Ok(()), // Nothing to do
         };
@@ -473,8 +473,8 @@ impl VulkanTextureImporter {
             self.copy_in_flight = false;
         }
 
-        let params = DmaBufImportParams {
-            fds: pending.fds.clone(),
+        let mut params = DmaBufImportParams {
+            fds: std::mem::take(&mut pending.fds),
             strides: pending.strides.clone(),
             offsets: pending.offsets.clone(),
             modifier: pending.modifier,
@@ -484,7 +484,15 @@ impl VulkanTextureImporter {
         };
 
         // Import the DMA-BUF as a Vulkan image
-        let src_image = self.import_dmabuf_to_image(&params)?;
+        let result = self.import_dmabuf_to_image(&mut params);
+
+        for fd in &params.fds {
+            if *fd >= 0 {
+                unsafe { libc::close(*fd) };
+            }
+        }
+
+        let src_image = result?;
 
         // Get destination Vulkan image from Godot's RenderingDevice
         let dst_image: vk::Image = {
@@ -521,7 +529,7 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    fn import_dmabuf_to_image(&mut self, params: &DmaBufImportParams) -> Result<vk::Image, String> {
+    fn import_dmabuf_to_image(&mut self, params: &mut DmaBufImportParams) -> Result<vk::Image, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
 
         // Always free previous image - we get new fds every frame
@@ -599,7 +607,7 @@ impl VulkanTextureImporter {
 
     fn import_memory_for_dmabuf(
         &mut self,
-        params: &DmaBufImportParams,
+        params: &mut DmaBufImportParams,
         image: vk::Image,
     ) -> Result<vk::DeviceMemory, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
@@ -654,6 +662,8 @@ impl VulkanTextureImporter {
         if result != vk::Result::SUCCESS {
             return Err(format!("Failed to allocate/import memory: {:?}", result));
         }
+
+        params.fds[0] = -1;
 
         // Bind image to memory
         let result = unsafe { (fns.bind_image_memory)(self.device, image, memory, 0) };
