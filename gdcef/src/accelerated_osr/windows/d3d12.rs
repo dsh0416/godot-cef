@@ -17,9 +17,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::core::Interface;
 
-/// Pending copy operation queued from on_accelerated_paint callback.
 pub struct PendingD3D12Copy {
-    /// Our duplicated handle (we own this, keeps D3D12 resource alive)
     duplicated_handle: HANDLE,
     width: u32,
     height: u32,
@@ -27,23 +25,18 @@ pub struct PendingD3D12Copy {
 
 impl Drop for PendingD3D12Copy {
     fn drop(&mut self) {
-        // If pending copy is dropped without being processed, close the handle
         if !self.duplicated_handle.is_invalid() {
             let _ = unsafe { CloseHandle(self.duplicated_handle) };
         }
     }
 }
 
-/// Imported D3D12 resource with its duplicated handle
 struct ImportedD3D12Resource {
-    /// Our duplicated handle that we own (keeps the D3D12 resource alive)
     duplicated_handle: HANDLE,
-    /// The opened D3D12 resource (held to keep it alive during GPU operations)
     #[allow(dead_code)]
     resource: ID3D12Resource,
 }
 
-/// Duplicates a Windows HANDLE so we can extend its lifetime beyond CEF's callback.
 fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
     let mut duplicated = HANDLE::default();
     let current_process = unsafe { GetCurrentProcess() };
@@ -70,11 +63,8 @@ pub struct D3D12TextureImporter {
     fence_value: u64,
     fence_event: HANDLE,
     device_removed_logged: bool,
-    /// Pending copy operation to be processed later
     pending_copy: Option<PendingD3D12Copy>,
-    /// Currently imported resource (kept alive for GPU operations)
     imported_resource: Option<ImportedD3D12Resource>,
-    /// Whether there's a GPU operation in flight (submitted but not waited on)
     copy_in_flight: bool,
 }
 
@@ -225,9 +215,6 @@ impl D3D12TextureImporter {
         Ok(resource)
     }
 
-    /// Queue a copy operation for deferred processing.
-    /// This method returns immediately after duplicating the handle.
-    /// Call `process_pending_copy()` later to actually perform the GPU work.
     pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
         let handle = HANDLE(info.shared_texture_handle);
         if handle.is_invalid() {
@@ -254,15 +241,11 @@ impl D3D12TextureImporter {
         Ok(())
     }
 
-    /// Returns true if there's a pending copy operation waiting to be processed.
     #[allow(dead_code)]
     pub fn has_pending_copy(&self) -> bool {
         self.pending_copy.is_some()
     }
 
-    /// Process the pending copy operation. This does the actual GPU work.
-    /// Should be called from Godot's main loop, not from CEF callbacks.
-    /// The dst_rd_rid is passed at processing time so resize can update the destination.
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         self.check_device_state()?;
 
@@ -333,7 +316,6 @@ impl D3D12TextureImporter {
         Ok(())
     }
 
-    /// Wait for any in-flight copy to complete.
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         if !self.copy_in_flight {
             return Ok(());
@@ -355,7 +337,6 @@ impl D3D12TextureImporter {
         Ok(())
     }
 
-    /// Submit copy command asynchronously (does not wait for completion).
     fn submit_copy_async(
         &mut self,
         src_resource: &ID3D12Resource,
@@ -440,11 +421,8 @@ impl D3D12TextureImporter {
         Ok(())
     }
 
-    /// Frees the imported resource and closes its duplicated handle.
     fn free_imported_resource(&mut self) {
         if let Some(imported) = self.imported_resource.take() {
-            // Close our duplicated handle - this releases our reference to the D3D12 resource
-            // The ID3D12Resource will be dropped automatically, releasing its COM refcount
             let _ = unsafe { CloseHandle(imported.duplicated_handle) };
         }
     }
@@ -452,15 +430,11 @@ impl D3D12TextureImporter {
 
 impl Drop for D3D12TextureImporter {
     fn drop(&mut self) {
-        // Wait for in-flight copy to complete
         if self.copy_in_flight {
             let _ = self.wait_for_copy();
         }
 
-        // Drop pending copy (will close its handle)
         self.pending_copy = None;
-
-        // Free imported resource
         self.free_imported_resource();
 
         if !self.fence_event.is_invalid() {

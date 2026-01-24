@@ -14,26 +14,18 @@ use std::os::fd::RawFd;
 /// DRM format modifier indicating invalid/linear modifier
 const DRM_FORMAT_MOD_INVALID: u64 = 0x00ffffffffffffff;
 
-/// Pending copy operation queued from on_accelerated_paint callback.
 pub struct PendingLinuxCopy {
-    /// Duplicated file descriptors for each plane (we own these)
     fds: Vec<RawFd>,
-    /// Stride (pitch) for each plane
     strides: Vec<u32>,
-    /// Offset for each plane
     offsets: Vec<u64>,
-    /// DRM format modifier
     modifier: u64,
-    /// Vulkan format to use
     format: vk::Format,
-    /// Image dimensions
     width: u32,
     height: u32,
 }
 
 impl Drop for PendingLinuxCopy {
     fn drop(&mut self) {
-        // Close our duplicated file descriptors
         for fd in &self.fds {
             if *fd >= 0 {
                 unsafe { libc::close(*fd) };
@@ -42,19 +34,12 @@ impl Drop for PendingLinuxCopy {
     }
 }
 
-/// Parameters for DMA-BUF import extracted from AcceleratedPaintInfo
 struct DmaBufImportParams {
-    /// File descriptors for each plane
     fds: Vec<RawFd>,
-    /// Stride (pitch) for each plane
     strides: Vec<u32>,
-    /// Offset for each plane
     offsets: Vec<u64>,
-    /// DRM format modifier
     modifier: u64,
-    /// Vulkan format to use
     format: vk::Format,
-    /// Image dimensions
     width: u32,
     height: u32,
 }
@@ -77,9 +62,7 @@ pub struct VulkanTextureImporter {
     get_memory_fd_properties: PfnVkGetMemoryFdPropertiesKHR,
     cached_memory_type_index: Option<u32>,
     imported_image: Option<ImportedVulkanImage>,
-    /// Pending copy operation to be processed later
     pending_copy: Option<PendingLinuxCopy>,
-    /// Whether there's a GPU operation in flight (submitted but not waited on)
     copy_in_flight: bool,
 }
 
@@ -333,8 +316,6 @@ impl VulkanTextureImporter {
         }
     }
 
-    /// Try to find a separate queue for copy operations to avoid conflicts with Godot's graphics queue.
-    /// Returns (queue_family_index, queue_index, uses_separate_queue).
     fn find_copy_queue(
         lib: &libloading::Library,
         physical_device: vk::PhysicalDevice,
@@ -415,9 +396,6 @@ impl VulkanTextureImporter {
         default
     }
 
-    /// Queue a copy operation for deferred processing.
-    /// This method returns immediately after duplicating the file descriptors.
-    /// Call `process_pending_copy()` later to actually perform the GPU work.
     pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
         // Extract DMA-BUF parameters from all planes
         let plane_count = info.plane_count as usize;
@@ -479,15 +457,11 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    /// Returns true if there's a pending copy operation waiting to be processed.
     #[allow(dead_code)]
     pub fn has_pending_copy(&self) -> bool {
         self.pending_copy.is_some()
     }
 
-    /// Process the pending copy operation. This does the actual GPU work.
-    /// Should be called from Godot's main loop, not from CEF callbacks.
-    /// The dst_rd_rid is passed at processing time so resize can update the destination.
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         let pending = match self.pending_copy.take() {
             Some(p) => p,
@@ -537,7 +511,6 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    /// Wait for any in-flight copy to complete.
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         if !self.copy_in_flight {
             return Ok(());
@@ -706,8 +679,6 @@ impl VulkanTextureImporter {
         Some(type_filter.trailing_zeros())
     }
 
-    /// Submit a copy command asynchronously (does not wait for completion).
-    /// Call wait_for_copy() to ensure the copy is complete.
     fn submit_copy_async(
         &mut self,
         src: vk::Image,

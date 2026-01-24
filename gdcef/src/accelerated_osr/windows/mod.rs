@@ -73,9 +73,6 @@ impl GodotTextureImporter {
         })
     }
 
-    /// Queue a copy operation for deferred processing.
-    /// This method returns immediately after duplicating the handle.
-    /// Call `process_pending_copy()` later to actually perform the GPU work.
     pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
         match &mut self.backend {
             TextureImporterBackend::D3D12(importer) => importer.queue_copy(info),
@@ -83,7 +80,6 @@ impl GodotTextureImporter {
         }
     }
 
-    /// Returns true if there's a pending copy operation waiting to be processed.
     #[allow(dead_code)]
     pub fn has_pending_copy(&self) -> bool {
         match &self.backend {
@@ -92,9 +88,6 @@ impl GodotTextureImporter {
         }
     }
 
-    /// Process the pending copy operation. This does the actual GPU work.
-    /// Should be called from Godot's main loop, not from CEF callbacks.
-    /// The dst_rd_rid is passed at processing time so resize can update the destination.
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         match &mut self.backend {
             TextureImporterBackend::D3D12(importer) => importer.process_pending_copy(dst_rd_rid),
@@ -102,7 +95,6 @@ impl GodotTextureImporter {
         }
     }
 
-    /// Wait for any in-flight copy to complete.
     #[allow(dead_code)]
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         match &mut self.backend {

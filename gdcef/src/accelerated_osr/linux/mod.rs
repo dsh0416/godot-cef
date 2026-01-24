@@ -46,27 +46,19 @@ impl GodotTextureImporter {
         }
     }
 
-    /// Queue a copy operation for deferred processing.
-    /// This method returns immediately after duplicating the file descriptors.
-    /// Call `process_pending_copy()` later to actually perform the GPU work.
     pub fn queue_copy(&mut self, info: &AcceleratedPaintInfo) -> Result<(), String> {
         self.vulkan_importer.queue_copy(info)
     }
 
-    /// Returns true if there's a pending copy operation waiting to be processed.
     #[allow(dead_code)]
     pub fn has_pending_copy(&self) -> bool {
         self.vulkan_importer.has_pending_copy()
     }
 
-    /// Process the pending copy operation. This does the actual GPU work.
-    /// Should be called from Godot's main loop, not from CEF callbacks.
-    /// The dst_rd_rid is passed at processing time so resize can update the destination.
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         self.vulkan_importer.process_pending_copy(dst_rd_rid)
     }
 
-    /// Wait for any in-flight copy to complete.
     #[allow(dead_code)]
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         self.vulkan_importer.wait_for_copy()

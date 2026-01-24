@@ -13,10 +13,7 @@ type PfnVkGetMemoryWin32HandlePropertiesKHR = unsafe extern "system" fn(
     p_memory_win32_handle_properties: *mut vk::MemoryWin32HandlePropertiesKHR<'_>,
 ) -> vk::Result;
 
-/// Pending copy operation queued from on_accelerated_paint callback.
-/// This allows the callback to return immediately without blocking.
 pub struct PendingVulkanCopy {
-    /// Our duplicated handle (we own this, keeps D3D12 resource alive)
     duplicated_handle: HANDLE,
     width: u32,
     height: u32,
@@ -24,7 +21,6 @@ pub struct PendingVulkanCopy {
 
 impl Drop for PendingVulkanCopy {
     fn drop(&mut self) {
-        // If pending copy is dropped without being processed, close the handle
         if !self.duplicated_handle.is_invalid() {
             let _ = unsafe { CloseHandle(self.duplicated_handle) };
         }
@@ -42,14 +38,11 @@ pub struct VulkanTextureImporter {
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
     cached_memory_type_index: Option<u32>,
     imported_image: Option<ImportedVulkanImage>,
-    /// Pending copy operation to be processed later
     pending_copy: Option<PendingVulkanCopy>,
-    /// Whether there's a GPU operation in flight (submitted but not waited on)
     copy_in_flight: bool,
 }
 
 struct ImportedVulkanImage {
-    /// Our duplicated handle that we own (keeps the D3D12 resource alive)
     duplicated_handle: HANDLE,
     image: vk::Image,
     memory: vk::DeviceMemory,
@@ -80,8 +73,6 @@ struct VulkanFunctions {
 
 static VULKAN_FNS: std::sync::OnceLock<VulkanFunctions> = std::sync::OnceLock::new();
 
-/// Duplicates a Windows HANDLE so we can extend its lifetime beyond CEF's callback.
-/// This is necessary because Vulkan's external memory import does NOT duplicate the handle.
 fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
     let mut duplicated = HANDLE::default();
     let current_process = unsafe { GetCurrentProcess() };
@@ -317,8 +308,6 @@ impl VulkanTextureImporter {
         }
     }
 
-    /// Try to find a separate queue for copy operations to avoid conflicts with Godot's graphics queue.
-    /// Returns (queue_family_index, queue_index, uses_separate_queue).
     fn find_copy_queue(
         lib: &libloading::Library,
         physical_device: vk::PhysicalDevice,
@@ -400,9 +389,6 @@ impl VulkanTextureImporter {
         default
     }
 
-    /// Queue a copy operation for deferred processing.
-    /// This method returns immediately after duplicating the handle.
-    /// Call `process_pending_copy()` later to actually perform the GPU work.
     pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
         let handle = HANDLE(info.shared_texture_handle);
         if handle.is_invalid() {
@@ -429,15 +415,11 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    /// Returns true if there's a pending copy operation waiting to be processed.
     #[allow(dead_code)]
     pub fn has_pending_copy(&self) -> bool {
         self.pending_copy.is_some()
     }
 
-    /// Process the pending copy operation. This does the actual GPU work.
-    /// Should be called from Godot's main loop, not from CEF callbacks.
-    /// The dst_rd_rid is passed at processing time so resize can update the destination.
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         let pending = match self.pending_copy.take() {
             Some(p) => p,
@@ -487,7 +469,6 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    /// Wait for any in-flight copy to complete.
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         if !self.copy_in_flight {
             return Ok(());
@@ -503,8 +484,6 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    /// Import an already-duplicated handle as a Vulkan image.
-    /// The handle ownership is transferred to this function.
     fn import_handle_to_image_from_duplicated(
         &mut self,
         duplicated_handle: HANDLE,
@@ -645,8 +624,6 @@ impl VulkanTextureImporter {
         Some(type_filter.trailing_zeros())
     }
 
-    /// Submit a copy command asynchronously (does not wait for completion).
-    /// Call wait_for_copy() to ensure the copy is complete.
     fn submit_copy_async(
         &mut self,
         src: vk::Image,
@@ -807,7 +784,6 @@ impl VulkanTextureImporter {
             unsafe {
                 (fns.destroy_image)(self.device, img.image, std::ptr::null());
                 (fns.free_memory)(self.device, img.memory, std::ptr::null());
-                // Close our duplicated handle - this releases our reference to the D3D12 resource
                 let _ = CloseHandle(img.duplicated_handle);
             }
         }
@@ -816,12 +792,10 @@ impl VulkanTextureImporter {
 
 impl Drop for VulkanTextureImporter {
     fn drop(&mut self) {
-        // Wait for in-flight copy to complete before cleanup
         if self.copy_in_flight {
             let _ = self.wait_for_copy();
         }
 
-        // Drop pending copy (will close its handle)
         self.pending_copy = None;
 
         self.free_imported_image();

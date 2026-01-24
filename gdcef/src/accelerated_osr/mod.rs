@@ -85,7 +85,6 @@ pub struct AcceleratedRenderState {
     pub popup_dirty: bool,
     pub popup_has_content: bool,
     pub needs_popup_texture: Option<(u32, u32)>,
-    /// Flag indicating there's a pending copy that needs processing
     pub has_pending_copy: bool,
 }
 
@@ -107,8 +106,6 @@ impl AcceleratedRenderState {
         }
     }
 
-    /// Process any pending copy operation. Call this from Godot's main loop.
-    /// Uses the current dst_rd_rid, so this should be called AFTER any resize.
     pub fn process_pending_copy(&mut self) -> Result<(), String> {
         if !self.has_pending_copy {
             return Ok(());
@@ -119,7 +116,6 @@ impl AcceleratedRenderState {
         Ok(())
     }
 
-    /// Wait for any in-flight GPU copy to complete.
     #[allow(dead_code)]
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         self.importer.wait_for_copy()
