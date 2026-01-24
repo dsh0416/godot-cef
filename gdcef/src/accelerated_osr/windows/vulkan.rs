@@ -133,7 +133,7 @@ impl VulkanTextureImporter {
         let physical_device_ptr =
             rd.get_driver_resource(DriverResource::PHYSICAL_DEVICE, Rid::Invalid, 0);
         let physical_device: vk::PhysicalDevice = if physical_device_ptr != 0 {
-            unsafe { std::mem::transmute(physical_device_ptr) }
+            unsafe { std::mem::transmute::<u64, vk::PhysicalDevice>(physical_device_ptr) }
         } else {
             vk::PhysicalDevice::null()
         };

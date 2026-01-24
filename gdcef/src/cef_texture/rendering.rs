@@ -253,11 +253,10 @@ impl CefTexture {
                 None
             };
 
-            if state.has_pending_copy {
-                if let Err(e) = state.process_pending_copy() {
+            if state.has_pending_copy
+                && let Err(e) = state.process_pending_copy() {
                     godot::global::godot_error!("[CefTexture] Failed to process pending copy: {}", e);
                 }
-            }
 
             drop(state);
 
