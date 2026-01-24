@@ -80,14 +80,6 @@ impl GodotTextureImporter {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn has_pending_copy(&self) -> bool {
-        match &self.backend {
-            TextureImporterBackend::D3D12(importer) => importer.has_pending_copy(),
-            TextureImporterBackend::Vulkan(importer) => importer.has_pending_copy(),
-        }
-    }
-
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         match &mut self.backend {
             TextureImporterBackend::D3D12(importer) => importer.process_pending_copy(dst_rd_rid),
@@ -95,7 +87,6 @@ impl GodotTextureImporter {
         }
     }
 
-    #[allow(dead_code)]
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         match &mut self.backend {
             TextureImporterBackend::D3D12(importer) => importer.wait_for_copy(),

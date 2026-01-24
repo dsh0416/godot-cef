@@ -50,16 +50,10 @@ impl GodotTextureImporter {
         self.vulkan_importer.queue_copy(info)
     }
 
-    #[allow(dead_code)]
-    pub fn has_pending_copy(&self) -> bool {
-        self.vulkan_importer.has_pending_copy()
-    }
-
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         self.vulkan_importer.process_pending_copy(dst_rd_rid)
     }
 
-    #[allow(dead_code)]
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         self.vulkan_importer.wait_for_copy()
     }

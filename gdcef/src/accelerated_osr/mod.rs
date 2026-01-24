@@ -115,11 +115,6 @@ impl AcceleratedRenderState {
         self.has_pending_copy = false;
         Ok(())
     }
-
-    #[allow(dead_code)]
-    pub fn wait_for_copy(&mut self) -> Result<(), String> {
-        self.importer.wait_for_copy()
-    }
 }
 
 #[derive(Clone)]

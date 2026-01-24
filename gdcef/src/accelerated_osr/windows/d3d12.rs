@@ -241,11 +241,6 @@ impl D3D12TextureImporter {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn has_pending_copy(&self) -> bool {
-        self.pending_copy.is_some()
-    }
-
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
         self.check_device_state()?;
 
