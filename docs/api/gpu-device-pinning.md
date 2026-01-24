@@ -84,6 +84,8 @@ COM interfaces like `IDXGIFactory` use virtual function tables (vtables). We pat
 |--------------|--------|-----------------|
 | 7 | `EnumAdapters` | Redirect to our filter |
 | 12 | `EnumAdapters1` | Redirect to our filter |
+| 19 | `EnumAdapterByLuid` | Block non-target LUIDs (IDXGIFactory4) |
+| 22 | `EnumAdapterByGpuPreference` | Always return target adapter (IDXGIFactory6) |
 
 The patched methods implement adapter filtering:
 
@@ -190,6 +192,8 @@ A mutex protects vtable patching to prevent race conditions when multiple factor
 Original function pointers are stored atomically:
 - `ORIGINAL_ENUM_ADAPTERS` — For `IDXGIFactory::EnumAdapters`
 - `ORIGINAL_ENUM_ADAPTERS1` — For `IDXGIFactory1::EnumAdapters1`
+- `ORIGINAL_ENUM_ADAPTER_BY_LUID` — For `IDXGIFactory4::EnumAdapterByLuid`
+- `ORIGINAL_ENUM_ADAPTER_BY_GPU_PREFERENCE` — For `IDXGIFactory6::EnumAdapterByGpuPreference`
 
 This ensures the filter can call the real enumeration functions to access the target adapter.
 
