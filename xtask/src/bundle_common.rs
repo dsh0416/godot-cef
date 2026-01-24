@@ -244,3 +244,75 @@ pub fn run_lipo(
     }
     Ok(())
 }
+
+pub fn get_addon_bin_dir(platform_target: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask should be in workspace")
+        .join("addons/godot_cef/bin")
+        .join(platform_target)
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub fn deploy_to_addon(
+    source_dir: &Path,
+    platform_target: &str,
+    files: &[&str],
+    dirs: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let addon_bin_dir = get_addon_bin_dir(platform_target);
+
+    println!("Deploying to addon: {}", addon_bin_dir.display());
+
+    if addon_bin_dir.exists() {
+        fs::remove_dir_all(&addon_bin_dir)?;
+    }
+    fs::create_dir_all(&addon_bin_dir)?;
+
+    for file in files {
+        let src = source_dir.join(file);
+        let dst = addon_bin_dir.join(file);
+
+        if src.exists() {
+            fs::copy(&src, &dst)?;
+            println!("  Deployed: {}", file);
+        }
+    }
+
+    for dir in dirs {
+        let src = source_dir.join(dir);
+        let dst = addon_bin_dir.join(dir);
+
+        if src.exists() {
+            copy_directory(&src, &dst)?;
+            println!("  Deployed directory: {}", dir);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn deploy_bundle_to_addon(
+    bundle_path: &Path,
+    platform_target: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let addon_bin_dir = get_addon_bin_dir(platform_target);
+
+    println!("Deploying bundle to addon: {}", addon_bin_dir.display());
+
+    fs::create_dir_all(&addon_bin_dir)?;
+
+    let bundle_name = bundle_path
+        .file_name()
+        .ok_or("Invalid bundle path")?;
+    let dst = addon_bin_dir.join(bundle_name);
+
+    if dst.exists() {
+        fs::remove_dir_all(&dst)?;
+    }
+    copy_directory(bundle_path, &dst)?;
+    println!("  Deployed: {}", bundle_name.to_string_lossy());
+
+    Ok(())
+}

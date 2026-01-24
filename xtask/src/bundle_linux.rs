@@ -1,9 +1,11 @@
 //! Linux bundling - copies CEF assets alongside the built binaries
 
-use crate::bundle_common::{copy_directory, get_cef_dir, get_target_dir, run_cargo};
+use crate::bundle_common::{copy_directory, deploy_to_addon, get_cef_dir, get_target_dir, run_cargo};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
+
+const PLATFORM_TARGET: &str = "x86_64-unknown-linux-gnu";
 
 /// CEF files that need to be copied to the target directory
 const CEF_FILES: &[&str] = &[
@@ -97,9 +99,31 @@ fn strip_cef_binaries(target_dir: &Path) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
+/// Files to deploy to the addon directory
+const DEPLOY_FILES: &[&str] = &[
+    "libgdcef.so",
+    "gdcef_helper",
+    "libcef.so",
+    "libEGL.so",
+    "libGLESv2.so",
+    "libvk_swiftshader.so",
+    "libvulkan.so.1",
+    "vk_swiftshader_icd.json",
+    "icudtl.dat",
+    "resources.pak",
+    "chrome_100_percent.pak",
+    "chrome_200_percent.pak",
+    "v8_context_snapshot.bin",
+    "chrome-sandbox",
+];
+
+/// Directories to deploy to the addon directory
+const DEPLOY_DIRS: &[&str] = &["locales"];
+
 fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     copy_cef_assets(target_dir)?;
     strip_cef_binaries(target_dir)?;
+    deploy_to_addon(target_dir, PLATFORM_TARGET, DEPLOY_FILES, DEPLOY_DIRS)?;
     println!("Linux bundle complete: {}", target_dir.display());
     Ok(())
 }

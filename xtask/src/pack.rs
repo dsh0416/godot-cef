@@ -28,18 +28,8 @@ fn copy_platform_artifacts(
     if dst_dir.exists() {
         fs::remove_dir_all(&dst_dir)?;
     }
-    fs::create_dir_all(&dst_dir)?;
 
-    for entry in fs::read_dir(&src_dir)? {
-        let entry = entry?;
-        let dst_path = dst_dir.join(entry.file_name());
-
-        if entry.file_type()?.is_dir() {
-            copy_directory(&entry.path(), &dst_path)?;
-        } else {
-            fs::copy(entry.path(), &dst_path)?;
-        }
-    }
+    copy_directory(&src_dir, &dst_dir)?;
 
     println!("  Copied: {} -> bin/{}/", artifact_name, platform_target);
     Ok(true)

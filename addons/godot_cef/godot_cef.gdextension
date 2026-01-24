@@ -4,9 +4,9 @@ compatibility_minimum = 4.5
 reloadable = true
 
 [libraries]
-linux.x86_64     = "bin/x86_64-unknown-linux-gnu/libgdcef.so"
-macos     = "bin/universal-apple-darwin/Godot CEF.framework"
-windows.x86_64   = "bin/x86_64-pc-windows-msvc/gdcef.dll"
+linux.x86_64   = "bin/x86_64-unknown-linux-gnu/libgdcef.so"
+macos          = "bin/universal-apple-darwin/Godot CEF.framework"
+windows.x86_64 = "bin/x86_64-pc-windows-msvc/gdcef.dll"
 
 [icons]
 CefTexture = "icons/webview.png"

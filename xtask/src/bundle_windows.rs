@@ -1,8 +1,10 @@
 //! Windows bundling - copies CEF assets alongside the built binaries
 
-use crate::bundle_common::{copy_directory, get_cef_dir, get_target_dir, run_cargo};
+use crate::bundle_common::{copy_directory, deploy_to_addon, get_cef_dir, get_target_dir, run_cargo};
 use std::fs;
 use std::path::Path;
+
+const PLATFORM_TARGET: &str = "x86_64-pc-windows-msvc";
 
 /// CEF files that need to be copied to the target directory
 const CEF_FILES: &[&str] = &[
@@ -69,8 +71,35 @@ fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
     Ok(())
 }
 
+/// Files to deploy to the addon directory
+const DEPLOY_FILES: &[&str] = &[
+    "gdcef.dll",
+    "gdcef_helper.exe",
+    "libcef.dll",
+    "chrome_elf.dll",
+    "libEGL.dll",
+    "libGLESv2.dll",
+    "d3dcompiler_47.dll",
+    "dxcompiler.dll",
+    "dxil.dll",
+    "vk_swiftshader.dll",
+    "vk_swiftshader_icd.json",
+    "vulkan-1.dll",
+    "icudtl.dat",
+    "resources.pak",
+    "chrome_100_percent.pak",
+    "chrome_200_percent.pak",
+    "v8_context_snapshot.bin",
+    "bootstrap.exe",
+    "bootstrapc.exe",
+];
+
+/// Directories to deploy to the addon directory
+const DEPLOY_DIRS: &[&str] = &["locales"];
+
 fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     copy_cef_assets(target_dir)?;
+    deploy_to_addon(target_dir, PLATFORM_TARGET, DEPLOY_FILES, DEPLOY_DIRS)?;
     println!("Windows bundle complete: {}", target_dir.display());
     Ok(())
 }

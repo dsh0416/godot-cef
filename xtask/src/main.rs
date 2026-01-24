@@ -1,10 +1,10 @@
 //! xtask - Build tasks for gdcef
 //!
 //! Usage:
-//!   cargo xtask bundle [--release]           # Bundle for the current platform
+//!   cargo xtask bundle [--release]           # Bundle for current platform and deploy to addons/
 //!   cargo xtask bundle-app [--release]       # Bundle helper app (macOS only)
 //!   cargo xtask bundle-framework [--release] # Bundle framework (macOS only)
-//!   cargo xtask pack <artifacts> <output>    # Pack all platform artifacts into addon
+//!   cargo xtask pack <artifacts> <output>    # Pack CI artifacts into distributable addon
 
 #[cfg(target_os = "macos")]
 mod bundle_app;
@@ -30,7 +30,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Bundle for the current platform (cross-platform)
+    /// Bundle for the current platform and deploy to addons/godot_cef/bin/
     Bundle {
         /// Build in release mode
         #[arg(long, short)]
@@ -63,7 +63,7 @@ enum Commands {
         target_dir: Option<PathBuf>,
     },
 
-    /// Pack all platform artifacts into a single Godot addon
+    /// Pack CI artifacts from multiple platforms into a distributable addon
     Pack {
         /// Directory containing downloaded CI artifacts
         #[arg(long, short)]

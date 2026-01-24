@@ -1,8 +1,11 @@
 use crate::bundle_common::{
-    FrameworkInfoPlist, get_target_dir, get_target_dir_for_target, run_cargo, run_lipo,
+    FrameworkInfoPlist, deploy_bundle_to_addon, get_target_dir, get_target_dir_for_target,
+    run_cargo, run_lipo,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const PLATFORM_TARGET: &str = "universal-apple-darwin";
 
 const RESOURCES_PATH: &str = "Resources";
 const TARGET_ARM64: &str = "aarch64-apple-darwin";
@@ -38,11 +41,11 @@ fn create_framework(
     Ok(fmwk_path)
 }
 
-fn bundle(target_dir: &Path, universal_dylib: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn bundle(target_dir: &Path, universal_dylib: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let fmwk_path = create_framework(target_dir, "libgdcef.dylib", universal_dylib)?;
 
     println!("Created: {}", fmwk_path.display());
-    Ok(())
+    Ok(fmwk_path)
 }
 
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
@@ -82,8 +85,9 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
 
     run_lipo(&dylib_arm64, &dylib_x64, &universal_dylib)?;
 
-    bundle(&output_dir, &universal_dylib)?;
+    let fmwk_path = bundle(&output_dir, &universal_dylib)?;
     fs::remove_file(&universal_dylib)?;
+    deploy_bundle_to_addon(&fmwk_path, PLATFORM_TARGET)?;
 
     Ok(())
 }

@@ -1,9 +1,11 @@
 use crate::bundle_common::{
-    AppInfoPlist, copy_directory, get_cef_dir_arm64, get_cef_dir_x64, get_target_dir,
-    get_target_dir_for_target, run_cargo, run_lipo,
+    AppInfoPlist, copy_directory, deploy_bundle_to_addon, get_cef_dir_arm64, get_cef_dir_x64,
+    get_target_dir, get_target_dir_for_target, run_cargo, run_lipo,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const PLATFORM_TARGET: &str = "universal-apple-darwin";
 
 const EXEC_PATH: &str = "Contents/MacOS";
 const FRAMEWORKS_PATH: &str = "Contents/Frameworks";
@@ -51,7 +53,7 @@ fn create_app(
     Ok(app_path)
 }
 
-fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let main_app_path = create_app(target_dir, "Godot CEF", universal_helper, false)?;
 
     let cef_path_arm64 = get_cef_dir_arm64()
@@ -82,7 +84,7 @@ fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<(), Box<dyn std:
     }
 
     println!("Created: {}", main_app_path.display());
-    Ok(())
+    Ok(main_app_path)
 }
 
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
@@ -108,8 +110,9 @@ pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::
 
     run_lipo(&helper_arm64, &helper_x64, &universal_helper)?;
 
-    bundle(&output_dir, &universal_helper)?;
+    let app_path = bundle(&output_dir, &universal_helper)?;
     fs::remove_file(&universal_helper)?;
+    deploy_bundle_to_addon(&app_path, PLATFORM_TARGET)?;
 
     Ok(())
 }
