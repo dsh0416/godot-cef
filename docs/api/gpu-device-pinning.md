@@ -39,7 +39,7 @@ Godot CEF uses Chromium's `--gpu-vendor-id` and `--gpu-device-id` command-line s
 │     - macOS Metal: IOKit registry properties                    │
 │                                                                 │
 │  2. Pass IDs to CEF subprocesses via command-line switches      │
-│     --gpu-vendor-id=0x10de --gpu-device-id=0x1e87               │
+│     --gpu-vendor-id=4318 --gpu-device-id=7815                   │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -79,11 +79,11 @@ if let Some((vendor_id, device_id)) = get_godot_gpu_device_ids() {
 if let Some(ids) = &self.handler.gpu_device_ids {
     command_line.append_switch_with_value(
         Some(&"gpu-vendor-id".into()),
-        Some(&ids.to_vendor_arg().as_str().into()),  // e.g., "0x10de"
+        Some(&ids.to_vendor_arg().as_str().into()),  // e.g., "4318" (decimal)
     );
     command_line.append_switch_with_value(
         Some(&"gpu-device-id".into()),
-        Some(&ids.to_device_arg().as_str().into()),  // e.g., "0x1e87"
+        Some(&ids.to_device_arg().as_str().into()),  // e.g., "7815" (decimal)
     );
 }
 ```

@@ -141,14 +141,14 @@ impl GpuDeviceIds {
         }
     }
 
-    /// Format vendor ID as hex string for command line argument
+    /// Format vendor ID as decimal string for command line argument
     pub fn to_vendor_arg(&self) -> String {
-        format!("0x{:04x}", self.vendor_id)
+        format!("{}", self.vendor_id)
     }
 
-    /// Format device ID as hex string for command line argument
+    /// Format device ID as decimal string for command line argument
     pub fn to_device_arg(&self) -> String {
-        format!("0x{:04x}", self.device_id)
+        format!("{}", self.device_id)
     }
 }
 
