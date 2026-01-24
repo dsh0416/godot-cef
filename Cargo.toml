@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["cef_app", "gdcef", "gdcef_helper", "xtask"]
+members = ["crates/*", "xtask"]
 
 [workspace.package]
 version = "1.3.0"
