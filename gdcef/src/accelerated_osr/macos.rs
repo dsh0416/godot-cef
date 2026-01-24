@@ -33,6 +33,14 @@ impl Drop for PendingMetalCopy {
 unsafe extern "C" {
     fn CFRetain(cf: *mut c_void) -> *mut c_void;
     fn CFRelease(cf: *mut c_void);
+
+    fn CFStringCreateWithCString(
+        alloc: *const c_void,
+        cStr: *const i8,
+        encoding: u32,
+    ) -> *const c_void;
+    fn CFDataGetLength(theData: *const c_void) -> isize;
+    fn CFDataGetBytePtr(theData: *const c_void) -> *const u8;
 }
 
 /// Wrapper type for IOSurfaceRef with correct Objective-C type encoding.
@@ -351,17 +359,6 @@ unsafe extern "C" {
         allocator: *const c_void,
         options: u32,
     ) -> *const c_void;
-}
-
-#[link(name = "CoreFoundation", kind = "framework")]
-unsafe extern "C" {
-    fn CFStringCreateWithCString(
-        alloc: *const c_void,
-        cStr: *const i8,
-        encoding: u32,
-    ) -> *const c_void;
-    fn CFDataGetLength(theData: *const c_void) -> isize;
-    fn CFDataGetBytePtr(theData: *const c_void) -> *const u8;
 }
 
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
