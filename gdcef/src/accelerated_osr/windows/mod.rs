@@ -73,14 +73,44 @@ impl GodotTextureImporter {
         })
     }
 
-    pub fn import_and_copy(
+    /// Queue a copy operation for deferred processing.
+    /// This method returns immediately after duplicating the handle.
+    /// Call `process_pending_copy()` later to actually perform the GPU work.
+    pub fn queue_copy(
         &mut self,
         info: &cef::AcceleratedPaintInfo,
         dst_rd_rid: Rid,
     ) -> Result<(), String> {
         match &mut self.backend {
-            TextureImporterBackend::D3D12(importer) => importer.import_and_copy(info, dst_rd_rid),
-            TextureImporterBackend::Vulkan(importer) => importer.import_and_copy(info, dst_rd_rid),
+            TextureImporterBackend::D3D12(importer) => importer.queue_copy(info, dst_rd_rid),
+            TextureImporterBackend::Vulkan(importer) => importer.queue_copy(info, dst_rd_rid),
+        }
+    }
+
+    /// Returns true if there's a pending copy operation waiting to be processed.
+    #[allow(dead_code)]
+    pub fn has_pending_copy(&self) -> bool {
+        match &self.backend {
+            TextureImporterBackend::D3D12(importer) => importer.has_pending_copy(),
+            TextureImporterBackend::Vulkan(importer) => importer.has_pending_copy(),
+        }
+    }
+
+    /// Process the pending copy operation. This does the actual GPU work.
+    /// Should be called from Godot's main loop, not from CEF callbacks.
+    pub fn process_pending_copy(&mut self) -> Result<(), String> {
+        match &mut self.backend {
+            TextureImporterBackend::D3D12(importer) => importer.process_pending_copy(),
+            TextureImporterBackend::Vulkan(importer) => importer.process_pending_copy(),
+        }
+    }
+
+    /// Wait for any in-flight copy to complete.
+    #[allow(dead_code)]
+    pub fn wait_for_copy(&mut self) -> Result<(), String> {
+        match &mut self.backend {
+            TextureImporterBackend::D3D12(importer) => importer.wait_for_copy(),
+            TextureImporterBackend::Vulkan(importer) => importer.wait_for_copy(),
         }
     }
 }

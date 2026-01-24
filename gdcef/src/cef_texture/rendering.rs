@@ -228,6 +228,14 @@ impl CefTexture {
                 return;
             };
 
+            // Process any pending copy operation from the CEF callback
+            // This is where the actual GPU work happens (deferred from on_accelerated_paint)
+            if state.has_pending_copy {
+                if let Err(e) = state.process_pending_copy() {
+                    godot::global::godot_error!("[CefTexture] Failed to process pending copy: {}", e);
+                }
+            }
+
             if let Some((new_w, new_h)) = state.needs_resize.take()
                 && new_w > 0
                 && new_h > 0

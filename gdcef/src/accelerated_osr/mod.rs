@@ -85,6 +85,8 @@ pub struct AcceleratedRenderState {
     pub popup_dirty: bool,
     pub popup_has_content: bool,
     pub needs_popup_texture: Option<(u32, u32)>,
+    /// Flag indicating there's a pending copy that needs processing
+    pub has_pending_copy: bool,
 }
 
 impl AcceleratedRenderState {
@@ -101,7 +103,25 @@ impl AcceleratedRenderState {
             popup_dirty: false,
             popup_has_content: false,
             needs_popup_texture: None,
+            has_pending_copy: false,
         }
+    }
+
+    /// Process any pending copy operation. Call this from Godot's main loop.
+    pub fn process_pending_copy(&mut self) -> Result<(), String> {
+        if !self.has_pending_copy {
+            return Ok(());
+        }
+
+        self.importer.process_pending_copy()?;
+        self.has_pending_copy = false;
+        Ok(())
+    }
+
+    /// Wait for any in-flight GPU copy to complete.
+    #[allow(dead_code)]
+    pub fn wait_for_copy(&mut self) -> Result<(), String> {
+        self.importer.wait_for_copy()
     }
 }
 
@@ -156,8 +176,15 @@ impl AcceleratedRenderHandler {
                 return;
             }
 
+            // For popups, use synchronous copy (they're small and infrequent)
             if let Some(popup_rid) = state.popup_rd_rid {
-                match state.importer.import_and_copy(info, popup_rid) {
+                let result = state
+                    .importer
+                    .queue_copy(info, popup_rid)
+                    .and_then(|_| state.importer.process_pending_copy())
+                    .and_then(|_| state.importer.wait_for_copy());
+
+                match result {
                     Ok(_) => {
                         state.popup_dirty = true;
                         state.popup_has_content = true;
@@ -180,7 +207,8 @@ impl AcceleratedRenderHandler {
         let src_width = info.extra.coded_size.width as u32;
         let src_height = info.extra.coded_size.height as u32;
 
-        // Perform immediate GPU copy while handle is valid
+        // Queue the copy operation for deferred processing
+        // This returns immediately after duplicating the handle
         let Some(render_state_arc) = &self.render_state else {
             return;
         };
@@ -197,16 +225,17 @@ impl AcceleratedRenderHandler {
             return;
         }
 
-        // Perform immediate import and copy while handle is guaranteed valid
+        // Queue the copy operation (fast - just duplicates handle)
+        // The actual GPU work will be done in process_pending_copy()
         let dst_rid = state.dst_rd_rid;
-        match state.importer.import_and_copy(info, dst_rid) {
-            Ok(_) => {}
+        match state.importer.queue_copy(info, dst_rid) {
+            Ok(_) => {
+                state.has_pending_copy = true;
+            }
             Err(e) => {
-                // Don't spam the log for device removed/suspended errors
-                // (these are logged once by check_device_state)
                 if !e.contains("D3D12 device removed") {
                     godot::global::godot_error!(
-                        "[AcceleratedOSR] Failed to import and copy texture: {}",
+                        "[AcceleratedOSR] Failed to queue texture copy: {}",
                         e
                     );
                 }
@@ -261,11 +290,19 @@ impl GodotTextureImporter {
         None
     }
 
-    pub fn import_and_copy(
+    pub fn queue_copy(
         &mut self,
         _info: &AcceleratedPaintInfo,
         _dst_rd_rid: Rid,
     ) -> Result<(), String> {
+        Err("Accelerated OSR not supported on this platform".to_string())
+    }
+
+    pub fn process_pending_copy(&mut self) -> Result<(), String> {
+        Err("Accelerated OSR not supported on this platform".to_string())
+    }
+
+    pub fn wait_for_copy(&mut self) -> Result<(), String> {
         Err("Accelerated OSR not supported on this platform".to_string())
     }
 }

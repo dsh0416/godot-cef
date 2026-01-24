@@ -3,7 +3,8 @@ use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print};
 use godot::prelude::*;
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
+use windows::Win32::System::Threading::GetCurrentProcess;
 
 type PfnVkGetMemoryWin32HandlePropertiesKHR = unsafe extern "system" fn(
     device: vk::Device,
@@ -11,6 +12,25 @@ type PfnVkGetMemoryWin32HandlePropertiesKHR = unsafe extern "system" fn(
     handle: HANDLE,
     p_memory_win32_handle_properties: *mut vk::MemoryWin32HandlePropertiesKHR<'_>,
 ) -> vk::Result;
+
+/// Pending copy operation queued from on_accelerated_paint callback.
+/// This allows the callback to return immediately without blocking.
+pub struct PendingVulkanCopy {
+    /// Our duplicated handle (we own this, keeps D3D12 resource alive)
+    duplicated_handle: HANDLE,
+    width: u32,
+    height: u32,
+    dst_rd_rid: Rid,
+}
+
+impl Drop for PendingVulkanCopy {
+    fn drop(&mut self) {
+        // If pending copy is dropped without being processed, close the handle
+        if !self.duplicated_handle.is_invalid() {
+            let _ = unsafe { CloseHandle(self.duplicated_handle) };
+        }
+    }
+}
 
 pub struct VulkanTextureImporter {
     device: vk::Device,
@@ -23,13 +43,17 @@ pub struct VulkanTextureImporter {
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
     cached_memory_type_index: Option<u32>,
     imported_image: Option<ImportedVulkanImage>,
+    /// Pending copy operation to be processed later
+    pending_copy: Option<PendingVulkanCopy>,
+    /// Whether there's a GPU operation in flight (submitted but not waited on)
+    copy_in_flight: bool,
 }
 
 struct ImportedVulkanImage {
-    handle_value: isize,
+    /// Our duplicated handle that we own (keeps the D3D12 resource alive)
+    duplicated_handle: HANDLE,
     image: vk::Image,
     memory: vk::DeviceMemory,
-    extent: vk::Extent2D,
 }
 
 struct VulkanFunctions {
@@ -56,6 +80,26 @@ struct VulkanFunctions {
 }
 
 static VULKAN_FNS: std::sync::OnceLock<VulkanFunctions> = std::sync::OnceLock::new();
+
+/// Duplicates a Windows HANDLE so we can extend its lifetime beyond CEF's callback.
+/// This is necessary because Vulkan's external memory import does NOT duplicate the handle.
+fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
+    let mut duplicated = HANDLE::default();
+    let current_process = unsafe { GetCurrentProcess() };
+    unsafe {
+        DuplicateHandle(
+            current_process,
+            handle,
+            current_process,
+            &mut duplicated,
+            0,
+            false,
+            DUPLICATE_SAME_ACCESS,
+        )
+        .map_err(|e| format!("DuplicateHandle failed: {:?}", e))?;
+    }
+    Ok(duplicated)
+}
 
 impl VulkanTextureImporter {
     pub fn new() -> Option<Self> {
@@ -201,6 +245,8 @@ impl VulkanTextureImporter {
             get_memory_win32_handle_properties: fns.get_memory_win32_handle_properties,
             cached_memory_type_index: None,
             imported_image: None,
+            pending_copy: None,
+            copy_in_flight: false,
         })
     }
 
@@ -353,7 +399,10 @@ impl VulkanTextureImporter {
         default
     }
 
-    pub fn import_and_copy(
+    /// Queue a copy operation for deferred processing.
+    /// This method returns immediately after duplicating the handle.
+    /// Call `process_pending_copy()` later to actually perform the GPU work.
+    pub fn queue_copy(
         &mut self,
         info: &cef::AcceleratedPaintInfo,
         dst_rd_rid: Rid,
@@ -373,8 +422,46 @@ impl VulkanTextureImporter {
             return Err("Destination RID is invalid".into());
         }
 
+        // Duplicate the handle so we own it - this is fast and non-blocking
+        let duplicated_handle = duplicate_win32_handle(handle)?;
+
+        // Replace any existing pending copy (drop the old one, which closes its handle)
+        self.pending_copy = Some(PendingVulkanCopy {
+            duplicated_handle,
+            width,
+            height,
+            dst_rd_rid,
+        });
+
+        Ok(())
+    }
+
+    /// Returns true if there's a pending copy operation waiting to be processed.
+    #[allow(dead_code)]
+    pub fn has_pending_copy(&self) -> bool {
+        self.pending_copy.is_some()
+    }
+
+    /// Process the pending copy operation. This does the actual GPU work.
+    /// Should be called from Godot's main loop, not from CEF callbacks.
+    pub fn process_pending_copy(&mut self) -> Result<(), String> {
+        let pending = match self.pending_copy.take() {
+            Some(p) => p,
+            None => return Ok(()), // Nothing to do
+        };
+
+        // Wait for any previous in-flight copy to complete before reusing resources
+        if self.copy_in_flight {
+            self.wait_for_copy()?;
+            self.copy_in_flight = false;
+        }
+
         // Import the D3D12 handle as a Vulkan image
-        let src_image = self.import_handle_to_image(handle, width, height)?;
+        let src_image = self.import_handle_to_image_from_duplicated(
+            pending.duplicated_handle,
+            pending.width,
+            pending.height,
+        )?;
 
         // Get destination Vulkan image from Godot's RenderingDevice
         let dst_image: vk::Image = {
@@ -382,7 +469,7 @@ impl VulkanTextureImporter {
                 .get_rendering_device()
                 .ok_or("Failed to get RenderingDevice")?;
 
-            let image_ptr = rd.get_driver_resource(DriverResource::TEXTURE, dst_rd_rid, 0);
+            let image_ptr = rd.get_driver_resource(DriverResource::TEXTURE, pending.dst_rd_rid, 0);
             if image_ptr == 0 {
                 return Err("Failed to get destination Vulkan image".into());
             }
@@ -390,32 +477,46 @@ impl VulkanTextureImporter {
             unsafe { std::mem::transmute(image_ptr) }
         };
 
-        // Copy from imported image to Godot's texture
-        self.submit_copy(src_image, dst_image, width, height)?;
+        // Submit copy command (non-blocking GPU submission)
+        self.submit_copy_async(src_image, dst_image, pending.width, pending.height)?;
+        self.copy_in_flight = true;
+
+        // Note: We don't close pending.duplicated_handle here because it's now
+        // stored in self.imported_image and will be closed when that's freed.
+        // We need to prevent the Drop impl from closing it.
+        std::mem::forget(pending);
 
         Ok(())
     }
 
-    fn import_handle_to_image(
+    /// Wait for any in-flight copy to complete.
+    pub fn wait_for_copy(&mut self) -> Result<(), String> {
+        if !self.copy_in_flight {
+            return Ok(());
+        }
+
+        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let result = unsafe {
+            (fns.wait_for_fences)(self.device, 1, &self.fence, vk::TRUE, u64::MAX)
+        };
+        if result != vk::Result::SUCCESS {
+            return Err(format!("Failed to wait for fence: {:?}", result));
+        }
+        self.copy_in_flight = false;
+        Ok(())
+    }
+
+    /// Import an already-duplicated handle as a Vulkan image.
+    /// The handle ownership is transferred to this function.
+    fn import_handle_to_image_from_duplicated(
         &mut self,
-        handle: HANDLE,
+        duplicated_handle: HANDLE,
         width: u32,
         height: u32,
     ) -> Result<vk::Image, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-        let extent = vk::Extent2D { width, height };
-        let handle_value = handle.0 as isize;
 
-        // Check if we can fully reuse existing import (same handle AND dimensions)
-        if let Some(existing) = &self.imported_image
-            && existing.handle_value == handle_value
-            && existing.extent == extent
-        {
-            // Cache hit! Reuse everything
-            return Ok(existing.image);
-        }
-
-        // Cache miss - must create new image (VkImage can only be bound once)
+        // Always free previous image - we get a new handle every frame
         self.free_imported_image();
 
         // Create new image with external memory flag
@@ -443,17 +544,28 @@ impl VulkanTextureImporter {
         let result =
             unsafe { (fns.create_image)(self.device, &image_info, std::ptr::null(), &mut image) };
         if result != vk::Result::SUCCESS {
+            // Clean up duplicated handle on failure
+            let _ = unsafe { CloseHandle(duplicated_handle) };
             return Err(format!("Failed to create image: {:?}", result));
         }
 
-        // Import memory for this handle
-        let memory = self.import_memory_for_image(handle, image, width, height)?;
+        // Import memory using the duplicated handle
+        let memory = match self.import_memory_for_image(duplicated_handle, image, width, height) {
+            Ok(mem) => mem,
+            Err(e) => {
+                // Clean up on failure
+                unsafe {
+                    (fns.destroy_image)(self.device, image, std::ptr::null());
+                }
+                let _ = unsafe { CloseHandle(duplicated_handle) };
+                return Err(e);
+            }
+        };
 
         self.imported_image = Some(ImportedVulkanImage {
-            handle_value,
+            duplicated_handle,
             image,
             memory,
-            extent,
         });
         Ok(image)
     }
@@ -536,7 +648,9 @@ impl VulkanTextureImporter {
         Some(type_filter.trailing_zeros())
     }
 
-    fn submit_copy(
+    /// Submit a copy command asynchronously (does not wait for completion).
+    /// Call wait_for_copy() to ensure the copy is complete.
+    fn submit_copy_async(
         &mut self,
         src: vk::Image,
         dst: vk::Image,
@@ -677,14 +791,14 @@ impl VulkanTextureImporter {
 
         let _ = unsafe { (fns.end_command_buffer)(cmd_buffer) };
 
-        // Submit and wait for completion
+        // Submit (non-blocking - fence will be signaled when complete)
         let submit_info =
             vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
 
-        let _ = unsafe { (fns.queue_submit)(self.queue, 1, &submit_info, fence) };
-
-        // Wait for the copy to complete to ensure texture is ready for Godot
-        let _ = unsafe { (fns.wait_for_fences)(self.device, 1, &fence, vk::TRUE, u64::MAX) };
+        let result = unsafe { (fns.queue_submit)(self.queue, 1, &submit_info, fence) };
+        if result != vk::Result::SUCCESS {
+            return Err(format!("Failed to submit copy command: {:?}", result));
+        }
 
         Ok(())
     }
@@ -696,6 +810,8 @@ impl VulkanTextureImporter {
             unsafe {
                 (fns.destroy_image)(self.device, img.image, std::ptr::null());
                 (fns.free_memory)(self.device, img.memory, std::ptr::null());
+                // Close our duplicated handle - this releases our reference to the D3D12 resource
+                let _ = CloseHandle(img.duplicated_handle);
             }
         }
     }
@@ -704,17 +820,12 @@ impl VulkanTextureImporter {
 impl Drop for VulkanTextureImporter {
     fn drop(&mut self) {
         // Wait for in-flight copy to complete before cleanup
-        if let Some(fns) = VULKAN_FNS.get() {
-            let _ = unsafe {
-                (fns.wait_for_fences)(
-                    self.device,
-                    1,
-                    &self.fence,
-                    vk::TRUE,
-                    u64::MAX,
-                )
-            };
+        if self.copy_in_flight {
+            let _ = self.wait_for_copy();
         }
+
+        // Drop pending copy (will close its handle)
+        self.pending_copy = None;
 
         self.free_imported_image();
 
