@@ -529,15 +529,8 @@ impl VulkanTextureImporter {
             unsafe { std::mem::transmute(image_ptr) }
         };
 
-        // Submit copy command (non-blocking GPU submission)
         self.submit_copy_async(src_image, dst_image, pending.width, pending.height)?;
         self.copy_in_flight = true;
-
-        // Note: pending is dropped here, closing the duplicated fds.
-        // The Vulkan memory import takes ownership of fds[0], so we need to
-        // NOT close it. Mark it as -1 to prevent double-close.
-        // Actually, on Linux DMA-BUF import does NOT transfer ownership,
-        // so we do need to close all our dup'd fds.
 
         Ok(())
     }
