@@ -36,6 +36,7 @@ retour = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 ash = { workspace = true }
 libloading = { workspace = true }
+libc = { workspace = true }
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
 retour = { workspace = true }

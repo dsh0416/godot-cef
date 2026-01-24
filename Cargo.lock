@@ -647,6 +647,7 @@ dependencies = [
  "cef-dll-sys",
  "cef_app",
  "godot",
+ "libc",
  "libloading 0.9.0",
  "objc2",
  "objc2-metal",
