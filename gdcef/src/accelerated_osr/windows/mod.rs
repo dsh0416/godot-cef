@@ -9,14 +9,14 @@ use godot::prelude::*;
 use d3d12::D3D12TextureImporter;
 use vulkan::VulkanTextureImporter;
 
-pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
+pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     let backend = RenderBackend::detect();
     match backend {
-        RenderBackend::D3D12 => d3d12::get_godot_adapter_luid(),
-        RenderBackend::Vulkan => vulkan::get_godot_adapter_luid(),
+        RenderBackend::D3D12 => d3d12::get_godot_gpu_device_ids(),
+        RenderBackend::Vulkan => vulkan::get_godot_gpu_device_ids(),
         _ => {
             godot_warn!(
-                "[AcceleratedOSR/Windows] Cannot get adapter LUID for backend {:?}",
+                "[AcceleratedOSR/Windows] Cannot get GPU device IDs for backend {:?}",
                 backend
             );
             None

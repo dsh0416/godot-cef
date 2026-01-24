@@ -2,7 +2,7 @@ use super::RenderBackend;
 use cef::AcceleratedPaintInfo;
 use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
-use godot::global::godot_warn;
+use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
 use objc2::encode::{Encode, Encoding};
 use objc2::msg_send;
@@ -327,6 +327,187 @@ impl Drop for GodotTextureImporter {
 
 pub fn is_supported() -> bool {
     NativeTextureImporter::new().is_some() && RenderBackend::detect().supports_accelerated_osr()
+}
+
+// IOKit types and functions for querying GPU registry properties
+type IORegistryEntryID = u64;
+type IOReturn = i32;
+type MachPort = u32;
+
+// IOKit registry iteration options
+const K_IO_REGISTRY_ITERATE_RECURSIVELY: u32 = 0x00000001;
+const K_IO_REGISTRY_ITERATE_PARENTS: u32 = 0x00000002;
+
+#[link(name = "IOKit", kind = "framework")]
+unsafe extern "C" {
+    fn IORegistryEntryIDMatching(entryID: IORegistryEntryID) -> *mut c_void;
+    fn IOServiceGetMatchingService(mainPort: MachPort, matching: *mut c_void) -> u32;
+    fn IOObjectRelease(object: u32) -> IOReturn;
+    // Search for a property in the registry entry and its parents
+    fn IORegistryEntrySearchCFProperty(
+        entry: u32,
+        plane: *const i8,
+        key: *const c_void,
+        allocator: *const c_void,
+        options: u32,
+    ) -> *const c_void;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFStringCreateWithCString(
+        alloc: *const c_void,
+        cStr: *const i8,
+        encoding: u32,
+    ) -> *const c_void;
+    fn CFDataGetLength(theData: *const c_void) -> isize;
+    fn CFDataGetBytePtr(theData: *const c_void) -> *const u8;
+    fn CFRelease(cf: *const c_void);
+}
+
+const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
+const K_IO_SERVICE_PLANE: &[u8] = b"IOService\0";
+
+/// Get a u32 property from an IORegistry entry, searching parents if not found directly.
+///
+/// This uses IORegistryEntrySearchCFProperty with kIORegistryIterateParents to search
+/// up through parent entries. This is necessary on Apple Silicon where vendor-id/device-id
+/// properties are in parent IORegistry entries, not directly on the Metal device's entry.
+fn io_registry_search_property_u32(service: u32, key: &str) -> Option<u32> {
+    let key_cstr = std::ffi::CString::new(key).ok()?;
+
+    unsafe {
+        let cf_key = CFStringCreateWithCString(
+            std::ptr::null(),
+            key_cstr.as_ptr(),
+            K_CF_STRING_ENCODING_UTF8,
+        );
+        if cf_key.is_null() {
+            return None;
+        }
+
+        // Search for the property in this entry and all parent entries
+        // This is how Chromium's ANGLE does it in SystemInfo_macos.mm
+        let cf_data = IORegistryEntrySearchCFProperty(
+            service,
+            K_IO_SERVICE_PLANE.as_ptr() as *const i8,
+            cf_key,
+            std::ptr::null(),
+            K_IO_REGISTRY_ITERATE_RECURSIVELY | K_IO_REGISTRY_ITERATE_PARENTS,
+        );
+        CFRelease(cf_key);
+
+        if cf_data.is_null() {
+            return None;
+        }
+
+        let length = CFDataGetLength(cf_data);
+        if length < 4 {
+            CFRelease(cf_data);
+            return None;
+        }
+
+        let bytes = CFDataGetBytePtr(cf_data);
+        if bytes.is_null() {
+            CFRelease(cf_data);
+            return None;
+        }
+
+        // Read as little-endian u32
+        let value = u32::from_le_bytes([*bytes, *bytes.add(1), *bytes.add(2), *bytes.add(3)]);
+        CFRelease(cf_data);
+
+        Some(value)
+    }
+}
+
+/// Get the GPU vendor and device IDs from Godot's Metal device.
+///
+/// This queries the Metal device's registry ID and uses IOKit to find
+/// the matching IOService entry and retrieve the PCI vendor/device IDs.
+pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
+    let mut rd = RenderingServer::singleton().get_rendering_device()?;
+    let mtl_device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
+
+    if mtl_device_ptr == 0 {
+        godot_error!("[AcceleratedOSR/Metal] Failed to get Metal device for GPU ID query");
+        return None;
+    }
+
+    let device: &AnyObject = unsafe { &*(mtl_device_ptr as *const AnyObject) };
+
+    // Get registryID from MTLDevice
+    let registry_id: u64 = unsafe { msg_send![device, registryID] };
+
+    if registry_id == 0 {
+        godot_error!("[AcceleratedOSR/Metal] Metal device has no registry ID");
+        return None;
+    }
+
+    // Use IOKit to find the IOService entry and read vendor/device IDs
+    unsafe {
+        let matching = IORegistryEntryIDMatching(registry_id);
+        if matching.is_null() {
+            godot_error!("[AcceleratedOSR/Metal] Failed to create IORegistry matching dictionary");
+            return None;
+        }
+
+        // kIOMasterPortDefault is 0
+        let service = IOServiceGetMatchingService(0, matching);
+        // matching is consumed by IOServiceGetMatchingService
+
+        if service == 0 {
+            godot_error!(
+                "[AcceleratedOSR/Metal] No IOService found for registry ID {}",
+                registry_id
+            );
+            return None;
+        }
+
+        // Search for vendor-id and device-id, looking in parent entries too
+        // This is necessary on Apple Silicon where these properties are in parent IORegistry entries
+        let vendor_id = io_registry_search_property_u32(service, "vendor-id");
+        let device_id = io_registry_search_property_u32(service, "device-id");
+
+        IOObjectRelease(service);
+
+        // Get device name from the Metal device for logging
+        let name: Option<Retained<AnyObject>> = msg_send![device as &AnyObject, name];
+        let name_str = name
+            .map(|n| {
+                let s: *const std::ffi::c_char = msg_send![&*n, UTF8String];
+                if s.is_null() {
+                    "Unknown".to_string()
+                } else {
+                    std::ffi::CStr::from_ptr(s).to_string_lossy().into_owned()
+                }
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        match (vendor_id, device_id) {
+            (Some(vendor), Some(device_id_val)) => {
+                godot_print!(
+                    "[AcceleratedOSR/Metal] Godot GPU: vendor=0x{:04x}, device=0x{:04x}, name={}",
+                    vendor,
+                    device_id_val,
+                    name_str
+                );
+                Some((vendor, device_id_val))
+            }
+            _ => {
+                // On Apple Silicon, there are no PCI vendor-id/device-id properties because
+                // the GPU is integrated into the SoC, not a discrete PCI device.
+                // This is fine - Apple Silicon Macs have only one GPU, so GPU pinning
+                // is unnecessary (CEF will always use the same GPU as Godot).
+                godot_print!(
+                    "[AcceleratedOSR/Metal] GPU '{}' has no PCI vendor/device IDs (expected on Apple Silicon). \
+                         GPU pinning not needed on single-GPU systems.",
+                    name_str
+                );
+                None
+            }
+        }
+    }
 }
 
 unsafe impl Send for GodotTextureImporter {}

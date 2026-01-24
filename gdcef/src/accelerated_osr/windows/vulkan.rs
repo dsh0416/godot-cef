@@ -804,13 +804,19 @@ impl Drop for VulkanTextureImporter {
 unsafe impl Send for VulkanTextureImporter {}
 unsafe impl Sync for VulkanTextureImporter {}
 
-pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
+/// Get the GPU vendor and device IDs from Godot's Vulkan physical device.
+///
+/// This queries the Vulkan physical device properties to retrieve the vendor
+/// and device IDs.
+pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     let mut rd = RenderingServer::singleton().get_rendering_device()?;
 
     let physical_device_ptr =
         rd.get_driver_resource(DriverResource::PHYSICAL_DEVICE, Rid::Invalid, 0);
     if physical_device_ptr == 0 {
-        godot_error!("[AcceleratedOSR/Vulkan] Failed to get Vulkan physical device for LUID query");
+        godot_error!(
+            "[AcceleratedOSR/Vulkan] Failed to get Vulkan physical device for GPU ID query"
+        );
         return None;
     }
     let physical_device: vk::PhysicalDevice = unsafe { std::mem::transmute(physical_device_ptr) };
@@ -819,7 +825,7 @@ pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
         Ok(lib) => lib,
         Err(e) => {
             godot_error!(
-                "[AcceleratedOSR/Vulkan] Failed to load vulkan-1.dll for LUID query: {}",
+                "[AcceleratedOSR/Vulkan] Failed to load vulkan-1.dll for GPU ID query: {}",
                 e
             );
             return None;
@@ -837,7 +843,7 @@ pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
             Err(e) => {
                 godot_error!(
                     "[AcceleratedOSR/Vulkan] Failed to get vkGetPhysicalDeviceProperties2: {}. \
-                     Vulkan 1.1+ is required for LUID query.",
+                     Vulkan 1.1+ is required for GPU ID query.",
                     e
                 );
                 return None;
@@ -845,29 +851,27 @@ pub fn get_godot_adapter_luid() -> Option<(i32, u32)> {
         }
     };
 
-    // Query physical device ID properties which contains the LUID
-    let mut id_props = vk::PhysicalDeviceIDProperties::default();
-    let mut props2 = vk::PhysicalDeviceProperties2::default().push_next(&mut id_props);
+    // Query physical device properties which contains vendor/device IDs
+    let mut props2 = vk::PhysicalDeviceProperties2::default();
 
     unsafe {
         get_physical_device_properties2(physical_device, &mut props2);
     }
 
-    if id_props.device_luid_valid == vk::FALSE {
-        godot_error!("[AcceleratedOSR/Vulkan] Physical device does not have a valid LUID");
-        return None;
-    }
-
-    let luid_bytes = id_props.device_luid;
-    let low_part = u32::from_ne_bytes([luid_bytes[0], luid_bytes[1], luid_bytes[2], luid_bytes[3]]);
-    let high_part =
-        i32::from_ne_bytes([luid_bytes[4], luid_bytes[5], luid_bytes[6], luid_bytes[7]]);
+    let vendor_id = props2.properties.vendor_id;
+    let device_id = props2.properties.device_id;
+    let device_name = unsafe {
+        std::ffi::CStr::from_ptr(props2.properties.device_name.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
 
     godot_print!(
-        "[AcceleratedOSR/Vulkan] Godot adapter LUID: HighPart={}, LowPart={}",
-        high_part,
-        low_part
+        "[AcceleratedOSR/Vulkan] Godot GPU: vendor=0x{:04x}, device=0x{:04x}, name={}",
+        vendor_id,
+        device_id,
+        device_name
     );
 
-    Some((high_part, low_part))
+    Some((vendor_id, device_id))
 }

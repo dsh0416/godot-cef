@@ -23,142 +23,105 @@ Without explicit GPU selection:
 
 This results in black textures or rendering failures.
 
-## The Solution: DXGI Adapter Filtering
+## The Solution: Command-Line GPU Selection
 
-On Windows, Godot CEF uses a **DXGI hook** to force CEF to use the same GPU adapter as Godot. This works for both DirectX 12 and Vulkan backends (since Vulkan on Windows uses DXGI for adapter enumeration).
+Godot CEF uses Chromium's `--gpu-vendor-id` and `--gpu-device-id` command-line switches to specify which GPU CEF should use. This approach works across all platforms without requiring hooks or environment variable manipulation.
 
-### How GPU Identification Works
-
-Each GPU adapter has a **LUID (Locally Unique Identifier)** — a 64-bit value that uniquely identifies the adapter within the current boot session.
+### How It Works
 
 ```
-LUID Structure:
-┌─────────────────┬─────────────────┐
-│   HighPart (32) │   LowPart (32)  │
-└─────────────────┴─────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Godot Process                            │
+│                                                                 │
+│  1. Query RenderingDevice for GPU vendor/device IDs             │
+│     - Windows D3D12: DXGI adapter description                   │
+│     - Windows/Linux Vulkan: VkPhysicalDeviceProperties          │
+│     - macOS Metal: IOKit registry properties                    │
+│                                                                 │
+│  2. Pass IDs to CEF subprocesses via command-line switches      │
+│     --gpu-vendor-id=0x10de --gpu-device-id=0x1e87               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     CEF Subprocess                              │
+│                                                                 │
+│  Chromium's GPU process uses the vendor/device IDs to select   │
+│  the matching GPU adapter for rendering                         │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**Step 1:** When Godot CEF initializes, it queries Godot's `RenderingDevice` for the adapter LUID:
+### Platform-Specific GPU ID Retrieval
 
-```
-Godot RenderingDevice → get_driver_resource(DRIVER_RESOURCE_VULKAN_PHYSICAL_DEVICE)
-                      → Query VkPhysicalDeviceIDProperties
-                      → Extract deviceLUID
-```
+| Platform | Backend | Method |
+|----------|---------|--------|
+| Windows | D3D12 | Query `IDXGIAdapter::GetDesc()` for `VendorId` and `DeviceId` |
+| Windows | Vulkan | Query `VkPhysicalDeviceProperties` via `vkGetPhysicalDeviceProperties2` |
+| Linux | Vulkan | Query `VkPhysicalDeviceProperties` via `vkGetPhysicalDeviceProperties2` |
+| macOS | Metal | Query IOKit registry for `vendor-id` and `device-id` properties |
 
-**Step 2:** This LUID is passed to the CEF helper subprocess via command-line arguments.
+### Code Flow
 
-**Step 3:** The helper subprocess installs DXGI hooks before CEF initializes.
+**Step 1:** During CEF initialization, Godot CEF queries the GPU IDs:
 
-### DXGI Hook Architecture
-
-The hook intercepts DXGI factory creation to control adapter enumeration:
-
-```
-Application calls CreateDXGIFactory1/2
-           │
-           ▼
-    ┌──────────────┐
-    │  Our Hook    │ ◄── Intercepts the call
-    └──────┬───────┘
-           │
-           ▼
-    ┌──────────────┐
-    │ Real Factory │ ◄── Factory is created normally
-    └──────┬───────┘
-           │
-           ▼
-    ┌──────────────┐
-    │ Patch VTable │ ◄── EnumAdapters methods redirected
-    └──────┬───────┘
-           │
-           ▼
-    Factory returned to caller (with patched vtable)
+```rust
+// In gdcef/src/cef_init.rs
+use crate::accelerated_osr::get_godot_gpu_device_ids;
+if let Some((vendor_id, device_id)) = get_godot_gpu_device_ids() {
+    osr_app = osr_app.with_gpu_device_ids(vendor_id, device_id);
+}
 ```
 
-### VTable Patching
+**Step 2:** The IDs are passed to CEF subprocesses in `on_before_child_process_launch`:
 
-COM interfaces like `IDXGIFactory` use virtual function tables (vtables). We patch specific methods:
-
-| VTable Index | Method | Our Hook Action |
-|--------------|--------|-----------------|
-| 7 | `EnumAdapters` | Redirect to our filter |
-| 12 | `EnumAdapters1` | Redirect to our filter |
-
-The patched methods implement adapter filtering:
-
+```rust
+// In cef_app/src/lib.rs
+if let Some(ids) = &self.handler.gpu_device_ids {
+    command_line.append_switch_with_value(
+        Some(&"gpu-vendor-id".into()),
+        Some(&ids.to_vendor_arg().as_str().into()),  // e.g., "0x10de"
+    );
+    command_line.append_switch_with_value(
+        Some(&"gpu-device-id".into()),
+        Some(&ids.to_device_arg().as_str().into()),  // e.g., "0x1e87"
+    );
+}
 ```
-Original Behavior:
-  EnumAdapters(0) → Adapter A (integrated)
-  EnumAdapters(1) → Adapter B (discrete)  ← Target
-  EnumAdapters(2) → DXGI_ERROR_NOT_FOUND
-
-Hooked Behavior:
-  EnumAdapters(0) → Adapter B (discrete)  ← Only target visible
-  EnumAdapters(1) → DXGI_ERROR_NOT_FOUND
-```
-
-### Adapter Selection Logic
-
-When a factory is created, our hook:
-
-1. **Enumerates all adapters** using the original (unhooked) function
-2. **Matches by LUID** to find the target adapter's index
-3. **Stores the target index** for use by the filter
-4. **Patches the vtable** to redirect enumeration calls
-
-The filter then:
-- Returns the **target adapter** when index 0 is requested
-- Returns `DXGI_ERROR_NOT_FOUND` for all other indices
-
-This makes CEF "see" only one adapter — the same one Godot is using.
 
 ## Platform Availability
 
-| Platform | GPU Pinning Method | Status |
-|----------|-------------------|--------|
-| Windows (D3D12) | DXGI Hook | ✅ Supported |
-| Windows (Vulkan) | DXGI Hook | ✅ Supported |
-| Linux (Vulkan) | Device UUID matching | ✅ Supported |
-| macOS (Metal) | MTLDevice registryID | ❌ Unsupported |
+| Platform | GPU Pinning | Status |
+|----------|-------------|--------|
+| Windows (D3D12) | Command-line switches | ✅ Supported |
+| Windows (Vulkan) | Command-line switches | ✅ Supported |
+| Linux (Vulkan) | Command-line switches | ✅ Supported |
+| macOS (Metal) | Command-line switches | ✅ Supported |
 
-### Linux: Device UUID Matching
+### macOS Notes
 
-On Linux, GPU identification uses **Device UUIDs** from Vulkan's `VkPhysicalDeviceIDProperties`. The UUID is passed to the CEF helper, which uses it to select the matching GPU when initializing its Vulkan device.
-
-### macOS: MTLDevice registryID
-
-macOS with Metal doesn't require explicit device pinning in most cases.
-Due to the limitation of the retour library, it is not possible to make hook work on M-series CPUs.
+On Apple Silicon (M-series chips), the `vendor-id` and `device-id` properties may not exist in the IOKit registry since there's only one GPU. In this case, Godot CEF uses Apple's vendor ID (`0x106B`) with a placeholder device ID. This is typically fine since there's no GPU selection ambiguity on unified memory architectures.
 
 ## Debugging GPU Pinning
 
 ### Diagnostic Output
 
-The DXGI hook prints diagnostic information to stderr:
+Godot CEF prints GPU information during initialization:
 
 ```
-[DXGI Hook] Installing hooks for adapter LUID: 0, 12345
-[DXGI Hook] Adapter 0: LUID (0, 11111), Name: Intel UHD Graphics
-[DXGI Hook] Adapter 1: LUID (0, 12345), Name: NVIDIA GeForce RTX 3080
-[DXGI Hook] Target adapter found at index 1 (LUID: 0, 12345)
-[DXGI Hook] Vtable patched - only adapter 1 visible at index 0, others hidden
+[AcceleratedOSR/D3D12] Godot GPU: vendor=0x10de, device=0x1e87, name=NVIDIA GeForce RTX 3080
+[CefInit] Godot GPU: vendor=0x10de, device=0x1e87 - will pass to CEF subprocesses
 ```
 
 ### Common Issues
 
-**"No adapter found matching LUID"**
-- The target GPU may have been disabled or removed
-- Driver update changed the LUID
-- Try restarting the application
-
-**Hook installation failures**
-- Antivirus software may block function hooking
-- Try adding an exception for the helper executable
-
-**Black textures despite successful hooks**
+**Black textures**
 - Verify both Godot and CEF report the same GPU in logs
 - Check that external memory extensions are enabled (see [Vulkan Support](./vulkan-support.md))
+- On multi-GPU systems, ensure the correct GPU is being selected
+
+**GPU ID retrieval failures**
+- Check that Godot is using a supported rendering backend (D3D12, Vulkan, or Metal)
+- Verify graphics drivers are up to date
 
 ### Verifying GPU Selection
 
@@ -169,50 +132,23 @@ To confirm CEF is using the correct GPU:
 3. Navigate to `chrome://gpu` in the CEF browser
 4. Check "Graphics Feature Status" for the active GPU
 
-## Technical Details
+## Common GPU Vendor IDs
 
-### Memory Protection
+| Vendor | ID |
+|--------|-----|
+| NVIDIA | `0x10de` |
+| AMD | `0x1002` |
+| Intel | `0x8086` |
+| Apple | `0x106b` |
 
-The vtable resides in read-only memory. The hook temporarily changes memory protection:
+## Advantages Over Previous Approach
 
-```
-VirtualProtect(vtable_slot, PAGE_EXECUTE_READWRITE)
-    → Write hook pointer
-VirtualProtect(vtable_slot, original_protection)
-```
+The command-line switch approach has several advantages over the previous hook-based implementation:
 
-### Thread Safety
-
-A mutex protects vtable patching to prevent race conditions when multiple factories are created simultaneously.
-
-### Original Function Preservation
-
-Original function pointers are stored atomically:
-- `ORIGINAL_ENUM_ADAPTERS` — For `IDXGIFactory::EnumAdapters`
-- `ORIGINAL_ENUM_ADAPTERS1` — For `IDXGIFactory1::EnumAdapters1`
-
-This ensures the filter can call the real enumeration functions to access the target adapter.
-
-## Limitations
-
-### First-Factory Timing
-
-The hook must intercept the **first** DXGI factory creation. If CEF creates a factory before hooks are installed, GPU pinning fails.
-
-The helper subprocess installs hooks immediately on startup, before any CEF initialization, to ensure this timing requirement is met.
-
-### Single Target GPU
-
-Only one target GPU can be specified per process. Multi-GPU rendering (e.g., SLI/CrossFire) is not supported.
-
-### Session-Specific LUIDs
-
-LUIDs are valid only for the current Windows session. They may change after:
-- System restart
-- Driver updates
-- Hardware changes
-
-The LUID is queried fresh each time the application starts, so this is handled automatically.
+1. **Simpler architecture** — No function hooking or vtable patching required
+2. **Cross-platform** — Same mechanism works on Windows, Linux, and macOS
+3. **More reliable** — No timing issues with hook installation
+4. **Antivirus friendly** — No memory manipulation that might trigger security software
 
 ## See Also
 
