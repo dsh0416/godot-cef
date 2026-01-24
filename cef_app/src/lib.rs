@@ -362,7 +362,6 @@ wrap_browser_process_handler! {
             command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
             command_line.append_switch(Some(&"enable-logging=stderr".into()));
 
-            // Pass GPU vendor/device IDs to CEF for GPU selection
             if let Some(ids) = &self.handler.gpu_device_ids {
                 command_line.append_switch_with_value(
                     Some(&"gpu-vendor-id".into()),

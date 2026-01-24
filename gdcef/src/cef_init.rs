@@ -117,8 +117,6 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
         security_config,
     );
 
-    // Pass GPU vendor/device IDs to CEF subprocesses for GPU selection.
-    // This works across all platforms (Windows, Linux, macOS).
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     {
         use crate::accelerated_osr::get_godot_gpu_device_ids;

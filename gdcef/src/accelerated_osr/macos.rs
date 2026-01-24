@@ -369,10 +369,6 @@ const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
 const K_IO_SERVICE_PLANE: &[u8] = b"IOService\0";
 
 /// Get a u32 property from an IORegistry entry, searching parents if not found directly.
-///
-/// This uses IORegistryEntrySearchCFProperty with kIORegistryIterateParents to search
-/// up through parent entries. This is necessary on Apple Silicon where vendor-id/device-id
-/// properties are in parent IORegistry entries, not directly on the Metal device's entry.
 fn io_registry_search_property_u32(service: u32, key: &str) -> Option<u32> {
     let key_cstr = std::ffi::CString::new(key).ok()?;
 
@@ -386,8 +382,6 @@ fn io_registry_search_property_u32(service: u32, key: &str) -> Option<u32> {
             return None;
         }
 
-        // Search for the property in this entry and all parent entries
-        // This is how Chromium's ANGLE does it in SystemInfo_macos.mm
         let cf_data = IORegistryEntrySearchCFProperty(
             service,
             K_IO_SERVICE_PLANE.as_ptr() as *const i8,
@@ -422,9 +416,6 @@ fn io_registry_search_property_u32(service: u32, key: &str) -> Option<u32> {
 }
 
 /// Get the GPU vendor and device IDs from Godot's Metal device.
-///
-/// This queries the Metal device's registry ID and uses IOKit to find
-/// the matching IOService entry and retrieve the PCI vendor/device IDs.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     let mut rd = RenderingServer::singleton().get_rendering_device()?;
     let mtl_device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
@@ -464,14 +455,11 @@ pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
             return None;
         }
 
-        // Search for vendor-id and device-id, looking in parent entries too
-        // This is necessary on Apple Silicon where these properties are in parent IORegistry entries
         let vendor_id = io_registry_search_property_u32(service, "vendor-id");
         let device_id = io_registry_search_property_u32(service, "device-id");
 
         IOObjectRelease(service);
 
-        // Get device name from the Metal device for logging
         let name: Option<Retained<AnyObject>> = msg_send![device as &AnyObject, name];
         let name_str = name
             .map(|n| {

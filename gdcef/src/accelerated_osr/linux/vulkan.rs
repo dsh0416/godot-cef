@@ -893,9 +893,6 @@ fn cef_format_to_vulkan(format: &ColorType) -> vk::Format {
 }
 
 /// Get the GPU vendor and device IDs from Godot's Vulkan physical device.
-///
-/// This queries the Vulkan physical device properties to retrieve the vendor
-/// and device IDs.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     let mut rd = RenderingServer::singleton().get_rendering_device()?;
 
@@ -939,7 +936,6 @@ pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
         }
     };
 
-    // Query physical device properties which contains vendor/device IDs
     let mut props2 = vk::PhysicalDeviceProperties2::default();
 
     unsafe {

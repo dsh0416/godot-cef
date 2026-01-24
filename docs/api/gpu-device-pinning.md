@@ -99,7 +99,7 @@ if let Some(ids) = &self.handler.gpu_device_ids {
 
 ### macOS Notes
 
-On Apple Silicon (M-series chips), the `vendor-id` and `device-id` properties may not exist in the IOKit registry since there's only one GPU. In this case, Godot CEF uses Apple's vendor ID (`0x106B`) with a placeholder device ID. This is typically fine since there's no GPU selection ambiguity on unified memory architectures.
+On Apple Silicon (M-series chips), the `vendor-id` and `device-id` properties do not exist in the IOKit registry because the GPU is integrated into the SoC rather than being a discrete PCI device. In this case, GPU device pinning is simply skipped. This is fine since Apple Silicon Macs have only one GPU — both Godot and CEF will always use the same GPU without explicit pinning.
 
 ## Debugging GPU Pinning
 

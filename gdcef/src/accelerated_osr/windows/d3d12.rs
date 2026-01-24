@@ -442,9 +442,6 @@ impl Drop for D3D12TextureImporter {
 }
 
 /// Get the GPU vendor and device IDs from Godot's D3D12 device.
-///
-/// This queries the D3D12 device for its adapter LUID, then uses DXGI to find
-/// the matching adapter and retrieve its vendor/device IDs.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     let mut rd = RenderingServer::singleton().get_rendering_device()?;
     let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
@@ -460,10 +457,8 @@ pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     // Device is from Godot, we don't need to close it
     std::mem::forget(device);
 
-    // Create DXGI factory to enumerate adapters
     let factory: IDXGIFactory4 = unsafe { CreateDXGIFactory1() }.ok()?;
 
-    // Find the adapter matching our LUID
     let mut adapter_index = 0u32;
     loop {
         let adapter: IDXGIAdapter1 = match unsafe { factory.EnumAdapters1(adapter_index) } {
@@ -479,7 +474,6 @@ pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
             }
         };
 
-        // Check if LUID matches
         if desc.AdapterLuid.HighPart == target_luid.HighPart
             && desc.AdapterLuid.LowPart == target_luid.LowPart
         {

@@ -39,10 +39,6 @@ fn main() -> std::process::ExitCode {
         cef_app::load_sandbox_from_path(&framework_path, args.as_main_args());
     }
 
-    // GPU device selection is now handled via --gpu-vendor-id and --gpu-device-id
-    // command-line switches passed by cef_app in on_before_child_process_launch.
-    // No hooks or environment variables needed in the helper process.
-
     let switch = CefString::from("type");
     let is_browser_process = cmd.has_switch(Some(&switch)) != 1;
     let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::new());
