@@ -303,9 +303,7 @@ pub fn deploy_bundle_to_addon(
 
     fs::create_dir_all(&addon_bin_dir)?;
 
-    let bundle_name = bundle_path
-        .file_name()
-        .ok_or("Invalid bundle path")?;
+    let bundle_name = bundle_path.file_name().ok_or("Invalid bundle path")?;
     let dst = addon_bin_dir.join(bundle_name);
 
     if dst.exists() {

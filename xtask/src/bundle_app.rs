@@ -53,7 +53,10 @@ fn create_app(
     Ok(app_path)
 }
 
-fn bundle(target_dir: &Path, universal_helper: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn bundle(
+    target_dir: &Path,
+    universal_helper: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let main_app_path = create_app(target_dir, "Godot CEF", universal_helper, false)?;
 
     let cef_path_arm64 = get_cef_dir_arm64()

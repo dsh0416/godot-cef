@@ -1,6 +1,8 @@
 //! Windows bundling - copies CEF assets alongside the built binaries
 
-use crate::bundle_common::{copy_directory, deploy_to_addon, get_cef_dir, get_target_dir, run_cargo};
+use crate::bundle_common::{
+    copy_directory, deploy_to_addon, get_cef_dir, get_target_dir, run_cargo,
+};
 use std::fs;
 use std::path::Path;
 

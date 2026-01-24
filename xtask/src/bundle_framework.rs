@@ -41,7 +41,10 @@ fn create_framework(
     Ok(fmwk_path)
 }
 
-fn bundle(target_dir: &Path, universal_dylib: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn bundle(
+    target_dir: &Path,
+    universal_dylib: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let fmwk_path = create_framework(target_dir, "libgdcef.dylib", universal_dylib)?;
 
     println!("Created: {}", fmwk_path.display());
