@@ -362,7 +362,6 @@ unsafe extern "C" {
     ) -> *const c_void;
     fn CFDataGetLength(theData: *const c_void) -> isize;
     fn CFDataGetBytePtr(theData: *const c_void) -> *const u8;
-    fn CFRelease(cf: *const c_void);
 }
 
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
@@ -389,7 +388,7 @@ fn io_registry_search_property_u32(service: u32, key: &str) -> Option<u32> {
             std::ptr::null(),
             K_IO_REGISTRY_ITERATE_RECURSIVELY | K_IO_REGISTRY_ITERATE_PARENTS,
         );
-        CFRelease(cf_key);
+        CFRelease(cf_key as *mut c_void);
 
         if cf_data.is_null() {
             return None;
@@ -397,19 +396,19 @@ fn io_registry_search_property_u32(service: u32, key: &str) -> Option<u32> {
 
         let length = CFDataGetLength(cf_data);
         if length < 4 {
-            CFRelease(cf_data);
+            CFRelease(cf_data as *mut c_void);
             return None;
         }
 
         let bytes = CFDataGetBytePtr(cf_data);
         if bytes.is_null() {
-            CFRelease(cf_data);
+            CFRelease(cf_data as *mut c_void);
             return None;
         }
 
         // Read as little-endian u32
         let value = u32::from_le_bytes([*bytes, *bytes.add(1), *bytes.add(2), *bytes.add(3)]);
-        CFRelease(cf_data);
+        CFRelease(cf_data as *mut c_void);
 
         Some(value)
     }
