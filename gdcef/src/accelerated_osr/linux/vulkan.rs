@@ -203,9 +203,8 @@ impl VulkanTextureImporter {
             .command_buffer_count(1);
 
         let mut command_buffer: vk::CommandBuffer = unsafe { std::mem::zeroed() };
-        let result = unsafe {
-            (fns.allocate_command_buffers)(device, &alloc_info, &mut command_buffer)
-        };
+        let result =
+            unsafe { (fns.allocate_command_buffers)(device, &alloc_info, &mut command_buffer) };
         if result != vk::Result::SUCCESS {
             godot_error!(
                 "[AcceleratedOSR/Vulkan] Failed to allocate command buffer: {:?}",
@@ -220,9 +219,8 @@ impl VulkanTextureImporter {
         // Create fence (start signaled so first reset doesn't fail)
         let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
         let mut fence: vk::Fence = unsafe { std::mem::zeroed() };
-        let result = unsafe {
-            (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fence)
-        };
+        let result =
+            unsafe { (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fence) };
         if result != vk::Result::SUCCESS {
             godot_error!(
                 "[AcceleratedOSR/Vulkan] Failed to create fence: {:?}",
@@ -376,7 +374,11 @@ impl VulkanTextureImporter {
         // Get queue family properties
         let mut family_props = vec![vk::QueueFamilyProperties::default(); family_count as usize];
         unsafe {
-            get_queue_family_props(physical_device, &mut family_count, family_props.as_mut_ptr());
+            get_queue_family_props(
+                physical_device,
+                &mut family_count,
+                family_props.as_mut_ptr(),
+            );
         }
 
         // Strategy 1: Try to get queue index 1 from graphics family (family 0)
@@ -542,9 +544,8 @@ impl VulkanTextureImporter {
         }
 
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-        let result = unsafe {
-            (fns.wait_for_fences)(self.device, 1, &self.fence, vk::TRUE, u64::MAX)
-        };
+        let result =
+            unsafe { (fns.wait_for_fences)(self.device, 1, &self.fence, vk::TRUE, u64::MAX) };
         if result != vk::Result::SUCCESS {
             return Err(format!("Failed to wait for fence: {:?}", result));
         }
