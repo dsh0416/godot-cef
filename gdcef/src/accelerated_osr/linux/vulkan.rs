@@ -529,7 +529,10 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    fn import_dmabuf_to_image(&mut self, params: &mut DmaBufImportParams) -> Result<vk::Image, String> {
+    fn import_dmabuf_to_image(
+        &mut self,
+        params: &mut DmaBufImportParams,
+    ) -> Result<vk::Image, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
 
         // Always free previous image - we get new fds every frame
