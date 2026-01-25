@@ -1,0 +1,16 @@
+[package]
+name = "gdcef-benches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+software_render = { path = "../crates/software_render" }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "software_rendering"
+harness = false

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "xtask"]
+members = ["crates/*", "xtask", "benches"]
 
 [workspace.package]
 version = "1.3.0"
@@ -48,7 +48,14 @@ objc2-metal = { version = "0.3", features = [
 ] }
 retour = { version = "0.4.0-alpha.4", features = ["static-detour"] }
 libc = "0.2"
+criterion = { version = "0.6", features = ["html_reports"] }
 
 [profile.release]
 debug = "line-tables-only"
 lto = true
+codegen-units = 1
+
+[profile.bench]
+debug = "line-tables-only"
+lto = true
+codegen-units = 1
