@@ -31,8 +31,7 @@ fn composite_popup_chunks(dst: &mut DestBuffer, popup: &PopupBuffer) {
         let src_offset = src_start + row * src_row_stride;
         let dst_offset = dst_start + row * dst_row_stride;
 
-        if src_offset + copy_bytes <= popup.data.len()
-            && dst_offset + copy_bytes <= dst.data.len()
+        if src_offset + copy_bytes <= popup.data.len() && dst_offset + copy_bytes <= dst.data.len()
         {
             dst.data[dst_offset..dst_offset + copy_bytes]
                 .copy_from_slice(&popup.data[src_offset..src_offset + copy_bytes]);
@@ -131,7 +130,8 @@ fn bench_composite_popup(c: &mut Criterion) {
             },
         );
 
-        let (mut dst_buffer2, _) = create_test_buffers(dst_width, dst_height, popup_width, popup_height);
+        let (mut dst_buffer2, _) =
+            create_test_buffers(dst_width, dst_height, popup_width, popup_height);
 
         group.bench_with_input(
             BenchmarkId::new("chunks", name),
@@ -179,23 +179,27 @@ fn bench_composite_popup_edge_cases(c: &mut Criterion) {
     ];
 
     for (popup_x, popup_y, name) in test_cases {
-        group.bench_with_input(BenchmarkId::new("baseline", name), &popup_buffer, |b, popup_data| {
-            b.iter(|| {
-                let mut dst = DestBuffer {
-                    data: &mut dst_buffer,
-                    width: dst_width,
-                    height: dst_height,
-                };
-                let popup = PopupBuffer {
-                    data: popup_data,
-                    width: popup_width,
-                    height: popup_height,
-                    x: popup_x,
-                    y: popup_y,
-                };
-                composite_popup(black_box(&mut dst), black_box(&popup));
-            })
-        });
+        group.bench_with_input(
+            BenchmarkId::new("baseline", name),
+            &popup_buffer,
+            |b, popup_data| {
+                b.iter(|| {
+                    let mut dst = DestBuffer {
+                        data: &mut dst_buffer,
+                        width: dst_width,
+                        height: dst_height,
+                    };
+                    let popup = PopupBuffer {
+                        data: popup_data,
+                        width: popup_width,
+                        height: popup_height,
+                        x: popup_x,
+                        y: popup_y,
+                    };
+                    composite_popup(black_box(&mut dst), black_box(&popup));
+                })
+            },
+        );
     }
 
     group.finish();
@@ -204,10 +208,7 @@ fn bench_composite_popup_edge_cases(c: &mut Criterion) {
 fn bench_full_update_cycle(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_update_cycle");
 
-    let resolutions = [
-        (1920, 1080, "1080p"),
-        (2560, 1440, "1440p"),
-    ];
+    let resolutions = [(1920, 1080, "1080p"), (2560, 1440, "1440p")];
 
     for (width, height, name) in resolutions {
         let buffer_size = (width * height * 4) as u64;
@@ -215,7 +216,8 @@ fn bench_full_update_cycle(c: &mut Criterion) {
 
         let popup_width = 300u32;
         let popup_height = 200u32;
-        let (frame_buffer, popup_buffer) = create_test_buffers(width, height, popup_width, popup_height);
+        let (frame_buffer, popup_buffer) =
+            create_test_buffers(width, height, popup_width, popup_height);
 
         // Simulate the full update path: clone + composite
         group.bench_with_input(
