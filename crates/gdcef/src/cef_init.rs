@@ -114,11 +114,10 @@ fn initialize_cef() -> CefResult<()> {
     let security_config = settings::get_security_config();
 
     #[allow(unused_mut)]
-    let mut osr_app = cef_app::OsrApp::with_security_options(
-        godot_backend,
-        enable_remote_debugging,
-        security_config,
-    );
+    let mut app_builder = cef_app::OsrApp::builder()
+        .godot_backend(godot_backend)
+        .remote_debugging(enable_remote_debugging)
+        .security_config(security_config);
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     {
@@ -129,11 +128,11 @@ fn initialize_cef() -> CefResult<()> {
                 vendor_id,
                 device_id
             );
-            osr_app = osr_app.with_gpu_device_ids(vendor_id, device_id);
+            app_builder = app_builder.gpu_device_ids(vendor_id, device_id);
         }
     }
 
-    let mut app = cef_app::AppBuilder::build(osr_app);
+    let mut app = cef_app::AppBuilder::build(app_builder.build());
 
     #[cfg(target_os = "macos")]
     load_sandbox(args.as_main_args());

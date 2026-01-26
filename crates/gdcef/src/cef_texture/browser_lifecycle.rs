@@ -3,16 +3,12 @@ use cef::{BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings,
 use cef_app::PhysicalSize;
 use godot::classes::ImageTexture;
 use godot::prelude::*;
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use crate::accelerated_osr::{
     self, AcceleratedRenderState, GodotTextureImporter, PlatformAcceleratedRenderHandler,
 };
-use crate::browser::{
-    ConsoleMessageQueue, DragEventQueue, ImeCompositionQueue, ImeEnableQueue, LoadingStateQueue,
-    MessageQueue, PopupStateQueue, RenderMode, TitleChangeQueue, UrlChangeQueue,
-};
+use crate::browser::{PopupStateQueue, RenderMode};
 use crate::error::CefError;
 use crate::{godot_protocol, render, webrender};
 
@@ -192,28 +188,21 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
         let popup_state: PopupStateQueue = render_handler.get_popup_state();
-        let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let title_change_queue: TitleChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let loading_state_queue: LoadingStateQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let ime_enable_queue: ImeEnableQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
-        let console_message_queue: ConsoleMessageQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let drag_event_queue: DragEventQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let queues = webrender::ClientQueues::new();
 
         let texture = ImageTexture::new_gd();
 
         let mut client = webrender::SoftwareClientImpl::build(
             render_handler,
             webrender::ClientQueues {
-                message_queue: message_queue.clone(),
-                url_change_queue: url_change_queue.clone(),
-                title_change_queue: title_change_queue.clone(),
-                loading_state_queue: loading_state_queue.clone(),
-                ime_enable_queue: ime_enable_queue.clone(),
-                ime_composition_queue: ime_composition_queue.clone(),
-                console_message_queue: console_message_queue.clone(),
-                drag_event_queue: drag_event_queue.clone(),
+                message_queue: queues.message_queue.clone(),
+                url_change_queue: queues.url_change_queue.clone(),
+                title_change_queue: queues.title_change_queue.clone(),
+                loading_state_queue: queues.loading_state_queue.clone(),
+                ime_enable_queue: queues.ime_enable_queue.clone(),
+                ime_composition_queue: queues.ime_composition_queue.clone(),
+                console_message_queue: queues.console_message_queue.clone(),
+                drag_event_queue: queues.drag_event_queue.clone(),
             },
         );
 
@@ -240,14 +229,14 @@ impl CefTexture {
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
         self.app.popup_state = Some(popup_state);
-        self.app.message_queue = Some(message_queue);
-        self.app.url_change_queue = Some(url_change_queue);
-        self.app.title_change_queue = Some(title_change_queue);
-        self.app.loading_state_queue = Some(loading_state_queue);
-        self.app.ime_enable_queue = Some(ime_enable_queue);
-        self.app.ime_composition_range = Some(ime_composition_queue);
-        self.app.console_message_queue = Some(console_message_queue);
-        self.app.drag_event_queue = Some(drag_event_queue);
+        self.app.message_queue = Some(queues.message_queue);
+        self.app.url_change_queue = Some(queues.url_change_queue);
+        self.app.title_change_queue = Some(queues.title_change_queue);
+        self.app.loading_state_queue = Some(queues.loading_state_queue);
+        self.app.ime_enable_queue = Some(queues.ime_enable_queue);
+        self.app.ime_composition_range = Some(queues.ime_composition_queue);
+        self.app.console_message_queue = Some(queues.console_message_queue);
+        self.app.drag_event_queue = Some(queues.drag_event_queue);
 
         Ok(browser)
     }
@@ -301,27 +290,20 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
         let popup_state: PopupStateQueue = render_handler.get_popup_state();
-        let message_queue: MessageQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let url_change_queue: UrlChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let title_change_queue: TitleChangeQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let loading_state_queue: LoadingStateQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let ime_enable_queue: ImeEnableQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let ime_composition_queue: ImeCompositionQueue = Arc::new(Mutex::new(None));
-        let console_message_queue: ConsoleMessageQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let drag_event_queue: DragEventQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let queues = webrender::ClientQueues::new();
 
         let mut client = webrender::AcceleratedClientImpl::build(
             render_handler,
             cursor_type.clone(),
             webrender::ClientQueues {
-                message_queue: message_queue.clone(),
-                url_change_queue: url_change_queue.clone(),
-                title_change_queue: title_change_queue.clone(),
-                loading_state_queue: loading_state_queue.clone(),
-                ime_enable_queue: ime_enable_queue.clone(),
-                ime_composition_queue: ime_composition_queue.clone(),
-                console_message_queue: console_message_queue.clone(),
-                drag_event_queue: drag_event_queue.clone(),
+                message_queue: queues.message_queue.clone(),
+                url_change_queue: queues.url_change_queue.clone(),
+                title_change_queue: queues.title_change_queue.clone(),
+                loading_state_queue: queues.loading_state_queue.clone(),
+                ime_enable_queue: queues.ime_enable_queue.clone(),
+                ime_composition_queue: queues.ime_composition_queue.clone(),
+                console_message_queue: queues.console_message_queue.clone(),
+                drag_event_queue: queues.drag_event_queue.clone(),
             },
         );
 
@@ -354,14 +336,14 @@ impl CefTexture {
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
         self.app.popup_state = Some(popup_state);
-        self.app.message_queue = Some(message_queue);
-        self.app.url_change_queue = Some(url_change_queue);
-        self.app.title_change_queue = Some(title_change_queue);
-        self.app.loading_state_queue = Some(loading_state_queue);
-        self.app.ime_enable_queue = Some(ime_enable_queue);
-        self.app.ime_composition_range = Some(ime_composition_queue);
-        self.app.console_message_queue = Some(console_message_queue);
-        self.app.drag_event_queue = Some(drag_event_queue);
+        self.app.message_queue = Some(queues.message_queue);
+        self.app.url_change_queue = Some(queues.url_change_queue);
+        self.app.title_change_queue = Some(queues.title_change_queue);
+        self.app.loading_state_queue = Some(queues.loading_state_queue);
+        self.app.ime_enable_queue = Some(queues.ime_enable_queue);
+        self.app.ime_composition_range = Some(queues.ime_composition_queue);
+        self.app.console_message_queue = Some(queues.console_message_queue);
+        self.app.drag_event_queue = Some(queues.drag_event_queue);
 
         Ok(browser)
     }

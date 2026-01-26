@@ -8,6 +8,9 @@ use godot::prelude::*;
 
 mod keycode;
 
+/// Standard wheel delta for one scroll "notch" (Windows convention used by CEF).
+const WHEEL_DELTA: f32 = 120.0;
+
 /// Pre-defined shortcuts for editor commands.
 /// Initialized once per thread using thread_local.
 struct EditorShortcuts {
@@ -147,19 +150,19 @@ pub fn handle_mouse_button(
             );
         }
         MouseButton::WHEEL_UP => {
-            let delta = (120.0 * event.get_factor()) as i32;
+            let delta = (WHEEL_DELTA * event.get_factor()) as i32;
             host.send_mouse_wheel_event(Some(&mouse_event), 0, delta);
         }
         MouseButton::WHEEL_DOWN => {
-            let delta = (120.0 * event.get_factor()) as i32;
+            let delta = (WHEEL_DELTA * event.get_factor()) as i32;
             host.send_mouse_wheel_event(Some(&mouse_event), 0, -delta);
         }
         MouseButton::WHEEL_LEFT => {
-            let delta = (120.0 * event.get_factor()) as i32;
+            let delta = (WHEEL_DELTA * event.get_factor()) as i32;
             host.send_mouse_wheel_event(Some(&mouse_event), -delta, 0);
         }
         MouseButton::WHEEL_RIGHT => {
-            let delta = (120.0 * event.get_factor()) as i32;
+            let delta = (WHEEL_DELTA * event.get_factor()) as i32;
             host.send_mouse_wheel_event(Some(&mouse_event), delta, 0);
         }
         _ => {}
@@ -204,8 +207,8 @@ pub fn handle_pan_gesture(
     // Convert pan delta to scroll wheel delta
     // Pan gesture delta is typically smaller, so we scale it up
     // Negative because pan direction is opposite to scroll direction
-    let delta_x = (-delta.x * 120.0 / device_scale_factor) as i32;
-    let delta_y = (-delta.y * 120.0 / device_scale_factor) as i32;
+    let delta_x = (-delta.x * WHEEL_DELTA / device_scale_factor) as i32;
+    let delta_y = (-delta.y * WHEEL_DELTA / device_scale_factor) as i32;
 
     if delta_x != 0 || delta_y != 0 {
         host.send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);

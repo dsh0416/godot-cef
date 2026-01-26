@@ -1,5 +1,6 @@
 use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::{CursorType, PhysicalSize};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
 
@@ -21,6 +22,21 @@ pub(crate) struct ClientQueues {
     pub ime_composition_queue: ImeCompositionQueue,
     pub console_message_queue: ConsoleMessageQueue,
     pub drag_event_queue: DragEventQueue,
+}
+
+impl ClientQueues {
+    pub fn new() -> Self {
+        Self {
+            message_queue: Arc::new(Mutex::new(VecDeque::new())),
+            url_change_queue: Arc::new(Mutex::new(VecDeque::new())),
+            title_change_queue: Arc::new(Mutex::new(VecDeque::new())),
+            loading_state_queue: Arc::new(Mutex::new(VecDeque::new())),
+            ime_enable_queue: Arc::new(Mutex::new(VecDeque::new())),
+            ime_composition_queue: Arc::new(Mutex::new(None)),
+            console_message_queue: Arc::new(Mutex::new(VecDeque::new())),
+            drag_event_queue: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
 }
 
 /// Swizzle indices for BGRA -> RGBA conversion.
@@ -857,6 +873,14 @@ pub(crate) struct ClientIpcQueues {
     pub ime_composition_queue: ImeCompositionQueue,
 }
 
+fn build_ipc_queues(queues: &ClientQueues) -> ClientIpcQueues {
+    ClientIpcQueues {
+        message_queue: queues.message_queue.clone(),
+        ime_enable_queue: queues.ime_enable_queue.clone(),
+        ime_composition_queue: queues.ime_composition_queue.clone(),
+    }
+}
+
 wrap_client! {
     pub(crate) struct SoftwareClientImpl {
         handlers: ClientHandlers,
@@ -930,6 +954,7 @@ impl SoftwareClientImpl {
         queues: ClientQueues,
     ) -> cef::Client {
         let cursor_type = render_handler.get_cursor_type();
+        let ipc = build_ipc_queues(&queues);
         let handlers = build_client_handlers(
             SoftwareOsrHandler::build(
                 render_handler,
@@ -943,11 +968,6 @@ impl SoftwareClientImpl {
             queues.console_message_queue,
             queues.drag_event_queue,
         );
-        let ipc = ClientIpcQueues {
-            message_queue: queues.message_queue,
-            ime_enable_queue: queues.ime_enable_queue,
-            ime_composition_queue: queues.ime_composition_queue,
-        };
         Self::new(handlers, ipc)
     }
 }
@@ -1001,6 +1021,7 @@ impl AcceleratedClientImpl {
         cursor_type: Arc<Mutex<CursorType>>,
         queues: ClientQueues,
     ) -> cef::Client {
+        let ipc = build_ipc_queues(&queues);
         let handlers = build_client_handlers(
             AcceleratedOsrHandler::build(
                 render_handler,
@@ -1014,11 +1035,6 @@ impl AcceleratedClientImpl {
             queues.console_message_queue,
             queues.drag_event_queue,
         );
-        let ipc = ClientIpcQueues {
-            message_queue: queues.message_queue,
-            ime_enable_queue: queues.ime_enable_queue,
-            ime_composition_queue: queues.ime_composition_queue,
-        };
         Self::new(handlers, ipc)
     }
 }
