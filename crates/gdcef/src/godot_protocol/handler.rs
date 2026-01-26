@@ -457,7 +457,15 @@ wrap_resource_handler! {
             true as _
         }
 
-        fn cancel(&self) {}
+        fn cancel(&self) {
+            let mut state = self.handler.state.borrow_mut();
+
+            // If a multipart stream is active, explicitly release its resources
+            if state.multipart_stream.is_some() {
+                state.multipart_stream = None;
+                state.open_file = None;
+            }
+        }
     }
 }
 
