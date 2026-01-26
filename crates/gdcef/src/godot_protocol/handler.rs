@@ -53,9 +53,13 @@ fn url_decode(input: &str) -> Option<String> {
 /// Check if a path contains path traversal patterns.
 ///
 /// Returns `true` if the path is suspicious and should be rejected.
+/// Handles both forward slashes and backslashes (for Windows compatibility).
 fn contains_path_traversal(decoded_path: &str) -> bool {
+    // Normalize backslashes to forward slashes to catch Windows-style traversal
+    let normalized = decoded_path.replace('\\', "/");
+
     // Check each component for ".." traversal
-    for component in decoded_path.split('/') {
+    for component in normalized.split('/') {
         if component == ".." {
             return true;
         }
@@ -83,6 +87,11 @@ pub(crate) fn parse_godot_url(url: &str, scheme: GodotScheme) -> Option<String> 
 
     // URL-decode the path to handle percent-encoded characters
     let path = url_decode(path_encoded)?;
+
+    // Reject paths containing null bytes (could cause issues with file APIs)
+    if path.contains('\0') {
+        return None;
+    }
 
     // Reject paths with traversal patterns (checked after decoding)
     if contains_path_traversal(&path) {
@@ -167,6 +176,7 @@ wrap_resource_handler! {
                 None => {
                     state.status_code = 403;
                     state.mime_type = "text/plain".to_string();
+                    state.response_content_type = "text/plain".to_string();
                     state.error_message = Some("Forbidden: Invalid path".to_string());
                     state.data = state
                         .error_message
@@ -186,6 +196,7 @@ wrap_resource_handler! {
             if !FileAccess::file_exists(&gstring_path) {
                 state.status_code = 404;
                 state.mime_type = "text/plain".to_string();
+                state.response_content_type = "text/plain".to_string();
                 state.error_message = Some(format!("File not found: {}", godot_path));
                 state.data = state
                     .error_message
@@ -275,6 +286,7 @@ wrap_resource_handler! {
                 None => {
                     state.status_code = 500;
                     state.mime_type = "text/plain".to_string();
+                    state.response_content_type = "text/plain".to_string();
                     state.error_message = Some(format!("Failed to open file: {}", godot_path));
                     state.data = state
                         .error_message
@@ -656,6 +668,51 @@ mod tests {
         );
         assert_eq!(
             parse_godot_url("res://folder%2f..%2f../etc", GodotScheme::Res),
+            None
+        );
+
+        // Backslash-based traversal (Windows-style)
+        assert_eq!(
+            parse_godot_url("res://..\\etc\\passwd", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://folder\\..\\..\\etc", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://a\\b\\..\\..\\..\\c", GodotScheme::Res),
+            None
+        );
+
+        // URL-encoded backslash traversal (%5c = backslash)
+        assert_eq!(
+            parse_godot_url("res://..%5cetc%5cpasswd", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://..%5Cetc%5Cpasswd", GodotScheme::Res),
+            None
+        );
+    }
+
+    #[test]
+    fn test_rejects_null_bytes() {
+        // URL-encoded null byte (%00)
+        assert_eq!(
+            parse_godot_url("res://file%00.html", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://folder%00/file.txt", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://%00file.html", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("user://data%00.json", GodotScheme::User),
             None
         );
     }
