@@ -27,23 +27,28 @@ The `CefTexture` node extends `TextureRect` and provides a Chromium-based web br
 - **Navigation controls** and browser state management
 - **Drag-and-drop** between Godot and web content
 
-## Limitations
+## Global Configuration
 
-### One-Time Initialization Parameters
+Due to the architecture of CEF, certain parameters can only be configured **once** during Godot's boot-up process. These settings are configured via **Project Settings** and apply to all `CefTexture` instances.
 
-Due to the architecture of CEF, certain parameters can only be configured **once** during Godot's boot-up process. Once CEF is initialized, these settings cannot be changed without restarting the application.
+### Project Settings
 
-The following security configuration options in `cef_app/src/lib.rs` are affected:
+Navigate to **Project > Project Settings > godot_cef** to configure:
 
-| Parameter | Description |
-|-----------|-------------|
-| `allow_insecure_content` | Allow loading insecure (HTTP) content in HTTPS pages |
-| `ignore_certificate_errors` | Ignore SSL/TLS certificate errors |
-| `disable_web_security` | Disable web security (CORS, same-origin policy) |
+| Setting | Description |
+|---------|-------------|
+| `godot_cef/storage/data_path` | Path for cookies, cache, and localStorage (default: `user://cef-data`) |
+| `godot_cef/security/allow_insecure_content` | Allow loading insecure (HTTP) content in HTTPS pages |
+| `godot_cef/security/ignore_certificate_errors` | Ignore SSL/TLS certificate errors |
+| `godot_cef/security/disable_web_security` | Disable web security (CORS, same-origin policy) |
 
 These parameters are passed as command-line switches to the CEF subprocess during initialization and cannot be modified at runtime. If you need to change these settings, you must restart your Godot application.
 
 **Note:** Remote debugging is also configured once at startup and is automatically enabled only when running in debug builds or from the Godot editor for security purposes.
+
+::: warning
+Security settings are dangerous and should only be enabled for specific use cases. Warnings will be logged at startup if any security settings are enabled.
+:::
 
 ## API Sections
 

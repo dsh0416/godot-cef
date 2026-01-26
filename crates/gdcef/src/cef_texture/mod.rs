@@ -4,7 +4,6 @@ mod rendering;
 mod signals;
 
 use cef::{self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, do_message_loop_work};
-use cef_app::SecurityConfig;
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
@@ -28,15 +27,6 @@ pub struct CefTexture {
 
     #[export]
     enable_accelerated_osr: bool,
-
-    #[export]
-    allow_insecure_content: bool,
-
-    #[export]
-    ignore_certificate_errors: bool,
-
-    #[export]
-    disable_web_security: bool,
 
     #[var]
     /// Stores the IME cursor position in local coordinates (relative to this `CefTexture` node),
@@ -69,9 +59,6 @@ impl ITextureRect for CefTexture {
             app: App::default(),
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
-            allow_insecure_content: false,
-            ignore_certificate_errors: false,
-            disable_web_security: false,
             ime_position: Vector2i::new(0, 0),
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
@@ -154,11 +141,7 @@ impl CefTexture {
         // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF
         self.base_mut().set_focus_mode(FocusMode::CLICK);
 
-        if let Err(e) = cef_init::cef_retain_with_security(SecurityConfig {
-            allow_insecure_content: self.allow_insecure_content,
-            ignore_certificate_errors: self.ignore_certificate_errors,
-            disable_web_security: self.disable_web_security,
-        }) {
+        if let Err(e) = cef_init::cef_retain() {
             godot::global::godot_error!("[CefTexture] {}", e);
             return;
         }

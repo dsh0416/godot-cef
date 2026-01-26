@@ -1,7 +1,6 @@
 use cef::Settings;
 use godot::classes::{Engine, Os};
 use godot::prelude::*;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 #[cfg(target_os = "macos")]
@@ -10,7 +9,7 @@ use crate::utils::get_subprocess_path;
 
 use crate::accelerated_osr::RenderBackend;
 use crate::error::{CefError, CefResult};
-use cef_app::SecurityConfig;
+use crate::settings;
 
 struct CefState {
     ref_count: usize,
@@ -22,14 +21,16 @@ static CEF_STATE: Mutex<CefState> = Mutex::new(CefState {
     initialized: false,
 });
 
-pub fn cef_retain_with_security(security_config: SecurityConfig) -> CefResult<()> {
+pub fn cef_retain() -> CefResult<()> {
     let mut state = CEF_STATE.lock().unwrap();
 
     if state.ref_count == 0 {
         load_cef_framework()?;
         cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
-        initialize_cef(security_config)?;
+        initialize_cef()?;
         state.initialized = true;
+
+        settings::warn_if_insecure_settings();
     }
 
     state.ref_count += 1;
@@ -105,10 +106,12 @@ fn should_enable_remote_debugging() -> bool {
 }
 
 /// Initializes CEF with the given settings
-fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
+fn initialize_cef() -> CefResult<()> {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
     let enable_remote_debugging = should_enable_remote_debugging();
+
+    let security_config = settings::get_security_config();
 
     #[allow(unused_mut)]
     let mut osr_app = cef_app::OsrApp::with_security_options(
@@ -139,8 +142,7 @@ fn initialize_cef(security_config: SecurityConfig) -> CefResult<()> {
         CefError::InitializationFailed(format!("Failed to get subprocess path: {}", e))
     })?;
 
-    let user_data_dir = PathBuf::from(Os::singleton().get_user_data_dir().to_string());
-    let root_cache_path = user_data_dir.join("Godot CEF/Cache");
+    let root_cache_path = settings::get_data_path();
 
     let settings = Settings {
         browser_subprocess_path: subprocess_path
