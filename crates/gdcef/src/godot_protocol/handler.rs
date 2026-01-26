@@ -50,10 +50,10 @@ fn has_valid_percent_encoding(input: &str) -> bool {
 /// - Percent-encoded dots: `%2e%2e`, `%2E%2E`
 /// - Backslash variants: `..\\`, `%5c`
 fn contains_path_traversal_encoded(url: &str) -> bool {
-    if let Ok(decoded) = percent_decode_str(url).decode_utf8() {
-        if contains_path_traversal(&decoded) {
-            return true;
-        }
+    if let Ok(decoded) = percent_decode_str(url).decode_utf8()
+        && contains_path_traversal(&decoded)
+    {
+        return true;
     }
     contains_path_traversal(url)
 }
@@ -111,9 +111,9 @@ pub(crate) fn parse_godot_url(url_str: &str, scheme: GodotScheme) -> Option<Stri
                     let scheme_prefix = format!("{}://", scheme.name());
                     let had_trailing_slash = url_str
                         .strip_prefix(&scheme_prefix)
-                        .and_then(|rest| {
-                            let end = rest.find(|c| c == '?' || c == '#').unwrap_or(rest.len());
-                            Some(rest[..end].ends_with('/'))
+                        .map(|rest| {
+                            let end = rest.find(['?', '#']).unwrap_or(rest.len());
+                            rest[..end].ends_with('/')
                         })
                         // If we can't determine it reliably, preserve the previous behavior.
                         .unwrap_or(true);
