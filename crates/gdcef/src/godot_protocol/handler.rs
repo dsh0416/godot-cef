@@ -331,7 +331,7 @@ wrap_resource_handler! {
         ) -> ::std::os::raw::c_int {
             let mut state = self.handler.state.borrow_mut();
 
-            let bytes_to_skip = bytes_to_skip as usize;
+            let bytes_to_skip = bytes_to_skip.max(0) as usize;
             let remaining = state.data.len().saturating_sub(state.offset);
             let to_skip = remaining.min(bytes_to_skip);
 

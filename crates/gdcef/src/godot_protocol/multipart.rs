@@ -71,12 +71,12 @@ pub(crate) fn calculate_multipart_size(
             "--{}\r\nContent-Type: {}\r\nContent-Range: bytes {}-{}/{}\r\n\r\n",
             MULTIPART_BOUNDARY, mime_type, range.start, range.end, file_size
         );
-        total += header.len() as u64;
-        total += range.end - range.start + 1;
-        total += 2; // CRLF
+        total = total.saturating_add(header.len() as u64);
+        total = total.saturating_add(range.end - range.start + 1);
+        total = total.saturating_add(2); // CRLF
     }
 
-    total += 2 + MULTIPART_BOUNDARY.len() as u64 + 2 + 2; // "--" + boundary + "--" + "\r\n"
+    total = total.saturating_add(2 + MULTIPART_BOUNDARY.len() as u64 + 2 + 2); // "--" + boundary + "--" + "\r\n"
 
     total
 }
@@ -159,13 +159,13 @@ pub(crate) fn read_multipart_streaming(
                         written += actual_read;
                         stream.current_range_offset += actual_read as u64;
                     } else {
-                        // EOF or error - move to next phase
-                        stream.phase = MultipartPhase::TrailingCrlf;
+                        // EOF or error - abort the multipart response to avoid malformed output
+                        stream.phase = MultipartPhase::Complete;
                         stream.phase_offset = 0;
                     }
                 } else {
-                    // File open failed - skip to next range
-                    stream.phase = MultipartPhase::TrailingCrlf;
+                    // File open failed - abort the multipart response to avoid malformed output
+                    stream.phase = MultipartPhase::Complete;
                     stream.phase_offset = 0;
                 }
             }
