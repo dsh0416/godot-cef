@@ -174,6 +174,223 @@ enum ParsedRanges {
 
 const MULTIPART_BOUNDARY: &str = "godot_cef_multipart_boundary";
 
+// Limit to prevent DoS via excessive multipart response generation
+const MAX_MULTI_RANGES: usize = 10;
+
+#[derive(Clone, Debug)]
+struct MultipartStreamState {
+    ranges: Vec<ByteRange>,
+    current_range_index: usize,
+    current_range_offset: u64,
+    phase: MultipartPhase,
+    phase_offset: usize,
+    total_size: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum MultipartPhase {
+    Header,
+    Data,
+    TrailingCrlf,
+    FinalBoundary,
+    Complete,
+}
+
+impl MultipartStreamState {
+    fn new(ranges: Vec<ByteRange>, mime_type: &str, file_size: u64) -> Self {
+        let total_size = calculate_multipart_size(&ranges, mime_type, file_size);
+        Self {
+            ranges,
+            current_range_index: 0,
+            current_range_offset: 0,
+            phase: MultipartPhase::Header,
+            phase_offset: 0,
+            total_size,
+        }
+    }
+
+    fn build_current_header(&self, mime_type: &str, file_size: u64) -> String {
+        if self.current_range_index >= self.ranges.len() {
+            return String::new();
+        }
+        let range = &self.ranges[self.current_range_index];
+        format!(
+            "--{}\r\nContent-Type: {}\r\nContent-Range: bytes {}-{}/{}\r\n\r\n",
+            MULTIPART_BOUNDARY, mime_type, range.start, range.end, file_size
+        )
+    }
+
+    fn final_boundary() -> &'static [u8] {
+        const FINAL: &[u8] = b"--godot_cef_multipart_boundary--\r\n";
+        FINAL
+    }
+}
+
+fn calculate_multipart_size(ranges: &[ByteRange], mime_type: &str, file_size: u64) -> u64 {
+    let mut total: u64 = 0;
+
+    for range in ranges {
+        let header = format!(
+            "--{}\r\nContent-Type: {}\r\nContent-Range: bytes {}-{}/{}\r\n\r\n",
+            MULTIPART_BOUNDARY, mime_type, range.start, range.end, file_size
+        );
+        total += header.len() as u64;
+        total += range.end - range.start + 1;
+        total += 2; // CRLF
+    }
+
+    total += 2 + MULTIPART_BOUNDARY.len() as u64 + 2 + 2; // "--" + boundary + "--" + "\r\n"
+
+    total
+}
+
+fn read_multipart_streaming(
+    stream: &mut MultipartStreamState,
+    file_path: &str,
+    mime_type: &str,
+    file_size: u64,
+    data_out: *mut u8,
+    bytes_to_read: usize,
+) -> usize {
+    let mut written = 0usize;
+    let mut out_ptr = data_out;
+
+    while written < bytes_to_read {
+        match stream.phase {
+            MultipartPhase::Complete => break,
+
+            MultipartPhase::Header => {
+                let header = stream.build_current_header(mime_type, file_size);
+                let header_bytes = header.as_bytes();
+                let remaining_header = header_bytes.len().saturating_sub(stream.phase_offset);
+
+                if remaining_header == 0 {
+                    // Header fully sent, move to data phase
+                    stream.phase = MultipartPhase::Data;
+                    stream.phase_offset = 0;
+                    continue;
+                }
+
+                let to_copy = (bytes_to_read - written).min(remaining_header);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        header_bytes.as_ptr().add(stream.phase_offset),
+                        out_ptr,
+                        to_copy,
+                    );
+                    out_ptr = out_ptr.add(to_copy);
+                }
+                written += to_copy;
+                stream.phase_offset += to_copy;
+            }
+
+            MultipartPhase::Data => {
+                if stream.current_range_index >= stream.ranges.len() {
+                    stream.phase = MultipartPhase::FinalBoundary;
+                    stream.phase_offset = 0;
+                    continue;
+                }
+
+                let range = &stream.ranges[stream.current_range_index];
+                let range_size = range.end - range.start + 1;
+                let remaining_in_range = range_size.saturating_sub(stream.current_range_offset);
+
+                if remaining_in_range == 0 {
+                    // Range data fully sent, move to trailing CRLF
+                    stream.phase = MultipartPhase::TrailingCrlf;
+                    stream.phase_offset = 0;
+                    continue;
+                }
+
+                // Open file and read data for this chunk
+                let gstring_path = GString::from(file_path);
+                if let Some(mut file) = FileAccess::open(&gstring_path, ModeFlags::READ) {
+                    file.seek(range.start + stream.current_range_offset);
+                    let to_read = (bytes_to_read - written).min(remaining_in_range as usize);
+                    let buffer = file.get_buffer(to_read as i64);
+                    let actual_read = buffer.len();
+
+                    if actual_read > 0 {
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                buffer.as_slice().as_ptr(),
+                                out_ptr,
+                                actual_read,
+                            );
+                            out_ptr = out_ptr.add(actual_read);
+                        }
+                        written += actual_read;
+                        stream.current_range_offset += actual_read as u64;
+                    } else {
+                        // EOF or error - move to next phase
+                        stream.phase = MultipartPhase::TrailingCrlf;
+                        stream.phase_offset = 0;
+                    }
+                } else {
+                    // File open failed - skip to next range
+                    stream.phase = MultipartPhase::TrailingCrlf;
+                    stream.phase_offset = 0;
+                }
+            }
+
+            MultipartPhase::TrailingCrlf => {
+                const CRLF: &[u8] = b"\r\n";
+                let remaining_crlf = CRLF.len().saturating_sub(stream.phase_offset);
+
+                if remaining_crlf == 0 {
+                    // CRLF fully sent, move to next range
+                    stream.current_range_index += 1;
+                    stream.current_range_offset = 0;
+
+                    if stream.current_range_index >= stream.ranges.len() {
+                        stream.phase = MultipartPhase::FinalBoundary;
+                    } else {
+                        stream.phase = MultipartPhase::Header;
+                    }
+                    stream.phase_offset = 0;
+                    continue;
+                }
+
+                let to_copy = (bytes_to_read - written).min(remaining_crlf);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        CRLF.as_ptr().add(stream.phase_offset),
+                        out_ptr,
+                        to_copy,
+                    );
+                    out_ptr = out_ptr.add(to_copy);
+                }
+                written += to_copy;
+                stream.phase_offset += to_copy;
+            }
+
+            MultipartPhase::FinalBoundary => {
+                let final_boundary = MultipartStreamState::final_boundary();
+                let remaining_boundary = final_boundary.len().saturating_sub(stream.phase_offset);
+
+                if remaining_boundary == 0 {
+                    stream.phase = MultipartPhase::Complete;
+                    continue;
+                }
+
+                let to_copy = (bytes_to_read - written).min(remaining_boundary);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        final_boundary.as_ptr().add(stream.phase_offset),
+                        out_ptr,
+                        to_copy,
+                    );
+                    out_ptr = out_ptr.add(to_copy);
+                }
+                written += to_copy;
+                stream.phase_offset += to_copy;
+            }
+        }
+    }
+
+    written
+}
+
 fn parse_single_range(range_spec: &str, file_size: u64) -> Option<ByteRange> {
     // Empty file has no valid byte ranges
     if file_size == 0 {
@@ -243,6 +460,8 @@ fn parse_range_header(range_str: &str, file_size: u64) -> Option<ParsedRanges> {
             None
         } else if ranges.len() == 1 {
             Some(ParsedRanges::Single(ranges.into_iter().next().unwrap()))
+        } else if ranges.len() > MAX_MULTI_RANGES {
+            None
         } else {
             Some(ParsedRanges::Multi(ranges))
         }
@@ -250,43 +469,6 @@ fn parse_range_header(range_str: &str, file_size: u64) -> Option<ParsedRanges> {
         // Single range request
         parse_single_range(range_part, file_size).map(ParsedRanges::Single)
     }
-}
-
-fn build_multipart_body(
-    ranges: &[ByteRange],
-    file: &mut godot::classes::FileAccess,
-    mime_type: &str,
-    file_size: u64,
-) -> Vec<u8> {
-    let mut body = Vec::new();
-
-    for range in ranges {
-        // Add boundary
-        body.extend_from_slice(format!("--{}\r\n", MULTIPART_BOUNDARY).as_bytes());
-
-        // Add headers for this part
-        body.extend_from_slice(format!("Content-Type: {}\r\n", mime_type).as_bytes());
-        body.extend_from_slice(
-            format!(
-                "Content-Range: bytes {}-{}/{}\r\n",
-                range.start, range.end, file_size
-            )
-            .as_bytes(),
-        );
-        body.extend_from_slice(b"\r\n");
-
-        // Add the data for this range
-        let content_size = (range.end - range.start + 1) as i64;
-        file.seek(range.start);
-        let buffer = file.get_buffer(content_size);
-        body.extend_from_slice(buffer.as_slice());
-        body.extend_from_slice(b"\r\n");
-    }
-
-    // Add closing boundary
-    body.extend_from_slice(format!("--{}--\r\n", MULTIPART_BOUNDARY).as_bytes());
-
-    body
 }
 
 fn parse_godot_url(url: &str, scheme: GodotScheme) -> String {
@@ -326,6 +508,8 @@ struct ResourceState {
     range_start: Option<u64>,
     range_end: Option<u64>,
     is_multipart: bool,
+    multipart_stream: Option<MultipartStreamState>,
+    file_path: Option<String>,
 }
 
 #[derive(Clone)]
@@ -423,8 +607,12 @@ wrap_resource_handler! {
                             }
                         }
                         Some(ParsedRanges::Multi(ranges)) => {
-                            // Build multipart response
-                            state.data = build_multipart_body(&ranges, &mut file, &state.mime_type, file_size);
+                            // Set up streaming multipart response (data loaded on-demand during read)
+                            let stream_state = MultipartStreamState::new(
+                                ranges,
+                                &state.mime_type,
+                                file_size,
+                            );
                             state.status_code = 206;
                             state.response_content_type = format!(
                                 "multipart/byteranges; boundary={}",
@@ -433,6 +621,9 @@ wrap_resource_handler! {
                             state.range_start = None;
                             state.range_end = None;
                             state.is_multipart = true;
+                            state.file_path = Some(godot_path.clone());
+                            state.multipart_stream = Some(stream_state);
+                            state.data = Vec::new(); // Data will be streamed, not buffered
                             state.offset = 0;
                         }
                         None => {
@@ -506,7 +697,12 @@ wrap_resource_handler! {
             }
 
             if let Some(response_length) = response_length {
-                *response_length = state.data.len() as i64;
+                // For streaming multipart responses, use pre-calculated total size
+                if let Some(ref stream) = state.multipart_stream {
+                    *response_length = stream.total_size as i64;
+                } else {
+                    *response_length = state.data.len() as i64;
+                }
             }
         }
 
@@ -519,7 +715,37 @@ wrap_resource_handler! {
         ) -> ::std::os::raw::c_int {
             let mut state = self.handler.state.borrow_mut();
 
+            if data_out.is_null() {
+                return false as _;
+            }
+
             let bytes_to_read = bytes_to_read as usize;
+
+            // Handle streaming multipart responses
+            if state.multipart_stream.is_some() && state.file_path.is_some() {
+                // Clone values needed for streaming before mutable borrow
+                let file_path = state.file_path.clone().unwrap();
+                let mime_type = state.mime_type.clone();
+                let file_size = state.total_file_size;
+                let stream = state.multipart_stream.as_mut().unwrap();
+
+                let written = read_multipart_streaming(
+                    stream,
+                    &file_path,
+                    &mime_type,
+                    file_size,
+                    data_out,
+                    bytes_to_read,
+                );
+
+                if let Some(bytes_read) = bytes_read {
+                    *bytes_read = written as _;
+                }
+
+                return (written > 0) as _;
+            }
+
+            // Handle buffered (non-streaming) responses
             let remaining = state.data.len().saturating_sub(state.offset);
 
             if remaining == 0 {
@@ -530,7 +756,6 @@ wrap_resource_handler! {
             }
 
             let to_copy = remaining.min(bytes_to_read);
-            if data_out.is_null() { return false as _; }
 
             unsafe {
                 std::ptr::copy_nonoverlapping(
@@ -861,6 +1086,42 @@ mod tests {
         assert_eq!(
             parse_range_header("bytes= 0-100 , 200-300 ", TEST_FILE_SIZE),
             multi(vec![(0, 100), (200, 300)])
+        );
+    }
+
+    #[test]
+    fn test_range_header_multi_range_limit() {
+        // Exactly at the limit (MAX_MULTI_RANGES = 10) should work
+        let at_limit = "bytes=0-10,20-30,40-50,60-70,80-90,100-110,120-130,140-150,160-170,180-190";
+        assert_eq!(
+            parse_range_header(at_limit, TEST_FILE_SIZE),
+            multi(vec![
+                (0, 10),
+                (20, 30),
+                (40, 50),
+                (60, 70),
+                (80, 90),
+                (100, 110),
+                (120, 130),
+                (140, 150),
+                (160, 170),
+                (180, 190)
+            ])
+        );
+
+        // Exceeding the limit should return None (falls back to full file response)
+        let over_limit =
+            "bytes=0-10,20-30,40-50,60-70,80-90,100-110,120-130,140-150,160-170,180-190,200-210";
+        assert_eq!(parse_range_header(over_limit, TEST_FILE_SIZE), None);
+
+        // Many more ranges should also return None
+        let many_ranges = (0..100)
+            .map(|i| format!("{}-{}", i * 10, i * 10 + 5))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            parse_range_header(&format!("bytes={}", many_ranges), TEST_FILE_SIZE),
+            None
         );
     }
 
