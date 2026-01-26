@@ -14,10 +14,10 @@ use godot::prelude::*;
 use std::cell::RefCell;
 use std::path::PathBuf;
 
-use super::mime::get_mime_type;
-use super::multipart::{read_multipart_streaming, MultipartStreamState, MULTIPART_BOUNDARY};
-use super::range::{parse_range_header, ParsedRanges};
 use super::GodotScheme;
+use super::mime::get_mime_type;
+use super::multipart::{MULTIPART_BOUNDARY, MultipartStreamState, read_multipart_streaming};
+use super::range::{ParsedRanges, parse_range_header};
 
 /// Parse a URL into a Godot filesystem path.
 pub(crate) fn parse_godot_url(url: &str, scheme: GodotScheme) -> String {
@@ -451,4 +451,3 @@ mod tests {
         );
     }
 }
-

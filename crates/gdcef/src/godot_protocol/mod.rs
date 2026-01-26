@@ -15,8 +15,7 @@ mod multipart;
 mod range;
 
 pub use handler::{
-    register_res_scheme_handler_on_context,
-    register_user_scheme_handler_on_context,
+    register_res_scheme_handler_on_context, register_user_scheme_handler_on_context,
 };
 
 /// Represents the Godot filesystem scheme type.

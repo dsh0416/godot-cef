@@ -59,7 +59,11 @@ impl MultipartStreamState {
     }
 }
 
-pub(crate) fn calculate_multipart_size(ranges: &[ByteRange], mime_type: &str, file_size: u64) -> u64 {
+pub(crate) fn calculate_multipart_size(
+    ranges: &[ByteRange],
+    mime_type: &str,
+    file_size: u64,
+) -> u64 {
     let mut total: u64 = 0;
 
     for range in ranges {
