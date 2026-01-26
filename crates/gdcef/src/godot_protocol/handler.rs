@@ -101,7 +101,31 @@ pub(crate) fn parse_godot_url(url_str: &str, scheme: GodotScheme) -> Option<Stri
             if host.is_empty() {
                 url_path.strip_prefix('/').unwrap_or(url_path).to_string()
             } else {
-                format!("{}{}", host, url_path)
+                // When the URL is of the form `res://file.html?v=1` or `user://data.json#frag`,
+                // `Url::parse` will treat `file.html`/`data.json` as the host and `/` as the path.
+                // In those cases, we must *not* append a trailing slash, otherwise we end up with
+                // `file.html/` which `finalize_godot_path` then treats as a directory.
+                if url_path == "/" {
+                    // Reconstruct what was after `scheme://` up to any `?` or `#` to see if there
+                    // was an explicit trailing slash in the original URL.
+                    let scheme_prefix = format!("{}://", scheme.name());
+                    let had_trailing_slash = url_str
+                        .strip_prefix(&scheme_prefix)
+                        .and_then(|rest| {
+                            let end = rest.find(|c| c == '?' || c == '#').unwrap_or(rest.len());
+                            Some(rest[..end].ends_with('/'))
+                        })
+                        // If we can't determine it reliably, preserve the previous behavior.
+                        .unwrap_or(true);
+
+                    if !had_trailing_slash {
+                        host.to_string()
+                    } else {
+                        format!("{}{}", host, url_path)
+                    }
+                } else {
+                    format!("{}{}", host, url_path)
+                }
             }
         } else {
             return parse_godot_url_manual(url_str, scheme);
