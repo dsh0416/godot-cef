@@ -11,8 +11,10 @@ use cef::{
 use godot::classes::FileAccess;
 use godot::classes::file_access::ModeFlags;
 use godot::prelude::*;
+use percent_encoding::percent_decode_str;
 use std::cell::RefCell;
 use std::path::PathBuf;
+use url::Url;
 
 use super::GodotScheme;
 use super::mime::get_mime_type;
@@ -21,33 +23,39 @@ use super::multipart::{
 };
 use super::range::{ParsedRanges, parse_range_header};
 
-/// Decode a percent-encoded URL path.
+/// Validate that a string contains only valid percent-encoded sequences.
 ///
-/// Converts sequences like `%20` to their corresponding characters (e.g., space).
-/// Returns `None` if the percent-encoded sequence is invalid or results in
-/// invalid UTF-8.
-fn url_decode(input: &str) -> Option<String> {
-    let mut bytes = Vec::with_capacity(input.len());
+/// Returns `false` if there are malformed percent sequences like `%`, `%G`, `%2`.
+/// This is stricter than the percent-encoding crate which leaves invalid sequences as-is.
+fn has_valid_percent_encoding(input: &str) -> bool {
     let mut chars = input.chars().peekable();
 
     while let Some(c) = chars.next() {
         if c == '%' {
-            // Collect next two hex characters
-            let hex1 = chars.next()?;
-            let hex2 = chars.next()?;
-
-            let hex_str: String = [hex1, hex2].iter().collect();
-            let byte = u8::from_str_radix(&hex_str, 16).ok()?;
-            bytes.push(byte);
-        } else {
-            // Regular ASCII character - encode directly
-            for b in c.to_string().as_bytes() {
-                bytes.push(*b);
+            match (chars.next(), chars.next()) {
+                (Some(h1), Some(h2)) if h1.is_ascii_hexdigit() && h2.is_ascii_hexdigit() => {}
+                _ => return false,
             }
         }
     }
 
-    String::from_utf8(bytes).ok()
+    true
+}
+
+/// Check if a URL string contains path traversal patterns in encoded form.
+///
+/// This checks for traversal patterns BEFORE URL normalization to prevent
+/// the URL parser from resolving away the `..` segments. Handles:
+/// - Plain `..`
+/// - Percent-encoded dots: `%2e%2e`, `%2E%2E`
+/// - Backslash variants: `..\\`, `%5c`
+fn contains_path_traversal_encoded(url: &str) -> bool {
+    if let Ok(decoded) = percent_decode_str(url).decode_utf8() {
+        if contains_path_traversal(&decoded) {
+            return true;
+        }
+    }
+    contains_path_traversal(url)
 }
 
 /// Check if a path contains path traversal patterns.
@@ -70,11 +78,69 @@ fn contains_path_traversal(decoded_path: &str) -> bool {
 
 /// Parse a URL into a Godot filesystem path.
 ///
-/// Returns `None` if the URL contains path traversal patterns, invalid
-/// percent-encoding, or other security concerns.
-pub(crate) fn parse_godot_url(url: &str, scheme: GodotScheme) -> Option<String> {
-    // Strip query parameters and URL fragments before processing
-    let url_without_query = url.split_once('?').map(|(path, _)| path).unwrap_or(url);
+/// Uses the `percent-encoding` crate for robust percent-decoding. Returns `None`
+/// if the URL contains path traversal patterns, invalid encoding, or other
+/// security concerns.
+///
+/// Note: `res://` and `user://` are custom Godot schemes that don't follow
+/// standard URL authority rules - everything after `://` is treated as the path,
+/// not as host + path. We intentionally do NOT use URL normalization to avoid
+/// silently resolving `..` traversal patterns.
+pub(crate) fn parse_godot_url(url_str: &str, scheme: GodotScheme) -> Option<String> {
+    if contains_path_traversal_encoded(url_str) {
+        return None;
+    }
+
+    // For custom schemes like res://, the url crate treats the first path
+    // component as a host, so we reconstruct the full path ourselves.
+    let path_encoded = if let Ok(parsed_url) = Url::parse(url_str) {
+        if parsed_url.scheme() == scheme.name() {
+            let host = parsed_url.host_str().unwrap_or("");
+            let url_path = parsed_url.path();
+
+            if host.is_empty() {
+                url_path.strip_prefix('/').unwrap_or(url_path).to_string()
+            } else {
+                format!("{}{}", host, url_path)
+            }
+        } else {
+            return parse_godot_url_manual(url_str, scheme);
+        }
+    } else {
+        return parse_godot_url_manual(url_str, scheme);
+    };
+
+    if !has_valid_percent_encoding(&path_encoded) {
+        return None;
+    }
+
+    let path = percent_decode_str(&path_encoded)
+        .decode_utf8()
+        .ok()?
+        .into_owned();
+
+    if path.contains('\0') {
+        return None;
+    }
+
+    if contains_path_traversal(&path) {
+        return None;
+    }
+
+    finalize_godot_path(&path, scheme)
+}
+
+/// Manual URL parsing fallback for relative paths or when URL crate fails.
+fn parse_godot_url_manual(url_str: &str, scheme: GodotScheme) -> Option<String> {
+    if contains_path_traversal_encoded(url_str) {
+        return None;
+    }
+
+    // Strip query parameters and URL fragments
+    let url_without_query = url_str
+        .split_once('?')
+        .map(|(path, _)| path)
+        .unwrap_or(url_str);
     let url_clean = url_without_query
         .split_once('#')
         .map(|(path, _)| path)
@@ -85,19 +151,29 @@ pub(crate) fn parse_godot_url(url: &str, scheme: GodotScheme) -> Option<String> 
         .or_else(|| url_clean.strip_prefix(scheme.short_prefix()))
         .unwrap_or(url_clean);
 
-    // URL-decode the path to handle percent-encoded characters
-    let path = url_decode(path_encoded)?;
+    if !has_valid_percent_encoding(path_encoded) {
+        return None;
+    }
 
-    // Reject paths containing null bytes (could cause issues with file APIs)
+    let path = percent_decode_str(path_encoded)
+        .decode_utf8()
+        .ok()?
+        .into_owned();
+
     if path.contains('\0') {
         return None;
     }
 
-    // Reject paths with traversal patterns (checked after decoding)
     if contains_path_traversal(&path) {
         return None;
     }
 
+    finalize_godot_path(&path, scheme)
+}
+
+/// Finalize a decoded path into a full Godot path, adding index.html if needed.
+fn finalize_godot_path(path: &str, scheme: GodotScheme) -> Option<String> {
+    let path = path.strip_prefix('/').unwrap_or(path);
     let mut full_path = format!("{}{}", scheme.prefix(), path);
 
     // Determine whether the last path component (ignoring trailing '/')
@@ -728,44 +804,36 @@ mod tests {
             parse_godot_url("res://.hidden/file.txt", GodotScheme::Res),
             Some("res://.hidden/file.txt".to_string())
         );
+        // URL normalization removes meaningless "." path segments (per RFC 3986)
+        // This is correct behavior: "./file.txt" and "file.txt" refer to the same resource
         assert_eq!(
             parse_godot_url("res://folder/./file.txt", GodotScheme::Res),
-            Some("res://folder/./file.txt".to_string())
+            Some("res://folder/file.txt".to_string())
         );
     }
 
     #[test]
-    fn test_url_decode() {
-        // Space encoding
-        assert_eq!(url_decode("hello%20world"), Some("hello world".to_string()));
-
-        // Multiple encodings
-        assert_eq!(url_decode("a%20b%20c"), Some("a b c".to_string()));
-
-        // Mixed encoded and plain
-        assert_eq!(
-            url_decode("file%20name.txt"),
-            Some("file name.txt".to_string())
-        );
-
-        // Common special characters
-        assert_eq!(url_decode("%21%40%23"), Some("!@#".to_string()));
-
-        // Uppercase hex digits
-        assert_eq!(url_decode("%2F%2f"), Some("//".to_string()));
-
-        // No encoding needed
-        assert_eq!(url_decode("plain.txt"), Some("plain.txt".to_string()));
-
-        // Empty string
-        assert_eq!(url_decode(""), Some("".to_string()));
+    fn test_has_valid_percent_encoding() {
+        // Valid encodings
+        assert!(has_valid_percent_encoding("hello%20world"));
+        assert!(has_valid_percent_encoding("a%20b%20c"));
+        assert!(has_valid_percent_encoding("file%20name.txt"));
+        assert!(has_valid_percent_encoding("%21%40%23"));
+        assert!(has_valid_percent_encoding("%2F%2f")); // Mixed case hex
+        assert!(has_valid_percent_encoding("plain.txt")); // No encoding
+        assert!(has_valid_percent_encoding("")); // Empty string
 
         // Invalid: incomplete sequence
-        assert_eq!(url_decode("test%2"), None);
-        assert_eq!(url_decode("test%"), None);
+        assert!(!has_valid_percent_encoding("test%2"));
+        assert!(!has_valid_percent_encoding("test%"));
+        assert!(!has_valid_percent_encoding("%"));
+        assert!(!has_valid_percent_encoding("abc%"));
+        assert!(!has_valid_percent_encoding("abc%1"));
 
         // Invalid: non-hex characters
-        assert_eq!(url_decode("test%GG"), None);
+        assert!(!has_valid_percent_encoding("test%GG"));
+        assert!(!has_valid_percent_encoding("test%ZZ"));
+        assert!(!has_valid_percent_encoding("%XX"));
     }
 
     #[test]
