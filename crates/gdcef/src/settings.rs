@@ -42,7 +42,6 @@ pub fn register_project_settings() {
         SETTING_DISABLE_WEB_SECURITY,
         DEFAULT_DISABLE_WEB_SECURITY,
     );
-
 }
 
 fn register_string_setting(
