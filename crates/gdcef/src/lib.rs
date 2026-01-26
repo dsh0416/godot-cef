@@ -9,7 +9,6 @@ mod godot_protocol;
 mod input;
 mod queue_processing;
 mod render;
-mod res_protocol;
 mod settings;
 mod utils;
 mod vulkan_hook;
