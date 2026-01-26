@@ -16,15 +16,78 @@ use std::path::PathBuf;
 
 use super::GodotScheme;
 use super::mime::get_mime_type;
-use super::multipart::{MULTIPART_BOUNDARY, MultipartStreamState, read_multipart_streaming};
+use super::multipart::{
+    MULTIPART_BOUNDARY, MultipartStreamState, read_multipart_streaming, skip_multipart_streaming,
+};
 use super::range::{ParsedRanges, parse_range_header};
 
+/// Decode a percent-encoded URL path.
+///
+/// Converts sequences like `%20` to their corresponding characters (e.g., space).
+/// Returns `None` if the percent-encoded sequence is invalid or results in
+/// invalid UTF-8.
+fn url_decode(input: &str) -> Option<String> {
+    let mut bytes = Vec::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            // Collect next two hex characters
+            let hex1 = chars.next()?;
+            let hex2 = chars.next()?;
+
+            let hex_str: String = [hex1, hex2].iter().collect();
+            let byte = u8::from_str_radix(&hex_str, 16).ok()?;
+            bytes.push(byte);
+        } else {
+            // Regular ASCII character - encode directly
+            for b in c.to_string().as_bytes() {
+                bytes.push(*b);
+            }
+        }
+    }
+
+    String::from_utf8(bytes).ok()
+}
+
+/// Check if a path contains path traversal patterns.
+///
+/// Returns `true` if the path is suspicious and should be rejected.
+fn contains_path_traversal(decoded_path: &str) -> bool {
+    // Check each component for ".." traversal
+    for component in decoded_path.split('/') {
+        if component == ".." {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Parse a URL into a Godot filesystem path.
-pub(crate) fn parse_godot_url(url: &str, scheme: GodotScheme) -> String {
-    let path = url
+///
+/// Returns `None` if the URL contains path traversal patterns, invalid
+/// percent-encoding, or other security concerns.
+pub(crate) fn parse_godot_url(url: &str, scheme: GodotScheme) -> Option<String> {
+    // Strip query parameters and URL fragments before processing
+    let url_without_query = url.split_once('?').map(|(path, _)| path).unwrap_or(url);
+    let url_clean = url_without_query
+        .split_once('#')
+        .map(|(path, _)| path)
+        .unwrap_or(url_without_query);
+
+    let path_encoded = url_clean
         .strip_prefix(scheme.prefix())
-        .or_else(|| url.strip_prefix(scheme.short_prefix()))
-        .unwrap_or(url);
+        .or_else(|| url_clean.strip_prefix(scheme.short_prefix()))
+        .unwrap_or(url_clean);
+
+    // URL-decode the path to handle percent-encoded characters
+    let path = url_decode(path_encoded)?;
+
+    // Reject paths with traversal patterns (checked after decoding)
+    if contains_path_traversal(&path) {
+        return None;
+    }
 
     let mut full_path = format!("{}{}", scheme.prefix(), path);
 
@@ -42,7 +105,7 @@ pub(crate) fn parse_godot_url(url: &str, scheme: GodotScheme) -> String {
         full_path.push_str("index.html");
     }
 
-    full_path
+    Some(full_path)
 }
 
 #[derive(Clone, Default)]
@@ -59,6 +122,7 @@ struct ResourceState {
     is_multipart: bool,
     multipart_stream: Option<MultipartStreamState>,
     file_path: Option<String>,
+    open_file: Option<Gd<FileAccess>>,
 }
 
 #[derive(Clone)]
@@ -94,10 +158,30 @@ wrap_resource_handler! {
 
             let url_cef = request.url();
             let url = CefStringUtf16::from(&url_cef).to_string();
-            let godot_path = parse_godot_url(&url, self.handler.scheme);
-            let gstring_path = GString::from(&godot_path);
 
             let mut state = self.handler.state.borrow_mut();
+
+            // Reject paths with traversal patterns (returns 403 Forbidden)
+            let godot_path = match parse_godot_url(&url, self.handler.scheme) {
+                Some(path) => path,
+                None => {
+                    state.status_code = 403;
+                    state.mime_type = "text/plain".to_string();
+                    state.error_message = Some("Forbidden: Invalid path".to_string());
+                    state.data = state
+                        .error_message
+                        .as_ref()
+                        .unwrap()
+                        .as_bytes()
+                        .to_vec();
+
+                    if let Some(handle_request) = handle_request {
+                        *handle_request = true as _;
+                    }
+                    return true as _;
+                }
+            };
+            let gstring_path = GString::from(&godot_path);
 
             if !FileAccess::file_exists(&gstring_path) {
                 state.status_code = 404;
@@ -144,7 +228,8 @@ wrap_resource_handler! {
                                 state.range_end = None;
                                 state.is_multipart = false;
                             } else {
-                                let content_size = (range.end - range.start + 1) as i64;
+                                let content_size_u64 = range.end.saturating_sub(range.start).saturating_add(1);
+                                let content_size = i64::try_from(content_size_u64).unwrap_or(i64::MAX);
                                 file.seek(range.start);
                                 let buffer = file.get_buffer(content_size);
                                 state.data = buffer.as_slice().to_vec();
@@ -176,8 +261,8 @@ wrap_resource_handler! {
                             state.offset = 0;
                         }
                         None => {
-                            // No range or invalid range - return entire file
-                            let buffer = file.get_buffer(file_size as i64);
+                            let buffer_size = i64::try_from(file_size).unwrap_or(i64::MAX);
+                            let buffer = file.get_buffer(buffer_size);
                             state.data = buffer.as_slice().to_vec();
                             state.status_code = 200;
                             state.range_start = None;
@@ -221,6 +306,7 @@ wrap_resource_handler! {
                 let status_text = match state.status_code {
                     200 => "OK",
                     206 => "Partial Content",
+                    403 => "Forbidden",
                     404 => "Not Found",
                     416 => "Range Not Satisfiable",
                     500 => "Internal Server Error",
@@ -272,17 +358,22 @@ wrap_resource_handler! {
 
             // Handle streaming multipart responses
             if state.multipart_stream.is_some() && state.file_path.is_some() {
-                // Clone values needed for streaming before mutable borrow
                 let file_path = state.file_path.clone().unwrap();
                 let mime_type = state.mime_type.clone();
                 let file_size = state.total_file_size;
-                let stream = state.multipart_stream.as_mut().unwrap();
+
+                let ResourceState {
+                    multipart_stream,
+                    open_file,
+                    ..
+                } = &mut *state;
 
                 let written = read_multipart_streaming(
-                    stream,
+                    multipart_stream.as_mut().unwrap(),
                     &file_path,
                     &mime_type,
                     file_size,
+                    open_file,
                     data_out,
                     bytes_to_read,
                 );
@@ -332,6 +423,28 @@ wrap_resource_handler! {
             let mut state = self.handler.state.borrow_mut();
 
             let bytes_to_skip = bytes_to_skip.max(0) as usize;
+
+            // Handle streaming multipart responses
+            if state.multipart_stream.is_some() {
+                let mime_type = state.mime_type.clone();
+                let file_size = state.total_file_size;
+                let stream = state.multipart_stream.as_mut().unwrap();
+
+                let skipped = skip_multipart_streaming(
+                    stream,
+                    &mime_type,
+                    file_size,
+                    bytes_to_skip,
+                );
+
+                if let Some(bytes_skipped) = bytes_skipped {
+                    *bytes_skipped = skipped as i64;
+                }
+
+                return true as _;
+            }
+
+            // Handle buffered (non-streaming) responses
             let remaining = state.data.len().saturating_sub(state.offset);
             let to_skip = remaining.min(bytes_to_skip);
 
@@ -415,19 +528,63 @@ mod tests {
     fn test_parse_res_url() {
         assert_eq!(
             parse_godot_url("res://ui/index.html", GodotScheme::Res),
-            "res://ui/index.html"
+            Some("res://ui/index.html".to_string())
         );
         assert_eq!(
             parse_godot_url("res://folder/", GodotScheme::Res),
-            "res://folder/index.html"
+            Some("res://folder/index.html".to_string())
         );
         assert_eq!(
             parse_godot_url("res://folder", GodotScheme::Res),
-            "res://folder/index.html"
+            Some("res://folder/index.html".to_string())
         );
         assert_eq!(
             parse_godot_url("ui/style.css", GodotScheme::Res),
-            "res://ui/style.css"
+            Some("res://ui/style.css".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_url_strips_query_params() {
+        assert_eq!(
+            parse_godot_url("res://file.html?v=1", GodotScheme::Res),
+            Some("res://file.html".to_string())
+        );
+        assert_eq!(
+            parse_godot_url("res://ui/script.js?cache=false&v=2", GodotScheme::Res),
+            Some("res://ui/script.js".to_string())
+        );
+        assert_eq!(
+            parse_godot_url("user://data.json?timestamp=12345", GodotScheme::User),
+            Some("user://data.json".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_url_strips_fragments() {
+        assert_eq!(
+            parse_godot_url("res://file.html#section", GodotScheme::Res),
+            Some("res://file.html".to_string())
+        );
+        assert_eq!(
+            parse_godot_url("res://docs/page.html#heading-1", GodotScheme::Res),
+            Some("res://docs/page.html".to_string())
+        );
+        assert_eq!(
+            parse_godot_url("user://readme.html#intro", GodotScheme::User),
+            Some("user://readme.html".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_url_strips_query_and_fragment() {
+        assert_eq!(
+            parse_godot_url("res://file.html?v=1#section", GodotScheme::Res),
+            Some("res://file.html".to_string())
+        );
+        assert_eq!(
+            parse_godot_url("res://app.js?debug=true#line-50", GodotScheme::Res),
+            Some("res://app.js".to_string())
         );
     }
 
@@ -435,19 +592,166 @@ mod tests {
     fn test_parse_user_url() {
         assert_eq!(
             parse_godot_url("user://data/index.html", GodotScheme::User),
-            "user://data/index.html"
+            Some("user://data/index.html".to_string())
         );
         assert_eq!(
             parse_godot_url("user://folder/", GodotScheme::User),
-            "user://folder/index.html"
+            Some("user://folder/index.html".to_string())
         );
         assert_eq!(
             parse_godot_url("user://folder", GodotScheme::User),
-            "user://folder/index.html"
+            Some("user://folder/index.html".to_string())
         );
         assert_eq!(
             parse_godot_url("data/style.css", GodotScheme::User),
-            "user://data/style.css"
+            Some("user://data/style.css".to_string())
         );
+    }
+
+    #[test]
+    fn test_rejects_path_traversal() {
+        // Basic traversal attempts
+        assert_eq!(
+            parse_godot_url("res://../etc/passwd", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://../../etc/passwd", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://folder/../../../etc/passwd", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("user://../sensitive", GodotScheme::User),
+            None
+        );
+
+        // Traversal in middle of path
+        assert_eq!(
+            parse_godot_url("res://a/b/../../../c", GodotScheme::Res),
+            None
+        );
+
+        // Traversal at end
+        assert_eq!(parse_godot_url("res://folder/..", GodotScheme::Res), None);
+
+        // URL-encoded traversal attempts
+        assert_eq!(
+            parse_godot_url("res://%2e%2e/etc/passwd", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://%2E%2E/etc/passwd", GodotScheme::Res),
+            None
+        );
+        assert_eq!(
+            parse_godot_url("res://folder%2f..%2f../etc", GodotScheme::Res),
+            None
+        );
+    }
+
+    #[test]
+    fn test_allows_dots_in_filenames() {
+        // Single dots and dots in filenames should be allowed
+        assert_eq!(
+            parse_godot_url("res://file.name.html", GodotScheme::Res),
+            Some("res://file.name.html".to_string())
+        );
+        assert_eq!(
+            parse_godot_url("res://.hidden/file.txt", GodotScheme::Res),
+            Some("res://.hidden/file.txt".to_string())
+        );
+        assert_eq!(
+            parse_godot_url("res://folder/./file.txt", GodotScheme::Res),
+            Some("res://folder/./file.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn test_url_decode() {
+        // Space encoding
+        assert_eq!(url_decode("hello%20world"), Some("hello world".to_string()));
+
+        // Multiple encodings
+        assert_eq!(url_decode("a%20b%20c"), Some("a b c".to_string()));
+
+        // Mixed encoded and plain
+        assert_eq!(
+            url_decode("file%20name.txt"),
+            Some("file name.txt".to_string())
+        );
+
+        // Common special characters
+        assert_eq!(url_decode("%21%40%23"), Some("!@#".to_string()));
+
+        // Uppercase hex digits
+        assert_eq!(url_decode("%2F%2f"), Some("//".to_string()));
+
+        // No encoding needed
+        assert_eq!(url_decode("plain.txt"), Some("plain.txt".to_string()));
+
+        // Empty string
+        assert_eq!(url_decode(""), Some("".to_string()));
+
+        // Invalid: incomplete sequence
+        assert_eq!(url_decode("test%2"), None);
+        assert_eq!(url_decode("test%"), None);
+
+        // Invalid: non-hex characters
+        assert_eq!(url_decode("test%GG"), None);
+    }
+
+    #[test]
+    fn test_parse_url_decodes_percent_encoding() {
+        // Space in filename
+        assert_eq!(
+            parse_godot_url("res://my%20file.html", GodotScheme::Res),
+            Some("res://my file.html".to_string())
+        );
+
+        // Space in directory name
+        assert_eq!(
+            parse_godot_url("res://my%20folder/index.html", GodotScheme::Res),
+            Some("res://my folder/index.html".to_string())
+        );
+
+        // Multiple spaces
+        assert_eq!(
+            parse_godot_url(
+                "res://path%20with%20spaces/file%20name.txt",
+                GodotScheme::Res
+            ),
+            Some("res://path with spaces/file name.txt".to_string())
+        );
+
+        // Special characters
+        assert_eq!(
+            parse_godot_url("res://file%5B1%5D.txt", GodotScheme::Res),
+            Some("res://file[1].txt".to_string())
+        );
+
+        // User scheme with encoding
+        assert_eq!(
+            parse_godot_url("user://my%20data.json", GodotScheme::User),
+            Some("user://my data.json".to_string())
+        );
+
+        // Combined with query params (query stripped, path decoded)
+        assert_eq!(
+            parse_godot_url("res://my%20file.html?v=1", GodotScheme::Res),
+            Some("res://my file.html".to_string())
+        );
+    }
+
+    #[test]
+    fn test_rejects_invalid_percent_encoding() {
+        // Incomplete encoding
+        assert_eq!(parse_godot_url("res://file%2", GodotScheme::Res), None);
+        assert_eq!(parse_godot_url("res://file%", GodotScheme::Res), None);
+
+        // Invalid hex characters
+        assert_eq!(parse_godot_url("res://file%GG.txt", GodotScheme::Res), None);
     }
 }
