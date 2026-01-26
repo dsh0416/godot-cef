@@ -14,7 +14,7 @@ use crate::browser::{
     MessageQueue, PopupStateQueue, RenderMode, TitleChangeQueue, UrlChangeQueue,
 };
 use crate::error::CefError;
-use crate::{render, res_protocol, webrender};
+use crate::{godot_protocol, render, webrender};
 
 impl CefTexture {
     pub(super) fn cleanup_instance(&mut self) {
@@ -124,9 +124,10 @@ impl CefTexture {
             )),
         );
 
-        // Register the res:// scheme handler on this specific request context
+        // Register the res:// and user:// scheme handlers on this specific request context
         if let Some(ctx) = context.as_mut() {
-            res_protocol::register_res_scheme_handler_on_context(ctx);
+            godot_protocol::register_res_scheme_handler_on_context(ctx);
+            godot_protocol::register_user_scheme_handler_on_context(ctx);
         }
 
         let browser = if use_accelerated {

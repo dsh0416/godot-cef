@@ -5,6 +5,7 @@ mod cef_texture;
 mod cursor;
 mod drag;
 mod error;
+mod godot_protocol;
 mod input;
 mod queue_processing;
 mod render;
