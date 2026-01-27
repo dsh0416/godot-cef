@@ -6,8 +6,7 @@
 //! Platform-specific extensions:
 //! - Windows: `VK_KHR_external_memory_win32` for HANDLE sharing
 //! - Linux: `VK_EXT_external_memory_dma_buf` for DMA-Buf sharing
-//! - macOS: Not supported — Godot statically links MoltenVK, making hook injection impossible.
-//!          Use the Metal backend instead, which supports IOSurface sharing natively.
+//! - macOS: Not supported — Godot statically links MoltenVK, making hook injection impossible. Use the Metal backend instead, which supports IOSurface sharing natively.
 
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod windows;
