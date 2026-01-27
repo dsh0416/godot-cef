@@ -69,12 +69,17 @@ On unsupported architectures, the extension automatically falls back to software
 
 ### macOS Vulkan Not Supported
 
-macOS Vulkan support (via MoltenVK) does not benefit from the hook mechanism because:
-1. The retour library doesn't support ARM64
-2. macOS already has native Metal support which provides better performance
-3. MoltenVK's external memory support is limited
+macOS Vulkan support (via MoltenVK) does not benefit from the hook mechanism due to fundamental technical limitations:
 
-Use the Metal backend on macOS for GPU-accelerated rendering.
+1. **Static Linking** — Godot statically links MoltenVK into its binary. This means `vkCreateDevice` calls go directly to embedded code rather than through a dynamic library's PLT/GOT (Procedure Linkage Table / Global Offset Table). Function hooking libraries like retour work by intercepting calls at these indirection points, which don't exist with static linking. Even with ARM64 support in retour, there's no viable hook target.
+
+2. **Native Metal Alternative** — macOS already has native Metal support which provides better performance and doesn't require any hooks. Metal's IOSurface sharing mechanism works natively without extension injection.
+
+3. **Limited Benefit** — MoltenVK is a compatibility layer translating Vulkan to Metal. Using Vulkan on macOS adds overhead compared to using Metal directly.
+
+::: tip
+Use the **Metal backend** on macOS for GPU-accelerated rendering. It's the native API and works out of the box on both Intel and Apple Silicon Macs.
+:::
 
 ### Timing Sensitivity
 
@@ -101,7 +106,7 @@ If you experience issues with accelerated rendering, try:
 | Windows  | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
 | Linux    | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
 | Linux    | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
-| macOS    | Any          | ❌ Not applicable      | Use Metal backend instead |
+| macOS    | Any          | ❌ Not applicable      | Static linking of MoltenVK prevents hooking; use Metal backend |
 
 ## Future: Proper Godot API
 

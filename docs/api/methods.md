@@ -229,3 +229,4 @@ Returns `true` if a drag operation is currently over the CefTexture.
 if cef_texture.is_drag_over():
     print("Drag is over browser area")
 ```
+

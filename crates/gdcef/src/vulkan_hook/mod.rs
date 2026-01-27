@@ -6,7 +6,8 @@
 //! Platform-specific extensions:
 //! - Windows: `VK_KHR_external_memory_win32` for HANDLE sharing
 //! - Linux: `VK_EXT_external_memory_dma_buf` for DMA-Buf sharing
-//! - macOS: `VK_EXT_metal_objects` for IOSurface sharing (not yet supported - retour lacks ARM64)
+//! - macOS: Not supported — Godot statically links MoltenVK, making hook injection impossible.
+//!          Use the Metal backend instead, which supports IOSurface sharing natively.
 
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod windows;
@@ -25,6 +26,8 @@ pub use linux::install_vulkan_hook;
     all(target_os = "linux", target_arch = "x86_64")
 )))]
 pub fn install_vulkan_hook() {
-    // No-op on other platforms for now
-    // retour doesn't support platforms other than x86_64
+    // No-op on unsupported platforms:
+    // - ARM64: retour doesn't support ARM64 architecture
+    // - macOS: Godot statically links MoltenVK, so there's no dynamic symbol to hook
+    //          (even if retour supported ARM64, hooking wouldn't work on macOS)
 }
