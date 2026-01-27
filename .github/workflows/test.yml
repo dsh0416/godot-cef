@@ -2,7 +2,6 @@ name: Test
 permissions:
   contents: read
 
-
 on:
   push:
     branches: [main]
@@ -10,10 +9,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   CEF_VERSION: "144.0.7"
   CEF_PATH: ${{ github.workspace }}/cef
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
 
 jobs:
   test:
@@ -23,10 +28,13 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
+            cef_cache_key: macos-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            cef_cache_key: windows-x64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            cef_cache_key: linux-x64
 
     runs-on: ${{ matrix.os }}
     name: Test (${{ matrix.os }})
@@ -61,6 +69,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: Cache Cargo registry and build
         uses: actions/cache@v4
         with:
@@ -68,15 +79,30 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-test-
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
+      - name: Cache cargo bin
+        uses: actions/cache@v4
+        id: cargo-bin-cache
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-export-cef-dir-${{ runner.os }}-v1
+
       - name: Install CEF export tool
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         run: cargo install export-cef-dir
 
+      - name: Cache CEF binaries
+        uses: actions/cache@v4
+        id: cef-cache
+        with:
+          path: ${{ env.CEF_PATH }}
+          key: cef-${{ env.CEF_VERSION }}-${{ matrix.cef_cache_key }}
+
       - name: Download CEF binaries
+        if: steps.cef-cache.outputs.cache-hit != 'true'
         run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Run tests (Linux/macOS)
@@ -101,10 +127,13 @@ jobs:
         include:
           - os: macos-latest
             name: macOS
+            cef_cache_key: macos-arm64
           - os: windows-latest
             name: Windows
+            cef_cache_key: windows-x64
           - os: ubuntu-latest
             name: Linux
+            cef_cache_key: linux-x64
 
     runs-on: ${{ matrix.os }}
     name: Clippy (${{ matrix.os }})
@@ -139,6 +168,9 @@ jobs:
         with:
           components: clippy
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: Cache Cargo registry and build
         uses: actions/cache@v4
         with:
@@ -146,14 +178,30 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-clippy-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-clippy-
+            ${{ runner.os }}-cargo-
+
+      - name: Cache cargo bin
+        uses: actions/cache@v4
+        id: cargo-bin-cache
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-export-cef-dir-${{ runner.os }}-v1
 
       - name: Install CEF export tool
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         run: cargo install export-cef-dir
 
+      - name: Cache CEF binaries
+        uses: actions/cache@v4
+        id: cef-cache
+        with:
+          path: ${{ env.CEF_PATH }}
+          key: cef-${{ env.CEF_VERSION }}-${{ matrix.cef_cache_key }}
+
       - name: Download CEF binaries
+        if: steps.cef-cache.outputs.cache-hit != 'true'
         run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Run Clippy
@@ -174,4 +222,3 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
-

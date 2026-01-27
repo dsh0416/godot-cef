@@ -2,7 +2,6 @@ name: Build
 permissions:
   contents: read
 
-
 on:
   push:
     branches: [main]
@@ -11,10 +10,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   CEF_VERSION: "144.0.7"
   CEF_PATH: ${{ github.workspace }}/cef
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
 
 jobs:
   build-macos:
@@ -34,6 +39,9 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: Cache Cargo registry and build
         uses: actions/cache@v4
         with:
@@ -41,14 +49,30 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-universal-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: macos-universal-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-universal-cargo-
+            macos-universal-cargo-
+
+      - name: Cache cargo bin
+        uses: actions/cache@v4
+        id: cargo-bin-cache
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-export-cef-dir-v1
 
       - name: Install CEF export tool
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         run: cargo install export-cef-dir
 
+      - name: Cache CEF binaries (ARM64)
+        uses: actions/cache@v4
+        id: cef-cache-arm64
+        with:
+          path: ${{ env.CEF_PATH_ARM64 }}
+          key: cef-${{ env.CEF_VERSION }}-macos-arm64
+
       - name: Download CEF binaries (ARM64)
+        if: steps.cef-cache-arm64.outputs.cache-hit != 'true'
         run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target aarch64-apple-darwin ${{ env.CEF_PATH_ARM64 }}
       
       - name: Copy CEF binaries (ARM64)
@@ -56,7 +80,15 @@ jobs:
           mkdir -p ${{ env.CEF_PATH }}
           cp -R ${{ env.CEF_PATH_ARM64 }}/* ${{ env.CEF_PATH }}/
 
+      - name: Cache CEF binaries (X64)
+        uses: actions/cache@v4
+        id: cef-cache-x64
+        with:
+          path: ${{ env.CEF_PATH_X64 }}
+          key: cef-${{ env.CEF_VERSION }}-macos-x64
+
       - name: Download CEF binaries (X64)
+        if: steps.cef-cache-x64.outputs.cache-hit != 'true'
         run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target x86_64-apple-darwin ${{ env.CEF_PATH_X64 }}
 
       - name: Build and bundle for macOS (Universal)
@@ -88,6 +120,9 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: Cache Cargo registry and build
         uses: actions/cache@v4
         with:
@@ -99,10 +134,26 @@ jobs:
           restore-keys: |
             windows-x86_64-cargo-
 
+      - name: Cache cargo bin
+        uses: actions/cache@v4
+        id: cargo-bin-cache
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-export-cef-dir-windows-v1
+
       - name: Install CEF export tool
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         run: cargo install export-cef-dir
 
+      - name: Cache CEF binaries
+        uses: actions/cache@v4
+        id: cef-cache
+        with:
+          path: ${{ env.CEF_PATH }}
+          key: cef-${{ env.CEF_VERSION }}-windows-x64
+
       - name: Download CEF binaries
+        if: steps.cef-cache.outputs.cache-hit != 'true'
         run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for Windows
@@ -174,6 +225,9 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
       - name: Cache Cargo registry and build
         uses: actions/cache@v4
         with:
@@ -185,10 +239,26 @@ jobs:
           restore-keys: |
             linux-x86_64-cargo-
 
+      - name: Cache cargo bin
+        uses: actions/cache@v4
+        id: cargo-bin-cache
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-export-cef-dir-linux-v1
+
       - name: Install CEF export tool
+        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
         run: cargo install export-cef-dir
 
+      - name: Cache CEF binaries
+        uses: actions/cache@v4
+        id: cef-cache
+        with:
+          path: ${{ env.CEF_PATH }}
+          key: cef-${{ env.CEF_VERSION }}-linux-x64
+
       - name: Download CEF binaries
+        if: steps.cef-cache.outputs.cache-hit != 'true'
         run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
 
       - name: Build and bundle for Linux
@@ -232,6 +302,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
