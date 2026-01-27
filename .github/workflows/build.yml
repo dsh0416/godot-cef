@@ -58,7 +58,7 @@ jobs:
         id: cargo-bin-cache
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-export-cef-dir-v1
+          key: cargo-bin-export-cef-dir-macos-v1
 
       - name: Install CEF export tool
         if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
