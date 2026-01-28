@@ -422,14 +422,26 @@ impl CefTexture {
         let mut total_frames = 0i32;
 
         if let Ok(mut queue) = queue.lock() {
-            while let Some(packet) = queue.pop_front() {
-                for chunk in packet.data.chunks_exact(2) {
+            'outer: while let Some(mut packet) = queue.pop_front() {
+                let mut frame_index = 0;
+                let frame_count = packet.data.len() / 2;
+
+                while frame_index < frame_count {
                     if playback.can_push_buffer(1) {
-                        let frame = Vector2::new(chunk[0], chunk[1]);
+                        let i = frame_index * 2;
+                        let frame = Vector2::new(packet.data[i], packet.data[i + 1]);
                         playback.push_frame(frame);
                         total_frames += 1;
+                        frame_index += 1;
                     } else {
-                        break;
+                        // Playback buffer is full. Re-queue remaining data in this packet
+                        // at the front of the queue so it can be processed next frame.
+                        if frame_index < frame_count {
+                            let samples_consumed = frame_index * 2;
+                            packet.data.drain(..samples_consumed);
+                            queue.push_front(packet);
+                        }
+                        break 'outer;
                     }
                 }
             }

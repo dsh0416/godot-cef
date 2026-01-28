@@ -874,6 +874,13 @@ wrap_audio_handler! {
                 .and_then(|p| p.as_ref().map(|a| a.channels))
                 .unwrap_or(2);
 
+            if channels != 2 {
+                godot::global::godot_error!(
+                    "[CefAudioHandler] Expected 2 audio channels (stereo), but got {}. Dropping audio packet.",
+                    channels
+                );
+                return;
+            }
             let mut interleaved = Vec::with_capacity((frames * channels) as usize);
 
             unsafe {
