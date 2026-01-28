@@ -400,7 +400,7 @@ impl CefTexture {
             .audio_sample_rate
             .as_ref()
             .and_then(|sr| sr.lock().ok().map(|sr| *sr))
-            .unwrap_or(44100);
+            .unwrap_or(48000);
 
         stream.set_mix_rate(sample_rate as f32);
         stream.set_buffer_length(0.1);
