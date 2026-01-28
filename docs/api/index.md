@@ -41,6 +41,7 @@ Navigate to **Project > Project Settings > godot_cef** to configure:
 | `godot_cef/security/allow_insecure_content` | Allow loading insecure (HTTP) content in HTTPS pages |
 | `godot_cef/security/ignore_certificate_errors` | Ignore SSL/TLS certificate errors |
 | `godot_cef/security/disable_web_security` | Disable web security (CORS, same-origin policy) |
+| `godot_cef/audio/enable_audio_capture` | Route browser audio through Godot's audio system (default: `false`) |
 
 These parameters are passed as command-line switches to the CEF subprocess during initialization and cannot be modified at runtime. If you need to change these settings, you must restart your Godot application.
 
@@ -55,6 +56,7 @@ Security settings are dangerous and should only be enabled for specific use case
 - [**Properties**](./properties.md) - Node properties and configuration
 - [**Methods**](./methods.md) - Available methods for controlling the browser
 - [**Signals**](./signals.md) - Events emitted by the CefTexture node
+- [**Audio Capture**](./audio-capture.md) - Route browser audio through Godot's audio system
 - [**IME Support**](./ime-support.md) - Input Method Editor integration
 - [**Drag and Drop**](./drag-and-drop.md) - Bidirectional drag-and-drop support
 

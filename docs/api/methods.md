@@ -155,6 +155,61 @@ if cef_texture.is_audio_muted():
     print("Audio is muted")
 ```
 
+## Audio Capture
+
+These methods enable routing browser audio through Godot's audio system. For comprehensive documentation, see the [Audio Capture](./audio-capture.md) page.
+
+::: tip
+Audio capture must be enabled in Project Settings (`godot_cef/audio/enable_audio_capture`) before browsers are created.
+:::
+
+### `is_audio_capture_enabled() -> bool`
+
+Returns `true` if audio capture mode is enabled in project settings.
+
+```gdscript
+if cef_texture.is_audio_capture_enabled():
+    print("Audio capture is enabled")
+```
+
+### `create_audio_stream() -> AudioStreamGenerator`
+
+Creates and returns an `AudioStreamGenerator` configured with the correct sample rate.
+
+```gdscript
+var audio_stream = cef_texture.create_audio_stream()
+audio_player.stream = audio_stream
+audio_player.play()
+```
+
+### `push_audio_to_playback(playback: AudioStreamGeneratorPlayback) -> int`
+
+Pushes buffered audio data from CEF to the given playback. Returns the number of frames pushed. Call this every frame in `_process()`.
+
+```gdscript
+func _process(_delta):
+    var playback = audio_player.get_stream_playback()
+    if playback:
+        cef_texture.push_audio_to_playback(playback)
+```
+
+### `has_audio_data() -> bool`
+
+Returns `true` if there is audio data available in the buffer.
+
+```gdscript
+if cef_texture.has_audio_data():
+    print("Audio data available")
+```
+
+### `get_audio_buffer_size() -> int`
+
+Returns the number of audio packets currently buffered.
+
+```gdscript
+var buffer_size = cef_texture.get_audio_buffer_size()
+```
+
 ## Drag and Drop
 
 These methods enable drag-and-drop operations between Godot and the CEF browser. For comprehensive documentation, see the [Drag and Drop](./drag-and-drop.md) page.

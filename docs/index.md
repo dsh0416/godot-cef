@@ -29,10 +29,10 @@ features:
   - icon: 🖥️
     title: Cross-Platform Compatibility
     details: Native performance on Windows, macOS, and Linux with consistent behavior across all platforms
+  - icon: 🔊
+    title: Audio Capture
+    details: Route browser audio through Godot's audio system for 3D spatialization, effects, and mixing
   - icon: ⌨️
     title: IME Support
     details: Complete Input Method Editor support for handling multi-language text input including CJK languages
-  - icon: 🛠️
-    title: Remote Debugging
-    details: Debug with Chrome DevTools for streamlined development and testing workflows
 ---

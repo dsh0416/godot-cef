@@ -96,6 +96,33 @@ pub enum DragEvent {
 
 pub type DragEventQueue = Arc<Mutex<VecDeque<DragEvent>>>;
 
+/// Audio parameters from CEF audio stream.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct AudioParameters {
+    pub channels: i32,
+    pub sample_rate: i32,
+    pub frames_per_buffer: i32,
+}
+
+/// Audio packet containing interleaved stereo f32 PCM data from CEF.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct AudioPacket {
+    pub data: Vec<f32>,
+    pub frames: i32,
+    pub pts: i64,
+}
+
+/// Queue for audio packets from the browser to Godot.
+pub type AudioPacketQueue = Arc<Mutex<VecDeque<AudioPacket>>>;
+
+/// Shared audio parameters from CEF.
+pub type AudioParamsState = Arc<Mutex<Option<AudioParameters>>>;
+
+/// Shared sample rate for audio capture.
+pub type AudioSampleRateState = Arc<Mutex<i32>>;
+
 #[derive(Debug, Clone, Default)]
 pub struct DragState {
     pub is_drag_over: bool,
@@ -165,4 +192,10 @@ pub struct App {
     pub drag_event_queue: Option<DragEventQueue>,
     /// Current drag state for this browser.
     pub drag_state: DragState,
+    /// Queue for audio packets from the browser.
+    pub audio_packet_queue: Option<AudioPacketQueue>,
+    /// Shared audio parameters from CEF.
+    pub audio_params: Option<AudioParamsState>,
+    /// Shared sample rate configuration (from Godot's AudioServer).
+    pub audio_sample_rate: Option<AudioSampleRateState>,
 }

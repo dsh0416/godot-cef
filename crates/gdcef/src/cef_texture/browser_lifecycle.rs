@@ -1,7 +1,7 @@
 use super::CefTexture;
 use cef::{BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, WindowInfo};
 use cef_app::PhysicalSize;
-use godot::classes::ImageTexture;
+use godot::classes::{AudioServer, ImageTexture};
 use godot::prelude::*;
 use std::sync::{Arc, Mutex};
 
@@ -11,6 +11,10 @@ use crate::accelerated_osr::{
 use crate::browser::{PopupStateQueue, RenderMode};
 use crate::error::CefError;
 use crate::{godot_protocol, render, webrender};
+
+fn get_godot_audio_sample_rate() -> i32 {
+    AudioServer::singleton().get_mix_rate() as i32
+}
 
 impl CefTexture {
     pub(super) fn cleanup_instance(&mut self) {
@@ -64,6 +68,9 @@ impl CefTexture {
         self.app.console_message_queue = None;
         self.app.drag_event_queue = None;
         self.app.drag_state = Default::default();
+        self.app.audio_packet_queue = None;
+        self.app.audio_params = None;
+        self.app.audio_sample_rate = None;
 
         self.ime_active = false;
         self.ime_proxy = None;
@@ -188,7 +195,9 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
         let popup_state: PopupStateQueue = render_handler.get_popup_state();
-        let queues = webrender::ClientQueues::new();
+        let sample_rate = get_godot_audio_sample_rate();
+        let enable_audio_capture = crate::settings::is_audio_capture_enabled();
+        let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture);
 
         let texture = ImageTexture::new_gd();
 
@@ -203,6 +212,10 @@ impl CefTexture {
                 ime_composition_queue: queues.ime_composition_queue.clone(),
                 console_message_queue: queues.console_message_queue.clone(),
                 drag_event_queue: queues.drag_event_queue.clone(),
+                audio_packet_queue: queues.audio_packet_queue.clone(),
+                audio_params: queues.audio_params.clone(),
+                audio_sample_rate: queues.audio_sample_rate.clone(),
+                enable_audio_capture,
             },
         );
 
@@ -237,6 +250,9 @@ impl CefTexture {
         self.app.ime_composition_range = Some(queues.ime_composition_queue);
         self.app.console_message_queue = Some(queues.console_message_queue);
         self.app.drag_event_queue = Some(queues.drag_event_queue);
+        self.app.audio_packet_queue = Some(queues.audio_packet_queue);
+        self.app.audio_params = Some(queues.audio_params);
+        self.app.audio_sample_rate = Some(queues.audio_sample_rate);
 
         Ok(browser)
     }
@@ -290,7 +306,9 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
         let popup_state: PopupStateQueue = render_handler.get_popup_state();
-        let queues = webrender::ClientQueues::new();
+        let sample_rate = get_godot_audio_sample_rate();
+        let enable_audio_capture = crate::settings::is_audio_capture_enabled();
+        let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture);
 
         let mut client = webrender::AcceleratedClientImpl::build(
             render_handler,
@@ -304,6 +322,10 @@ impl CefTexture {
                 ime_composition_queue: queues.ime_composition_queue.clone(),
                 console_message_queue: queues.console_message_queue.clone(),
                 drag_event_queue: queues.drag_event_queue.clone(),
+                audio_packet_queue: queues.audio_packet_queue.clone(),
+                audio_params: queues.audio_params.clone(),
+                audio_sample_rate: queues.audio_sample_rate.clone(),
+                enable_audio_capture,
             },
         );
 
@@ -344,6 +366,9 @@ impl CefTexture {
         self.app.ime_composition_range = Some(queues.ime_composition_queue);
         self.app.console_message_queue = Some(queues.console_message_queue);
         self.app.drag_event_queue = Some(queues.drag_event_queue);
+        self.app.audio_packet_queue = Some(queues.audio_packet_queue);
+        self.app.audio_params = Some(queues.audio_params);
+        self.app.audio_sample_rate = Some(queues.audio_sample_rate);
 
         Ok(browser)
     }

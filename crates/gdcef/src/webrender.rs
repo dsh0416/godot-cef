@@ -6,9 +6,10 @@ use wide::{i8x16, u8x16};
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
-    ConsoleMessageEvent, ConsoleMessageQueue, DragDataInfo, DragEvent, DragEventQueue,
-    ImeCompositionQueue, ImeCompositionRange, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue,
-    MessageQueue, TitleChangeQueue, UrlChangeQueue,
+    AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, ConsoleMessageEvent,
+    ConsoleMessageQueue, DragDataInfo, DragEvent, DragEventQueue, ImeCompositionQueue,
+    ImeCompositionRange, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue,
+    TitleChangeQueue, UrlChangeQueue,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -22,10 +23,14 @@ pub(crate) struct ClientQueues {
     pub ime_composition_queue: ImeCompositionQueue,
     pub console_message_queue: ConsoleMessageQueue,
     pub drag_event_queue: DragEventQueue,
+    pub audio_packet_queue: AudioPacketQueue,
+    pub audio_params: AudioParamsState,
+    pub audio_sample_rate: AudioSampleRateState,
+    pub enable_audio_capture: bool,
 }
 
 impl ClientQueues {
-    pub fn new() -> Self {
+    pub fn new(sample_rate: i32, enable_audio_capture: bool) -> Self {
         Self {
             message_queue: Arc::new(Mutex::new(VecDeque::new())),
             url_change_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -35,6 +40,10 @@ impl ClientQueues {
             ime_composition_queue: Arc::new(Mutex::new(None)),
             console_message_queue: Arc::new(Mutex::new(VecDeque::new())),
             drag_event_queue: Arc::new(Mutex::new(VecDeque::new())),
+            audio_packet_queue: Arc::new(Mutex::new(VecDeque::new())),
+            audio_params: Arc::new(Mutex::new(None)),
+            audio_sample_rate: Arc::new(Mutex::new(sample_rate)),
+            enable_audio_capture,
         }
     }
 }
@@ -805,6 +814,126 @@ impl LoadHandlerImpl {
     }
 }
 
+wrap_audio_handler! {
+    pub(crate) struct AudioHandlerImpl {
+        audio_params: AudioParamsState,
+        audio_packet_queue: AudioPacketQueue,
+        audio_sample_rate: AudioSampleRateState,
+    }
+
+    impl AudioHandler {
+        fn audio_parameters(
+            &self,
+            _browser: Option<&mut Browser>,
+            params: Option<&mut cef::AudioParameters>,
+        ) -> ::std::os::raw::c_int {
+            if let Some(params) = params {
+                let sample_rate = self.audio_sample_rate
+                    .lock()
+                    .map(|sr| *sr)
+                    .unwrap_or(48000);
+
+                params.channel_layout = ChannelLayout::LAYOUT_STEREO;
+                params.sample_rate = sample_rate;
+                params.frames_per_buffer = 256;
+            }
+            true as _
+        }
+
+        fn on_audio_stream_started(
+            &self,
+            _browser: Option<&mut Browser>,
+            params: Option<&cef::AudioParameters>,
+            channels: ::std::os::raw::c_int,
+        ) {
+            if let Some(params) = params
+                && let Ok(mut audio_params) = self.audio_params.lock()
+            {
+                *audio_params = Some(crate::browser::AudioParameters {
+                    channels,
+                    sample_rate: params.sample_rate,
+                    frames_per_buffer: params.frames_per_buffer,
+                });
+            }
+        }
+
+        fn on_audio_stream_packet(
+            &self,
+            _browser: Option<&mut Browser>,
+            data: *mut *const f32,
+            frames: ::std::os::raw::c_int,
+            pts: i64,
+        ) {
+            if data.is_null() || frames <= 0 {
+                return;
+            }
+
+            let channels = self.audio_params
+                .lock()
+                .ok()
+                .and_then(|p| p.as_ref().map(|a| a.channels))
+                .unwrap_or(2);
+
+            let mut interleaved = Vec::with_capacity((frames * channels) as usize);
+
+            unsafe {
+                for frame_idx in 0..frames as isize {
+                    for ch in 0..channels as isize {
+                        let channel_ptr = *data.offset(ch);
+                        if !channel_ptr.is_null() {
+                            interleaved.push(*channel_ptr.offset(frame_idx));
+                        } else {
+                            interleaved.push(0.0);
+                        }
+                    }
+                }
+            }
+
+            if let Ok(mut queue) = self.audio_packet_queue.lock() {
+                const MAX_QUEUE_SIZE: usize = 100;
+                while queue.len() >= MAX_QUEUE_SIZE {
+                    queue.pop_front();
+                }
+                queue.push_back(AudioPacket {
+                    data: interleaved,
+                    frames,
+                    pts,
+                });
+            }
+        }
+
+        fn on_audio_stream_stopped(&self, _browser: Option<&mut Browser>) {
+            if let Ok(mut queue) = self.audio_packet_queue.lock() {
+                queue.clear();
+            }
+            if let Ok(mut params) = self.audio_params.lock() {
+                *params = None;
+            }
+        }
+
+        fn on_audio_stream_error(
+            &self,
+            _browser: Option<&mut Browser>,
+            message: Option<&CefString>,
+        ) {
+            if let Some(msg) = message {
+                let msg_str = msg.to_string();
+                godot::global::godot_error!("[CefAudioHandler] Audio stream error: {}", msg_str);
+            }
+        }
+    }
+}
+
+impl AudioHandlerImpl {
+    pub fn build(
+        audio_params: AudioParamsState,
+        audio_packet_queue: AudioPacketQueue,
+        audio_sample_rate: AudioSampleRateState,
+    ) -> cef::AudioHandler {
+        Self::new(audio_params, audio_packet_queue, audio_sample_rate)
+    }
+}
+
 fn on_process_message_received(
     _browser: Option<&mut cef::Browser>,
     _frame: Option<&mut cef::Frame>,
@@ -864,6 +993,7 @@ pub(crate) struct ClientHandlers {
     pub life_span_handler: cef::LifeSpanHandler,
     pub load_handler: cef::LoadHandler,
     pub drag_handler: cef::DragHandler,
+    pub audio_handler: Option<cef::AudioHandler>,
 }
 
 #[derive(Clone)]
@@ -912,6 +1042,10 @@ wrap_client! {
             Some(self.handlers.drag_handler.clone())
         }
 
+        fn audio_handler(&self) -> Option<cef::AudioHandler> {
+            self.handlers.audio_handler.clone()
+        }
+
         fn on_process_message_received(
             &self,
             browser: Option<&mut cef::Browser>,
@@ -927,24 +1061,31 @@ wrap_client! {
 fn build_client_handlers(
     render_handler: cef::RenderHandler,
     cursor_type: Arc<Mutex<CursorType>>,
-    url_change_queue: UrlChangeQueue,
-    title_change_queue: TitleChangeQueue,
-    loading_state_queue: LoadingStateQueue,
-    console_message_queue: ConsoleMessageQueue,
-    drag_event_queue: DragEventQueue,
+    queues: &ClientQueues,
 ) -> ClientHandlers {
+    let audio_handler = if queues.enable_audio_capture {
+        Some(AudioHandlerImpl::build(
+            queues.audio_params.clone(),
+            queues.audio_packet_queue.clone(),
+            queues.audio_sample_rate.clone(),
+        ))
+    } else {
+        None
+    };
+
     ClientHandlers {
         render_handler,
         display_handler: DisplayHandlerImpl::build(
             cursor_type,
-            url_change_queue,
-            title_change_queue,
-            console_message_queue,
+            queues.url_change_queue.clone(),
+            queues.title_change_queue.clone(),
+            queues.console_message_queue.clone(),
         ),
         context_menu_handler: ContextMenuHandlerImpl::build(),
         life_span_handler: LifeSpanHandlerImpl::build(),
-        load_handler: LoadHandlerImpl::build(loading_state_queue),
-        drag_handler: DragHandlerImpl::build(drag_event_queue),
+        load_handler: LoadHandlerImpl::build(queues.loading_state_queue.clone()),
+        drag_handler: DragHandlerImpl::build(queues.drag_event_queue.clone()),
+        audio_handler,
     }
 }
 
@@ -962,11 +1103,7 @@ impl SoftwareClientImpl {
                 queues.drag_event_queue.clone(),
             ),
             cursor_type,
-            queues.url_change_queue,
-            queues.title_change_queue,
-            queues.loading_state_queue,
-            queues.console_message_queue,
-            queues.drag_event_queue,
+            &queues,
         );
         Self::new(handlers, ipc)
     }
@@ -1003,6 +1140,10 @@ wrap_client! {
             Some(self.handlers.drag_handler.clone())
         }
 
+        fn audio_handler(&self) -> Option<cef::AudioHandler> {
+            self.handlers.audio_handler.clone()
+        }
+
         fn on_process_message_received(
             &self,
             browser: Option<&mut cef::Browser>,
@@ -1029,11 +1170,7 @@ impl AcceleratedClientImpl {
                 queues.drag_event_queue.clone(),
             ),
             cursor_type,
-            queues.url_change_queue,
-            queues.title_change_queue,
-            queues.loading_state_queue,
-            queues.console_message_queue,
-            queues.drag_event_queue,
+            &queues,
         );
         Self::new(handlers, ipc)
     }

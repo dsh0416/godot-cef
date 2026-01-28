@@ -8,11 +8,13 @@ const SETTING_DATA_PATH: &str = "godot_cef/storage/data_path";
 const SETTING_ALLOW_INSECURE_CONTENT: &str = "godot_cef/security/allow_insecure_content";
 const SETTING_IGNORE_CERTIFICATE_ERRORS: &str = "godot_cef/security/ignore_certificate_errors";
 const SETTING_DISABLE_WEB_SECURITY: &str = "godot_cef/security/disable_web_security";
+const SETTING_ENABLE_AUDIO_CAPTURE: &str = "godot_cef/audio/enable_audio_capture";
 
 const DEFAULT_DATA_PATH: &str = "user://cef-data";
 const DEFAULT_ALLOW_INSECURE_CONTENT: bool = false;
 const DEFAULT_IGNORE_CERTIFICATE_ERRORS: bool = false;
 const DEFAULT_DISABLE_WEB_SECURITY: bool = false;
+const DEFAULT_ENABLE_AUDIO_CAPTURE: bool = false;
 
 pub fn register_project_settings() {
     let mut settings = ProjectSettings::singleton();
@@ -41,6 +43,12 @@ pub fn register_project_settings() {
         &mut settings,
         SETTING_DISABLE_WEB_SECURITY,
         DEFAULT_DISABLE_WEB_SECURITY,
+    );
+
+    register_bool_setting(
+        &mut settings,
+        SETTING_ENABLE_AUDIO_CAPTURE,
+        DEFAULT_ENABLE_AUDIO_CAPTURE,
     );
 }
 
@@ -125,11 +133,17 @@ fn get_bool_setting(settings: &Gd<ProjectSettings>, name: &str) -> bool {
             SETTING_ALLOW_INSECURE_CONTENT => DEFAULT_ALLOW_INSECURE_CONTENT,
             SETTING_IGNORE_CERTIFICATE_ERRORS => DEFAULT_IGNORE_CERTIFICATE_ERRORS,
             SETTING_DISABLE_WEB_SECURITY => DEFAULT_DISABLE_WEB_SECURITY,
+            SETTING_ENABLE_AUDIO_CAPTURE => DEFAULT_ENABLE_AUDIO_CAPTURE,
             _ => false,
         }
     } else {
         variant.to::<bool>()
     }
+}
+
+pub fn is_audio_capture_enabled() -> bool {
+    let settings = ProjectSettings::singleton();
+    get_bool_setting(&settings, SETTING_ENABLE_AUDIO_CAPTURE)
 }
 
 pub fn warn_if_insecure_settings() {
