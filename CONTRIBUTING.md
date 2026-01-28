@@ -55,7 +55,7 @@ Then download CEF binaries for your platform:
 #### Linux
 
 ```bash
-export-cef-dir --version "144.0.7" --force $HOME/.local/share/cef
+export-cef-dir --version "144.0.11" --force $HOME/.local/share/cef
 export CEF_PATH="$HOME/.local/share/cef"
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$CEF_PATH"
 ```
@@ -75,20 +75,20 @@ sudo apt-get install -y \
 
 ```bash
 # Native architecture
-export-cef-dir --version "144.0.7" --force $HOME/.local/share/cef
+export-cef-dir --version "144.0.11" --force $HOME/.local/share/cef
 export CEF_PATH="$HOME/.local/share/cef"
 
 # For universal builds (optional)
-export-cef-dir --version "144.0.7" --target x86_64-apple-darwin --force $HOME/.local/share/cef_x86_64
+export-cef-dir --version "144.0.11" --target x86_64-apple-darwin --force $HOME/.local/share/cef_x86_64
 export CEF_PATH_X64="$HOME/.local/share/cef_x86_64"
-export-cef-dir --version "144.0.7" --target aarch64-apple-darwin --force $HOME/.local/share/cef_arm64
+export-cef-dir --version "144.0.11" --target aarch64-apple-darwin --force $HOME/.local/share/cef_arm64
 export CEF_PATH_ARM64="$HOME/.local/share/cef_arm64"
 ```
 
 #### Windows (PowerShell)
 
 ```powershell
-export-cef-dir --version "144.0.7" --force $env:USERPROFILE/.local/share/cef
+export-cef-dir --version "144.0.11" --force $env:USERPROFILE/.local/share/cef
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef"
 $env:PATH="$env:PATH;$env:CEF_PATH"
 ```
