@@ -168,10 +168,13 @@ fn invoke_js_binary_callback(frame: &mut Frame, callback_name: &str, buffer: &[u
     {
         if let Some(mut global) = context.global() {
             let callback_key: CefStringUtf16 = callback_name.into();
+            let mut buffer_copy = buffer.to_owned();
             if let Some(callback) = global.value_bykey(Some(&callback_key))
                 && callback.is_function() != 0
-                && let Some(array_buffer) =
-                    v8_value_create_array_buffer_with_copy(buffer.as_ptr() as *mut u8, buffer.len())
+                && let Some(array_buffer) = v8_value_create_array_buffer_with_copy(
+                    buffer_copy.as_mut_ptr(),
+                    buffer_copy.len(),
+                )
             {
                 let args = [Some(array_buffer)];
                 let _ = callback.execute_function(Some(&mut global), Some(&args));

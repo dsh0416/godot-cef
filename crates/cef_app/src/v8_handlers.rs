@@ -143,7 +143,9 @@ wrap_v8_handler! {
                 };
 
                 if let Some(frame) = self.handler.frame.as_ref() {
-                    let frame = frame.lock().unwrap();
+                    let frame = frame
+                        .lock()
+                        .expect("OsrIpcHandler: failed to lock frame mutex (poisoned)");
 
                     let route = CefStringUtf16::from("ipcBinaryRendererToGodot");
                     let process_message = process_message_create(Some(&route));

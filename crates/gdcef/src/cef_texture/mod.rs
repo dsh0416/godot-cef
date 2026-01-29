@@ -309,14 +309,29 @@ impl CefTexture {
         let route = cef::CefStringUtf16::from("ipcBinaryGodotToRenderer");
         let bytes = data.to_vec();
 
-        if let Some(mut binary_value) = cef::binary_value_create(Some(&bytes))
-            && let Some(mut process_message) = cef::process_message_create(Some(&route))
-        {
-            if let Some(argument_list) = process_message.argument_list() {
-                argument_list.set_binary(0, Some(&mut binary_value));
-            }
-            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-        }
+        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send binary IPC message: failed to create BinaryValue"
+            );
+            return;
+        };
+
+        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send binary IPC message: failed to create process message"
+            );
+            return;
+        };
+
+        let Some(argument_list) = process_message.argument_list() else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send binary IPC message: failed to get argument list"
+            );
+            return;
+        };
+
+        argument_list.set_binary(0, Some(&mut binary_value));
+        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
     }
 
     #[func]
