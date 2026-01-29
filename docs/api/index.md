@@ -44,11 +44,38 @@ Navigate to **Project > Project Settings > godot_cef** to configure:
 
 These parameters are passed as command-line switches to the CEF subprocess during initialization and cannot be modified at runtime. If you need to change these settings, you must restart your Godot application.
 
-**Note:** Remote debugging is also configured once at startup and is automatically enabled only when running in debug builds or from the Godot editor for security purposes.
-
 ::: warning
 Security settings are dangerous and should only be enabled for specific use cases. Warnings will be logged at startup if any security settings are enabled.
 :::
+
+## Remote DevTools
+
+Remote DevTools allows you to debug web content running inside your Godot application using Chrome's Developer Tools. This is useful for inspecting the DOM, debugging JavaScript, monitoring network requests, and profiling performance.
+
+### Availability
+
+For security purposes, remote debugging is **only enabled** when:
+- Godot is running in **debug mode** (`OS.is_debug_build()` returns `true`), OR
+- Running from the **Godot editor** (`Engine.is_editor_hint()` returns `true`)
+
+Remote debugging is automatically disabled in production/release builds.
+
+### Accessing DevTools
+
+When remote debugging is enabled, CEF listens on **port 9229**.
+1. Open Chrome and navigate to `chrome://inspect`
+2. Click on **"Configure..."** next to "Discover network targets"
+3. Add `localhost:9229` to the target discovery list
+4. Your CEF browser instances will appear under "Remote Target"
+5. Click **"inspect"** to open DevTools for that page
+
+### Use Cases
+
+- **Debug JavaScript errors** in your web UI
+- **Inspect and modify DOM** elements in real-time
+- **Monitor network requests** to debug API calls
+- **Profile performance** to identify bottlenecks
+- **Test CSS changes** before applying them permanently
 
 ## API Sections
 
