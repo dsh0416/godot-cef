@@ -14,7 +14,9 @@
   "packageManager": "pnpm@10.28.0",
   "devDependencies": {
     "@nolebase/vitepress-plugin-enhanced-readabilities": "^2.18.2",
+    "mermaid": "^11.12.2",
     "vitepress": "^1.6.4",
+    "vitepress-plugin-mermaid": "^2.0.17",
     "vue": "^3.5.27"
   }
 }

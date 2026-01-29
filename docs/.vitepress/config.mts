@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitepress'
+import { withMermaid } from 'vitepress-plugin-mermaid'
 
-export default defineConfig({
+export default withMermaid(defineConfig({
   title: 'Godot CEF',
   description: 'High-performance Chromium Embedded Framework integration for Godot Engine',
   base: '/godot-cef/',
@@ -41,6 +42,9 @@ export default defineConfig({
     optimizeDeps: {
       exclude: [
         '@nolebase/vitepress-plugin-enhanced-readabilities/client',
+      ],
+      include: [
+        'mermaid',
       ]
     },
     ssr: {
@@ -49,4 +53,8 @@ export default defineConfig({
       ]
     }
   },
-})
+
+  mermaid: {
+    // Mermaid configuration options
+  },
+}))
