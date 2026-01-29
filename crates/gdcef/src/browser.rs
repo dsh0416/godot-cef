@@ -7,6 +7,7 @@ use cef_app::{CursorType, FrameBuffer, PhysicalSize, PopupState};
 use godot::classes::{ImageTexture, Texture2Drd};
 use godot::prelude::*;
 use std::collections::VecDeque;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -150,6 +151,9 @@ pub struct DownloadUpdateEvent {
 pub type DownloadRequestQueue = Arc<Mutex<VecDeque<DownloadRequestEvent>>>;
 pub type DownloadUpdateQueue = Arc<Mutex<VecDeque<DownloadUpdateEvent>>>;
 
+/// Shutdown flag for audio handler to suppress errors during cleanup.
+pub type AudioShutdownFlag = Arc<AtomicBool>;
+
 #[derive(Debug, Clone, Default)]
 pub struct DragState {
     pub is_drag_over: bool,
@@ -227,4 +231,6 @@ pub struct App {
     pub audio_sample_rate: Option<AudioSampleRateState>,
     pub download_request_queue: Option<DownloadRequestQueue>,
     pub download_update_queue: Option<DownloadUpdateQueue>,
+    /// Shutdown flag for audio handler to suppress errors during cleanup.
+    pub audio_shutdown_flag: Option<AudioShutdownFlag>,
 }

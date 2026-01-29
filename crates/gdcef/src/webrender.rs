@@ -6,11 +6,11 @@ use wide::{i8x16, u8x16};
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
-    AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, ConsoleMessageEvent,
-    ConsoleMessageQueue, DownloadRequestEvent, DownloadRequestQueue, DownloadUpdateEvent,
-    DownloadUpdateQueue, DragDataInfo, DragEvent, DragEventQueue, ImeCompositionQueue,
-    ImeCompositionRange, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue,
-    TitleChangeQueue, UrlChangeQueue,
+    AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
+    ConsoleMessageEvent, ConsoleMessageQueue, DownloadRequestEvent, DownloadRequestQueue,
+    DownloadUpdateEvent, DownloadUpdateQueue, DragDataInfo, DragEvent, DragEventQueue,
+    ImeCompositionQueue, ImeCompositionRange, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue,
+    MessageQueue, TitleChangeQueue, UrlChangeQueue,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -27,6 +27,7 @@ pub(crate) struct ClientQueues {
     pub audio_packet_queue: AudioPacketQueue,
     pub audio_params: AudioParamsState,
     pub audio_sample_rate: AudioSampleRateState,
+    pub audio_shutdown_flag: AudioShutdownFlag,
     pub enable_audio_capture: bool,
     pub download_request_queue: DownloadRequestQueue,
     pub download_update_queue: DownloadUpdateQueue,
@@ -34,6 +35,7 @@ pub(crate) struct ClientQueues {
 
 impl ClientQueues {
     pub fn new(sample_rate: i32, enable_audio_capture: bool) -> Self {
+        use std::sync::atomic::AtomicBool;
         Self {
             message_queue: Arc::new(Mutex::new(VecDeque::new())),
             url_change_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -46,6 +48,7 @@ impl ClientQueues {
             audio_packet_queue: Arc::new(Mutex::new(VecDeque::new())),
             audio_params: Arc::new(Mutex::new(None)),
             audio_sample_rate: Arc::new(Mutex::new(sample_rate)),
+            audio_shutdown_flag: Arc::new(AtomicBool::new(false)),
             enable_audio_capture,
             download_request_queue: Arc::new(Mutex::new(VecDeque::new())),
             download_update_queue: Arc::new(Mutex::new(VecDeque::new())),
@@ -824,6 +827,7 @@ wrap_audio_handler! {
         audio_params: AudioParamsState,
         audio_packet_queue: AudioPacketQueue,
         audio_sample_rate: AudioSampleRateState,
+        audio_shutdown_flag: AudioShutdownFlag,
     }
 
     impl AudioHandler {
@@ -928,6 +932,10 @@ wrap_audio_handler! {
             _browser: Option<&mut Browser>,
             message: Option<&CefString>,
         ) {
+            use std::sync::atomic::Ordering;
+            if self.audio_shutdown_flag.load(Ordering::Relaxed) {
+                return;
+            }
             if let Some(msg) = message {
                 let msg_str = msg.to_string();
                 godot::global::godot_error!("[CefAudioHandler] Audio stream error: {}", msg_str);
@@ -941,8 +949,14 @@ impl AudioHandlerImpl {
         audio_params: AudioParamsState,
         audio_packet_queue: AudioPacketQueue,
         audio_sample_rate: AudioSampleRateState,
+        audio_shutdown_flag: AudioShutdownFlag,
     ) -> cef::AudioHandler {
-        Self::new(audio_params, audio_packet_queue, audio_sample_rate)
+        Self::new(
+            audio_params,
+            audio_packet_queue,
+            audio_sample_rate,
+            audio_shutdown_flag,
+        )
     }
 }
 
@@ -1183,6 +1197,7 @@ fn build_client_handlers(
             queues.audio_params.clone(),
             queues.audio_packet_queue.clone(),
             queues.audio_sample_rate.clone(),
+            queues.audio_shutdown_flag.clone(),
         ))
     } else {
         None

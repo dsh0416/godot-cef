@@ -23,6 +23,12 @@ impl CefTexture {
             return;
         }
 
+        // Signal audio handler that we're shutting down to suppress "socket closed" errors
+        if let Some(ref shutdown_flag) = self.app.audio_shutdown_flag {
+            use std::sync::atomic::Ordering;
+            shutdown_flag.store(true, Ordering::Relaxed);
+        }
+
         // Hide the TextureRect and clear its texture BEFORE freeing resources.
         // This prevents Godot from trying to render with an invalid texture during shutdown.
         self.base_mut().set_visible(false);
@@ -73,6 +79,7 @@ impl CefTexture {
         self.app.audio_sample_rate = None;
         self.app.download_request_queue = None;
         self.app.download_update_queue = None;
+        self.app.audio_shutdown_flag = None;
 
         self.ime_active = false;
         self.ime_proxy = None;
@@ -217,6 +224,7 @@ impl CefTexture {
                 audio_packet_queue: queues.audio_packet_queue.clone(),
                 audio_params: queues.audio_params.clone(),
                 audio_sample_rate: queues.audio_sample_rate.clone(),
+                audio_shutdown_flag: queues.audio_shutdown_flag.clone(),
                 enable_audio_capture,
                 download_request_queue: queues.download_request_queue.clone(),
                 download_update_queue: queues.download_update_queue.clone(),
@@ -259,6 +267,7 @@ impl CefTexture {
         self.app.audio_sample_rate = Some(queues.audio_sample_rate);
         self.app.download_request_queue = Some(queues.download_request_queue);
         self.app.download_update_queue = Some(queues.download_update_queue);
+        self.app.audio_shutdown_flag = Some(queues.audio_shutdown_flag);
 
         Ok(browser)
     }
@@ -331,6 +340,7 @@ impl CefTexture {
                 audio_packet_queue: queues.audio_packet_queue.clone(),
                 audio_params: queues.audio_params.clone(),
                 audio_sample_rate: queues.audio_sample_rate.clone(),
+                audio_shutdown_flag: queues.audio_shutdown_flag.clone(),
                 enable_audio_capture,
                 download_request_queue: queues.download_request_queue.clone(),
                 download_update_queue: queues.download_update_queue.clone(),
@@ -379,6 +389,7 @@ impl CefTexture {
         self.app.audio_sample_rate = Some(queues.audio_sample_rate);
         self.app.download_request_queue = Some(queues.download_request_queue);
         self.app.download_update_queue = Some(queues.download_update_queue);
+        self.app.audio_shutdown_flag = Some(queues.audio_shutdown_flag);
 
         Ok(browser)
     }
