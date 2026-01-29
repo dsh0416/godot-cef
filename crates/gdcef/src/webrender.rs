@@ -967,7 +967,7 @@ wrap_download_handler! {
             _browser: Option<&mut Browser>,
             download_item: Option<&mut cef::DownloadItem>,
             suggested_name: Option<&CefString>,
-            _callback: Option<&mut cef::BeforeDownloadCallback>,
+            callback: Option<&mut cef::BeforeDownloadCallback>,
         ) -> ::std::os::raw::c_int {
             if let Some(item) = download_item {
                 let url = CefStringUtf16::from(&item.url()).to_string();
@@ -988,6 +988,11 @@ wrap_download_handler! {
                         mime_type,
                         total_bytes,
                     });
+                }
+
+                if let Some(callback) = callback {
+                    let empty_path: cef::CefStringUtf16 = "".into();
+                    callback.cont(Some(&empty_path), 0);
                 }
             }
             false as _
