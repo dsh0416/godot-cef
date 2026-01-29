@@ -105,6 +105,16 @@ impl CefTexture {
 
     pub(super) fn try_create_browser(&mut self) -> Result<(), CefError> {
         let logical_size = self.base().get_size();
+
+        // Validate size before attempting to create browser.
+        // A zero or negative size will crash CEF subprocess.
+        if logical_size.x <= 0.0 || logical_size.y <= 0.0 {
+            return Err(CefError::InvalidSize {
+                width: logical_size.x,
+                height: logical_size.y,
+            });
+        }
+
         let dpi = self.get_pixel_scale_factor();
         let pixel_width = (logical_size.x * dpi) as i32;
         let pixel_height = (logical_size.y * dpi) as i32;

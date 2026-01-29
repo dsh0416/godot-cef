@@ -28,6 +28,8 @@ pub enum CefError {
     ResourceNotFound(String),
     /// GPU device access failed.
     GpuDeviceError(String),
+    /// Invalid texture size (zero or negative dimensions).
+    InvalidSize { width: f32, height: f32 },
 }
 
 impl fmt::Display for CefError {
@@ -54,6 +56,9 @@ impl fmt::Display for CefError {
             CefError::GpuDeviceError(msg) => {
                 write!(f, "GPU device error: {}", msg)
             }
+            CefError::InvalidSize { width, height } => {
+                write!(f, "Invalid texture size: {}x{}", width, height)
+            }
         }
     }
 }
@@ -67,7 +72,8 @@ impl std::error::Error for CefError {
             | CefError::BrowserCreationFailed(_)
             | CefError::TextureOperationFailed(_)
             | CefError::ResourceNotFound(_)
-            | CefError::GpuDeviceError(_) => None,
+            | CefError::GpuDeviceError(_)
+            | CefError::InvalidSize { .. } => None,
         }
     }
 }
