@@ -130,7 +130,8 @@ func _on_download_confirmed(download_id: int):
     var info = pending_downloads.get(download_id)
     if info:
         print("User approved download: ", info.suggested_file_name)
-        # Here you would initiate the actual download
+        # NOTE: Starting downloads programmatically is not implemented yet.
+        # The API to accept/start downloads is still pending.
         pending_downloads.erase(download_id)
 
 func _on_download_declined(download_id: int):
@@ -309,19 +310,35 @@ Always validate downloads before allowing them. Malicious websites can attempt t
 const MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 const TRUSTED_DOMAINS = ["example.com", "cdn.example.com"]
 
+func _is_domain_trusted(url: String) -> bool:
+    # Extract hostname from URL (e.g. "https://example.com/path" -> "example.com")
+    var start := url.find("://")
+    if start == -1:
+        start = 0
+    else:
+        start += 3
+    var end := url.find("/", start)
+    var host := ""
+    if end == -1:
+        host = url.substr(start)
+    else:
+        host = url.substr(start, end - start)
+
+    # Compare hostname against trusted domains, allowing subdomains
+    for domain in TRUSTED_DOMAINS:
+        if host == domain or host.ends_with("." + domain):
+            return true
+    return false
+
 func is_download_safe(info: DownloadRequestInfo) -> bool:
     # Check file size
     if info.total_bytes > MAX_DOWNLOAD_SIZE:
         push_warning("Download too large: %d bytes" % info.total_bytes)
         return false
     
-    # Check domain
+    # Check domain using hostname, not substring of full URL
     var url = info.url
-    var domain_allowed = false
-    for domain in TRUSTED_DOMAINS:
-        if domain in url:
-            domain_allowed = true
-            break
+    var domain_allowed = _is_domain_trusted(url)
     
     if not domain_allowed:
         push_warning("Download from untrusted domain: %s" % url)
