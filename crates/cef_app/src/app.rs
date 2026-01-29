@@ -50,6 +50,7 @@ impl GpuDeviceIds {
 pub struct OsrApp {
     godot_backend: GodotRenderBackend,
     enable_remote_debugging: bool,
+    remote_debugging_port: u16,
     security_config: SecurityConfig,
     /// GPU device IDs for GPU selection (all platforms)
     gpu_device_ids: Option<GpuDeviceIds>,
@@ -66,6 +67,7 @@ impl OsrApp {
         Self {
             godot_backend: GodotRenderBackend::Unknown,
             enable_remote_debugging: false,
+            remote_debugging_port: 9229,
             security_config: SecurityConfig::default(),
             gpu_device_ids: None,
         }
@@ -83,6 +85,10 @@ impl OsrApp {
         self.enable_remote_debugging
     }
 
+    pub fn remote_debugging_port(&self) -> u16 {
+        self.remote_debugging_port
+    }
+
     pub fn security_config(&self) -> &SecurityConfig {
         &self.security_config
     }
@@ -95,6 +101,7 @@ impl OsrApp {
 pub struct OsrAppBuilder {
     godot_backend: GodotRenderBackend,
     enable_remote_debugging: bool,
+    remote_debugging_port: u16,
     security_config: SecurityConfig,
     gpu_device_ids: Option<GpuDeviceIds>,
 }
@@ -110,6 +117,7 @@ impl OsrAppBuilder {
         Self {
             godot_backend: GodotRenderBackend::Unknown,
             enable_remote_debugging: false,
+            remote_debugging_port: 9229,
             security_config: SecurityConfig::default(),
             gpu_device_ids: None,
         }
@@ -122,6 +130,11 @@ impl OsrAppBuilder {
 
     pub fn remote_debugging(mut self, enable_remote_debugging: bool) -> Self {
         self.enable_remote_debugging = enable_remote_debugging;
+        self
+    }
+
+    pub fn remote_debugging_port(mut self, port: u16) -> Self {
+        self.remote_debugging_port = port;
         self
     }
 
@@ -139,6 +152,7 @@ impl OsrAppBuilder {
         OsrApp {
             godot_backend: self.godot_backend,
             enable_remote_debugging: self.enable_remote_debugging,
+            remote_debugging_port: self.remote_debugging_port,
             security_config: self.security_config,
             gpu_device_ids: self.gpu_device_ids,
         }

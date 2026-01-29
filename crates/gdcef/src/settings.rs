@@ -9,12 +9,14 @@ const SETTING_ALLOW_INSECURE_CONTENT: &str = "godot_cef/security/allow_insecure_
 const SETTING_IGNORE_CERTIFICATE_ERRORS: &str = "godot_cef/security/ignore_certificate_errors";
 const SETTING_DISABLE_WEB_SECURITY: &str = "godot_cef/security/disable_web_security";
 const SETTING_ENABLE_AUDIO_CAPTURE: &str = "godot_cef/audio/enable_audio_capture";
+const SETTING_REMOTE_DEVTOOLS_PORT: &str = "godot_cef/debug/remote_devtools_port";
 
 const DEFAULT_DATA_PATH: &str = "user://cef-data";
 const DEFAULT_ALLOW_INSECURE_CONTENT: bool = false;
 const DEFAULT_IGNORE_CERTIFICATE_ERRORS: bool = false;
 const DEFAULT_DISABLE_WEB_SECURITY: bool = false;
 const DEFAULT_ENABLE_AUDIO_CAPTURE: bool = false;
+const DEFAULT_REMOTE_DEVTOOLS_PORT: i64 = 9229;
 
 pub fn register_project_settings() {
     let mut settings = ProjectSettings::singleton();
@@ -49,6 +51,14 @@ pub fn register_project_settings() {
         &mut settings,
         SETTING_ENABLE_AUDIO_CAPTURE,
         DEFAULT_ENABLE_AUDIO_CAPTURE,
+    );
+
+    register_int_setting(
+        &mut settings,
+        SETTING_REMOTE_DEVTOOLS_PORT,
+        DEFAULT_REMOTE_DEVTOOLS_PORT,
+        PropertyHint::RANGE,
+        "1,65535",
     );
 }
 
@@ -93,6 +103,32 @@ fn register_bool_setting(settings: &mut Gd<ProjectSettings>, name: &str, default
         "type": VariantType::BOOL.ord(),
         "hint": PropertyHint::NONE.ord(),
         "hint_string": "",
+    };
+
+    settings.add_property_info(&property_info);
+}
+
+fn register_int_setting(
+    settings: &mut Gd<ProjectSettings>,
+    name: &str,
+    default: i64,
+    hint: PropertyHint,
+    hint_string: &str,
+) {
+    let name_gstring: GString = name.into();
+
+    if !settings.has_setting(&name_gstring) {
+        settings.set_setting(&name_gstring, &default.to_variant());
+    }
+
+    settings.set_initial_value(&name_gstring, &default.to_variant());
+    settings.set_as_basic(&name_gstring, true);
+
+    let property_info = vdict! {
+        "name": name_gstring.clone(),
+        "type": VariantType::INT.ord(),
+        "hint": hint.ord(),
+        "hint_string": hint_string,
     };
 
     settings.add_property_info(&property_info);
@@ -144,6 +180,21 @@ fn get_bool_setting(settings: &Gd<ProjectSettings>, name: &str) -> bool {
 pub fn is_audio_capture_enabled() -> bool {
     let settings = ProjectSettings::singleton();
     get_bool_setting(&settings, SETTING_ENABLE_AUDIO_CAPTURE)
+}
+
+pub fn get_remote_devtools_port() -> u16 {
+    let settings = ProjectSettings::singleton();
+    let name_gstring: GString = SETTING_REMOTE_DEVTOOLS_PORT.into();
+    let variant = settings.get_setting(&name_gstring);
+
+    let port = if variant.is_nil() {
+        DEFAULT_REMOTE_DEVTOOLS_PORT
+    } else {
+        variant.to::<i64>()
+    };
+
+    // Clamp to valid port range
+    port.clamp(1, 65535) as u16
 }
 
 pub fn warn_if_insecure_settings() {

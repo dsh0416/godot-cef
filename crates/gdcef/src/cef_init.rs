@@ -110,6 +110,7 @@ fn initialize_cef() -> CefResult<()> {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
     let enable_remote_debugging = should_enable_remote_debugging();
+    let remote_debugging_port = settings::get_remote_devtools_port();
 
     let security_config = settings::get_security_config();
 
@@ -117,6 +118,7 @@ fn initialize_cef() -> CefResult<()> {
     let mut app_builder = cef_app::OsrApp::builder()
         .godot_backend(godot_backend)
         .remote_debugging(enable_remote_debugging)
+        .remote_debugging_port(remote_debugging_port)
         .security_config(security_config);
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
