@@ -1060,16 +1060,7 @@ impl DownloadHandlerImpl {
     }
 }
 
-fn on_process_message_received(
-    _browser: Option<&mut cef::Browser>,
-    _frame: Option<&mut cef::Frame>,
-    _source_process: ProcessId,
-    message: Option<&mut ProcessMessage>,
-    message_queue: &MessageQueue,
-    binary_message_queue: &BinaryMessageQueue,
-    ime_enable_queue: &ImeEnableQueue,
-    ime_composition_queue: &ImeCompositionQueue,
-) -> i32 {
+fn on_process_message_received(message: Option<&mut ProcessMessage>, ipc: &ClientIpcQueues) -> i32 {
     let Some(message) = message else { return 0 };
     let route = CefStringUtf16::from(&message.name()).to_string();
 
@@ -1078,7 +1069,7 @@ fn on_process_message_received(
             if let Some(args) = message.argument_list() {
                 let arg = args.string(0);
                 let msg_str = CefStringUtf16::from(&arg).to_string();
-                if let Ok(mut queue) = message_queue.lock() {
+                if let Ok(mut queue) = ipc.message_queue.lock() {
                     queue.push_back(msg_str);
                 }
             }
@@ -1093,7 +1084,7 @@ fn on_process_message_received(
                     let copied = binary_value.data(Some(&mut buffer), 0);
                     if copied > 0 {
                         buffer.truncate(copied);
-                        if let Ok(mut queue) = binary_message_queue.lock() {
+                        if let Ok(mut queue) = ipc.binary_message_queue.lock() {
                             queue.push_back(buffer);
                         }
                     }
@@ -1104,7 +1095,7 @@ fn on_process_message_received(
             if let Some(args) = message.argument_list() {
                 let arg = args.bool(0);
                 let enabled = arg != 0;
-                if let Ok(mut queue) = ime_enable_queue.lock() {
+                if let Ok(mut queue) = ipc.ime_enable_queue.lock() {
                     queue.push_back(enabled);
                 }
             }
@@ -1114,7 +1105,7 @@ fn on_process_message_received(
                 let x = args.int(0);
                 let y = args.int(1);
                 let height = args.int(2);
-                if let Ok(mut queue) = ime_composition_queue.lock() {
+                if let Ok(mut queue) = ipc.ime_composition_queue.lock() {
                     *queue = Some(ImeCompositionRange {
                         caret_x: x,
                         caret_y: y,
@@ -1199,12 +1190,12 @@ wrap_client! {
 
         fn on_process_message_received(
             &self,
-            browser: Option<&mut cef::Browser>,
-            frame: Option<&mut cef::Frame>,
-            source_process: ProcessId,
+            _browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut cef::Frame>,
+            _source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            on_process_message_received(browser, frame, source_process, message, &self.ipc.message_queue, &self.ipc.binary_message_queue, &self.ipc.ime_enable_queue, &self.ipc.ime_composition_queue)
+            on_process_message_received(message, &self.ipc)
         }
     }
 }
@@ -1306,12 +1297,12 @@ wrap_client! {
 
         fn on_process_message_received(
             &self,
-            browser: Option<&mut cef::Browser>,
-            frame: Option<&mut cef::Frame>,
-            source_process: ProcessId,
+            _browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut cef::Frame>,
+            _source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            on_process_message_received(browser, frame, source_process, message, &self.ipc.message_queue, &self.ipc.binary_message_queue, &self.ipc.ime_enable_queue, &self.ipc.ime_composition_queue)
+            on_process_message_received(message, &self.ipc)
         }
     }
 }

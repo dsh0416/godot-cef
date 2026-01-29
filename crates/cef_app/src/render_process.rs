@@ -153,7 +153,7 @@ fn invoke_js_string_callback(frame: &mut Frame, callback_name: &str, msg_str: &C
                 && callback.is_function() != 0
                 && let Some(str_value) = v8_value_create_string(Some(msg_str))
             {
-                let mut args = [Some(str_value)];
+                let args = [Some(str_value)];
                 let _ = callback.execute_function(Some(&mut global), Some(&args));
             }
         }
@@ -173,7 +173,7 @@ fn invoke_js_binary_callback(frame: &mut Frame, callback_name: &str, buffer: &[u
                 && let Some(array_buffer) =
                     v8_value_create_array_buffer_with_copy(buffer.as_ptr() as *mut u8, buffer.len())
             {
-                let mut args = [Some(array_buffer)];
+                let args = [Some(array_buffer)];
                 let _ = callback.execute_function(Some(&mut global), Some(&args));
             }
         }
