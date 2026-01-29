@@ -1,6 +1,6 @@
 # GPU 设备绑定
 
-本页面解释 Godot CEF 如何确保 CEF 在多 GPU 系统上使用与 Godot 相同的 GPU，以实现成功的纹理共享用于加速渲染。
+本页面解释 Godot CEF 如何在多 GPU 系统上确保 CEF 与 Godot 使用同一块 GPU，从而在启用加速渲染时实现可靠的纹理共享。
 
 ## 多 GPU 问题
 

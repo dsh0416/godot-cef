@@ -1,6 +1,6 @@
 # 拖放
 
-CefTexture 支持 Godot 和嵌入式 CEF 浏览器之间的双向拖放操作。这允许您：
+CefTexture 支持 Godot 与嵌入式 CEF 浏览器之间的双向拖放（Drag & Drop）。这允许你：
 
 - **从 Godot 拖动文件或数据到浏览器**（例如将文件拖放到网页上）
 - **通过信号处理从浏览器发起的拖动**（例如从网页拖动图像或链接到您的游戏中）
@@ -25,9 +25,9 @@ CefTexture 支持 Godot 和嵌入式 CEF 浏览器之间的双向拖放操作。
 
 | 属性 | 类型 | 描述 |
 |------|------|------|
-| `is_link` | `bool` | 如果拖动的是 URL 链接则为 True |
-| `is_file` | `bool` | 如果拖动的是文件则为 True |
-| `is_fragment` | `bool` | 如果拖动的是文本/HTML 内容则为 True |
+| `is_link` | `bool` | 是否为 URL 链接拖动 |
+| `is_file` | `bool` | 是否为文件拖动 |
+| `is_fragment` | `bool` | 是否为文本/HTML 片段拖动 |
 | `link_url` | `String` | 正在拖动的 URL（如果 `is_link`） |
 | `link_title` | `String` | 链接的标题（如果 `is_link`） |
 | `fragment_text` | `String` | 纯文本内容（如果 `is_fragment`） |

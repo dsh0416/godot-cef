@@ -1,10 +1,10 @@
 # 信号
 
-`CefTexture` 节点会发出各种信号来通知您的游戏关于浏览器事件和状态变化。
+`CefTexture` 会发出一系列信号，用于通知游戏侧浏览器事件与状态变化。
 
 ## `ipc_message(message: String)`
 
-当 JavaScript 通过 `sendIpcMessage` 函数向 Godot 发送消息时发出。用于 Web UI 和游戏逻辑之间的双向通信。
+当网页端通过 `sendIpcMessage` 向 Godot 发送消息时发出。用于网页 UI 与游戏逻辑之间的双向通信（IPC）。
 
 ```gdscript
 func _ready():
@@ -16,7 +16,7 @@ func _on_ipc_message(message: String):
     # 处理消息...
 ```
 
-在您的 JavaScript 中（在 CEF 浏览器中运行）：
+网页端 JavaScript（在 CEF 浏览器中运行）：
 
 ```javascript
 // 向 Godot 发送消息

@@ -31,7 +31,7 @@ export default withMermaid(defineConfig({
                 { text: '方法', link: '/zh_CN/api/methods' },
                 { text: '信号', link: '/zh_CN/api/signals' },
                 { text: '音频捕获', link: '/zh_CN/api/audio-capture' },
-                { text: '输入法支持', link: '/zh_CN/api/ime-support' },
+                { text: '输入法（IME）支持', link: '/zh_CN/api/ime-support' },
                 { text: '拖放', link: '/zh_CN/api/drag-and-drop' },
                 { text: '下载', link: '/zh_CN/api/downloads' },
                 { text: 'Vulkan 支持', link: '/zh_CN/api/vulkan-support' },
@@ -55,8 +55,8 @@ export default withMermaid(defineConfig({
         },
 
         returnToTopLabel: '返回顶部',
-        sidebarMenuLabel: '菜单',
-        darkModeSwitchLabel: '外观',
+        sidebarMenuLabel: '侧边栏',
+        darkModeSwitchLabel: '主题',
       }
     }
   },

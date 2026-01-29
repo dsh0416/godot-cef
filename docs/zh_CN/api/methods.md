@@ -1,6 +1,6 @@
 # 方法
 
-`CefTexture` 节点提供全面的方法来控制浏览器行为和与网页内容交互。
+`CefTexture` 提供一组方法，用于控制浏览器行为并与网页内容交互。
 
 ## 导航
 
@@ -75,7 +75,7 @@ if cef_texture.is_loading():
 
 ### `eval(code: String)`
 
-在浏览器的主框架中执行 JavaScript 代码。
+在浏览器主 Frame（main frame）中执行 JavaScript 代码。
 
 ```gdscript
 # 执行 JavaScript
@@ -92,18 +92,18 @@ cef_texture.eval("document.getElementById('player-name').innerText = 'Player1'")
 
 ### `send_ipc_message(message: String)`
 
-从 Godot 向 JavaScript 发送消息。如果注册了 `window.onIpcMessage(msg)` 回调，消息将通过该回调传递。
+从 Godot 向 JavaScript 发送消息。网页端如果注册了 `window.onIpcMessage(msg)` 回调，就会收到该消息。
 
 ```gdscript
 # 发送简单字符串消息
-cef_texture.send_ipc_message("来自 Godot 的问候!")
+cef_texture.send_ipc_message("Hello from Godot!")
 
 # 使用 Dictionary 发送结构化数据作为 JSON
 var payload := {"action": "update", "value": 42}
 cef_texture.send_ipc_message(JSON.stringify(payload))
 ```
 
-在您的 JavaScript 中（在 CEF 浏览器中运行）：
+网页端 JavaScript（在 CEF 浏览器中运行）：
 
 ```javascript
 // 注册回调以接收来自 Godot 的消息
