@@ -104,6 +104,12 @@ impl CefTexture {
     }
 
     pub(super) fn try_create_browser(&mut self) -> Result<(), CefError> {
+        // Prevent double-initialization: if browser already exists, do nothing.
+        // This avoids resource leaks (unclosed browser handles, leaked textures, etc.).
+        if self.app.browser.is_some() {
+            return Ok(());
+        }
+
         let logical_size = self.base().get_size();
 
         // Validate size before attempting to create browser.
