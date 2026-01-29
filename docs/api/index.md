@@ -26,6 +26,7 @@ The `CefTexture` node extends `TextureRect` and provides a Chromium-based web br
 - **Input handling** including mouse, keyboard, and IME support
 - **Navigation controls** and browser state management
 - **Drag-and-drop** between Godot and web content
+- **Download handling** with full control over file downloads
 
 ## Global Configuration
 
@@ -86,6 +87,7 @@ When remote debugging is enabled, CEF listens on **port 9229**.
 - [**Audio Capture**](./audio-capture.md) - Route browser audio through Godot's audio system
 - [**IME Support**](./ime-support.md) - Input Method Editor integration
 - [**Drag and Drop**](./drag-and-drop.md) - Bidirectional drag-and-drop support
+- [**Downloads**](./downloads.md) - Handle file downloads from web pages
 
 ## Basic Usage Example
 
@@ -127,4 +129,21 @@ if browser.can_go_forward():
 
 browser.reload()
 browser.reload_ignore_cache()
+```
+
+## Download Handling
+
+```gdscript
+func _ready():
+    browser.download_requested.connect(_on_download_requested)
+    browser.download_updated.connect(_on_download_updated)
+
+func _on_download_requested(info: DownloadRequestInfo):
+    print("Download: %s (%s)" % [info.suggested_file_name, info.mime_type])
+
+func _on_download_updated(info: DownloadUpdateInfo):
+    if info.is_complete:
+        print("Download complete: ", info.full_path)
+    elif info.is_in_progress:
+        print("Progress: %d%%" % info.percent_complete)
 ```

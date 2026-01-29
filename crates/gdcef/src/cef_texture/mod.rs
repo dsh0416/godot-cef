@@ -132,6 +132,12 @@ impl CefTexture {
     #[signal]
     fn drag_entered(drag_data: Gd<crate::drag::DragDataInfo>, mask: i32);
 
+    #[signal]
+    fn download_requested(download_info: Gd<crate::cef_texture::signals::DownloadRequestInfo>);
+
+    #[signal]
+    fn download_updated(download_info: Gd<crate::cef_texture::signals::DownloadUpdateInfo>);
+
     #[func]
     fn on_ready(&mut self) {
         use godot::classes::control::FocusMode;
@@ -167,6 +173,8 @@ impl CefTexture {
         self.process_loading_state_queue();
         self.process_console_message_queue();
         self.process_drag_event_queue();
+        self.process_download_request_queue();
+        self.process_download_update_queue();
         self.process_ime_enable_queue();
         self.process_ime_composition_queue();
         self.process_ime_position();

@@ -46,7 +46,7 @@ Godot CEF uses Chromium's `--gpu-vendor-id` and `--gpu-device-id` command-line s
 ┌─────────────────────────────────────────────────────────────────┐
 │                     CEF Subprocess                              │
 │                                                                 │
-│  Chromium's GPU process uses the vendor/device IDs to select   │
+│  Chromium's GPU process uses the vendor/device IDs to select    │
 │  the matching GPU adapter for rendering                         │
 └─────────────────────────────────────────────────────────────────┘
 ```

@@ -71,6 +71,8 @@ impl CefTexture {
         self.app.audio_packet_queue = None;
         self.app.audio_params = None;
         self.app.audio_sample_rate = None;
+        self.app.download_request_queue = None;
+        self.app.download_update_queue = None;
 
         self.ime_active = false;
         self.ime_proxy = None;
@@ -216,6 +218,8 @@ impl CefTexture {
                 audio_params: queues.audio_params.clone(),
                 audio_sample_rate: queues.audio_sample_rate.clone(),
                 enable_audio_capture,
+                download_request_queue: queues.download_request_queue.clone(),
+                download_update_queue: queues.download_update_queue.clone(),
             },
         );
 
@@ -253,6 +257,8 @@ impl CefTexture {
         self.app.audio_packet_queue = Some(queues.audio_packet_queue);
         self.app.audio_params = Some(queues.audio_params);
         self.app.audio_sample_rate = Some(queues.audio_sample_rate);
+        self.app.download_request_queue = Some(queues.download_request_queue);
+        self.app.download_update_queue = Some(queues.download_update_queue);
 
         Ok(browser)
     }
@@ -326,6 +332,8 @@ impl CefTexture {
                 audio_params: queues.audio_params.clone(),
                 audio_sample_rate: queues.audio_sample_rate.clone(),
                 enable_audio_capture,
+                download_request_queue: queues.download_request_queue.clone(),
+                download_update_queue: queues.download_update_queue.clone(),
             },
         );
 
@@ -369,6 +377,8 @@ impl CefTexture {
         self.app.audio_packet_queue = Some(queues.audio_packet_queue);
         self.app.audio_params = Some(queues.audio_params);
         self.app.audio_sample_rate = Some(queues.audio_sample_rate);
+        self.app.download_request_queue = Some(queues.download_request_queue);
+        self.app.download_update_queue = Some(queues.download_update_queue);
 
         Ok(browser)
     }

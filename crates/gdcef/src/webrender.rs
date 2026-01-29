@@ -7,7 +7,8 @@ use wide::{i8x16, u8x16};
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, ConsoleMessageEvent,
-    ConsoleMessageQueue, DragDataInfo, DragEvent, DragEventQueue, ImeCompositionQueue,
+    ConsoleMessageQueue, DownloadRequestEvent, DownloadRequestQueue, DownloadUpdateEvent,
+    DownloadUpdateQueue, DragDataInfo, DragEvent, DragEventQueue, ImeCompositionQueue,
     ImeCompositionRange, ImeEnableQueue, LoadingStateEvent, LoadingStateQueue, MessageQueue,
     TitleChangeQueue, UrlChangeQueue,
 };
@@ -27,6 +28,8 @@ pub(crate) struct ClientQueues {
     pub audio_params: AudioParamsState,
     pub audio_sample_rate: AudioSampleRateState,
     pub enable_audio_capture: bool,
+    pub download_request_queue: DownloadRequestQueue,
+    pub download_update_queue: DownloadUpdateQueue,
 }
 
 impl ClientQueues {
@@ -44,6 +47,8 @@ impl ClientQueues {
             audio_params: Arc::new(Mutex::new(None)),
             audio_sample_rate: Arc::new(Mutex::new(sample_rate)),
             enable_audio_capture,
+            download_request_queue: Arc::new(Mutex::new(VecDeque::new())),
+            download_update_queue: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 }
@@ -941,6 +946,99 @@ impl AudioHandlerImpl {
     }
 }
 
+wrap_download_handler! {
+    pub(crate) struct DownloadHandlerImpl {
+        download_request_queue: DownloadRequestQueue,
+        download_update_queue: DownloadUpdateQueue,
+    }
+
+    impl DownloadHandler {
+        fn can_download(
+            &self,
+            _browser: Option<&mut Browser>,
+            _url: Option<&CefString>,
+            _request_method: Option<&CefString>,
+        ) -> ::std::os::raw::c_int {
+            true as _
+        }
+
+        fn on_before_download(
+            &self,
+            _browser: Option<&mut Browser>,
+            download_item: Option<&mut cef::DownloadItem>,
+            suggested_name: Option<&CefString>,
+            _callback: Option<&mut cef::BeforeDownloadCallback>,
+        ) -> ::std::os::raw::c_int {
+            if let Some(item) = download_item {
+                let url = CefStringUtf16::from(&item.url()).to_string();
+                let original_url = CefStringUtf16::from(&item.original_url()).to_string();
+                let suggested_file_name = suggested_name
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let mime_type = CefStringUtf16::from(&item.mime_type()).to_string();
+                let total_bytes = item.total_bytes();
+                let id = item.id();
+
+                if let Ok(mut queue) = self.download_request_queue.lock() {
+                    queue.push_back(DownloadRequestEvent {
+                        id,
+                        url,
+                        original_url,
+                        suggested_file_name,
+                        mime_type,
+                        total_bytes,
+                    });
+                }
+            }
+            false as _
+        }
+
+        fn on_download_updated(
+            &self,
+            _browser: Option<&mut Browser>,
+            download_item: Option<&mut cef::DownloadItem>,
+            _callback: Option<&mut cef::DownloadItemCallback>,
+        ) {
+            if let Some(item) = download_item {
+                let id = item.id();
+                let url = CefStringUtf16::from(&item.url()).to_string();
+                let full_path = CefStringUtf16::from(&item.full_path()).to_string();
+                let received_bytes = item.received_bytes();
+                let total_bytes = item.total_bytes();
+                let current_speed = item.current_speed();
+                let percent_complete = item.percent_complete();
+                let is_in_progress = item.is_in_progress() != 0;
+                let is_complete = item.is_complete() != 0;
+                let is_canceled = item.is_canceled() != 0;
+
+                if let Ok(mut queue) = self.download_update_queue.lock() {
+                    queue.push_back(DownloadUpdateEvent {
+                        id,
+                        url,
+                        full_path,
+                        received_bytes,
+                        total_bytes,
+                        current_speed,
+                        percent_complete,
+                        is_in_progress,
+                        is_complete,
+                        is_canceled,
+                    });
+                }
+            }
+        }
+    }
+}
+
+impl DownloadHandlerImpl {
+    pub fn build(
+        download_request_queue: DownloadRequestQueue,
+        download_update_queue: DownloadUpdateQueue,
+    ) -> cef::DownloadHandler {
+        Self::new(download_request_queue, download_update_queue)
+    }
+}
+
 fn on_process_message_received(
     _browser: Option<&mut cef::Browser>,
     _frame: Option<&mut cef::Frame>,
@@ -1001,6 +1099,7 @@ pub(crate) struct ClientHandlers {
     pub load_handler: cef::LoadHandler,
     pub drag_handler: cef::DragHandler,
     pub audio_handler: Option<cef::AudioHandler>,
+    pub download_handler: cef::DownloadHandler,
 }
 
 #[derive(Clone)]
@@ -1053,6 +1152,10 @@ wrap_client! {
             self.handlers.audio_handler.clone()
         }
 
+        fn download_handler(&self) -> Option<cef::DownloadHandler> {
+            Some(self.handlers.download_handler.clone())
+        }
+
         fn on_process_message_received(
             &self,
             browser: Option<&mut cef::Browser>,
@@ -1093,6 +1196,10 @@ fn build_client_handlers(
         load_handler: LoadHandlerImpl::build(queues.loading_state_queue.clone()),
         drag_handler: DragHandlerImpl::build(queues.drag_event_queue.clone()),
         audio_handler,
+        download_handler: DownloadHandlerImpl::build(
+            queues.download_request_queue.clone(),
+            queues.download_update_queue.clone(),
+        ),
     }
 }
 
@@ -1149,6 +1256,10 @@ wrap_client! {
 
         fn audio_handler(&self) -> Option<cef::AudioHandler> {
             self.handlers.audio_handler.clone()
+        }
+
+        fn download_handler(&self) -> Option<cef::DownloadHandler> {
+            Some(self.handlers.download_handler.clone())
         }
 
         fn on_process_message_received(

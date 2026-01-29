@@ -180,6 +180,63 @@ func _on_drag_entered(drag_data: DragDataInfo, mask: int):
 For comprehensive drag-and-drop documentation including methods for handling Godot → CEF drags, see the [Drag and Drop](./drag-and-drop.md) page.
 :::
 
+## `download_requested(download_info: DownloadRequestInfo)`
+
+Emitted when a download is requested (e.g., user clicks a download link). The download does **not** start automatically; you must handle this signal to decide what to do with the download.
+
+**Parameters:**
+- `download_info`: A `DownloadRequestInfo` object containing:
+  - `id: int` - Unique identifier for this download
+  - `url: String` - The URL being downloaded
+  - `original_url: String` - The original URL before any redirects
+  - `suggested_file_name: String` - Suggested file name from the server
+  - `mime_type: String` - MIME type of the download
+  - `total_bytes: int` - Total size in bytes, or -1 if unknown
+
+```gdscript
+func _ready():
+    cef_texture.download_requested.connect(_on_download_requested)
+
+func _on_download_requested(download_info: DownloadRequestInfo):
+    print("Download: %s (%d bytes)" % [download_info.suggested_file_name, download_info.total_bytes])
+```
+
+::: tip
+Downloads don't start automatically—handle this signal to show a confirmation dialog or save the file.
+:::
+
+## `download_updated(download_info: DownloadUpdateInfo)`
+
+Emitted when a download's progress changes or completes. Use this to track download progress and handle completion.
+
+**Parameters:**
+- `download_info`: A `DownloadUpdateInfo` object containing:
+  - `id: int` - Unique identifier for this download (matches `download_requested`)
+  - `url: String` - The URL being downloaded
+  - `full_path: String` - Full path where the file is being saved
+  - `received_bytes: int` - Bytes received so far
+  - `total_bytes: int` - Total size in bytes, or -1 if unknown
+  - `current_speed: int` - Current download speed in bytes per second
+  - `percent_complete: int` - Percentage complete (0-100), or -1 if unknown
+  - `is_in_progress: bool` - Whether the download is still in progress
+  - `is_complete: bool` - Whether the download completed successfully
+  - `is_canceled: bool` - Whether the download was canceled
+
+```gdscript
+func _ready():
+    cef_texture.download_updated.connect(_on_download_updated)
+
+func _on_download_updated(download_info: DownloadUpdateInfo):
+    if download_info.is_complete:
+        print("Download complete: ", download_info.full_path)
+    elif download_info.is_canceled:
+        print("Download canceled: ", download_info.url)
+    elif download_info.is_in_progress:
+        var percent = download_info.percent_complete
+        var speed_kb = download_info.current_speed / 1024.0
+        print("Downloading: %d%% (%.1f KB/s)" % [percent, speed_kb])
+```
+
 ## Signal Usage Patterns
 
 ### Loading State Management

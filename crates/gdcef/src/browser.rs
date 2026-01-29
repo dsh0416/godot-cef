@@ -123,6 +123,33 @@ pub type AudioParamsState = Arc<Mutex<Option<AudioParameters>>>;
 /// Shared sample rate for audio capture.
 pub type AudioSampleRateState = Arc<Mutex<i32>>;
 
+#[derive(Debug, Clone)]
+pub struct DownloadRequestEvent {
+    pub id: u32,
+    pub url: String,
+    pub original_url: String,
+    pub suggested_file_name: String,
+    pub mime_type: String,
+    pub total_bytes: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadUpdateEvent {
+    pub id: u32,
+    pub url: String,
+    pub full_path: String,
+    pub received_bytes: i64,
+    pub total_bytes: i64,
+    pub current_speed: i64,
+    pub percent_complete: i32,
+    pub is_in_progress: bool,
+    pub is_complete: bool,
+    pub is_canceled: bool,
+}
+
+pub type DownloadRequestQueue = Arc<Mutex<VecDeque<DownloadRequestEvent>>>;
+pub type DownloadUpdateQueue = Arc<Mutex<VecDeque<DownloadUpdateEvent>>>;
+
 #[derive(Debug, Clone, Default)]
 pub struct DragState {
     pub is_drag_over: bool,
@@ -198,4 +225,6 @@ pub struct App {
     pub audio_params: Option<AudioParamsState>,
     /// Shared sample rate configuration (from Godot's AudioServer).
     pub audio_sample_rate: Option<AudioSampleRateState>,
+    pub download_request_queue: Option<DownloadRequestQueue>,
+    pub download_update_queue: Option<DownloadUpdateQueue>,
 }

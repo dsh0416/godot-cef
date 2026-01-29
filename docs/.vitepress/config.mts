@@ -24,6 +24,7 @@ export default defineConfig({
             { text: 'Audio Capture', link: '/api/audio-capture' },
             { text: 'IME Support', link: '/api/ime-support' },
             { text: 'Drag and Drop', link: '/api/drag-and-drop' },
+            { text: 'Downloads', link: '/api/downloads' },
             { text: 'Vulkan Support', link: '/api/vulkan-support' },
             { text: 'GPU Device Pinning', link: '/api/gpu-device-pinning' }
           ]
