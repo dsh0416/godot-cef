@@ -68,7 +68,7 @@ cef_texture.stop_loading()
 
 ```gdscript
 if cef_texture.is_loading():
-    print("页面仍在加载中...")
+    print("Page is still loading...")
 ```
 
 ## JavaScript 执行
@@ -78,13 +78,13 @@ if cef_texture.is_loading():
 在浏览器主 Frame（main frame）中执行 JavaScript 代码。
 
 ```gdscript
-# 执行 JavaScript
+# Execute JavaScript
 cef_texture.eval("document.body.style.backgroundColor = 'red'")
 
-# 调用 JavaScript 函数
+# Call a JavaScript function
 cef_texture.eval("updateScore(100)")
 
-# 与 DOM 交互
+# Interact with the DOM
 cef_texture.eval("document.getElementById('player-name').innerText = 'Player1'")
 ```
 
@@ -95,10 +95,10 @@ cef_texture.eval("document.getElementById('player-name').innerText = 'Player1'")
 从 Godot 向 JavaScript 发送消息。网页端如果注册了 `window.onIpcMessage(msg)` 回调，就会收到该消息。
 
 ```gdscript
-# 发送简单字符串消息
+# Send a simple string message
 cef_texture.send_ipc_message("Hello from Godot!")
 
-# 使用 Dictionary 发送结构化数据作为 JSON
+# Send structured data as JSON using a Dictionary
 var payload := {"action": "update", "value": 42}
 cef_texture.send_ipc_message(JSON.stringify(payload))
 ```
@@ -106,11 +106,11 @@ cef_texture.send_ipc_message(JSON.stringify(payload))
 网页端 JavaScript（在 CEF 浏览器中运行）：
 
 ```javascript
-// 注册回调以接收来自 Godot 的消息
+// Register the callback to receive messages from Godot
 window.onIpcMessage = function(msg) {
-    console.log("从 Godot 收到:", msg);
+    console.log("Received from Godot:", msg);
     var data = JSON.parse(msg);
-    // 处理消息...
+    // Handle the message...
 };
 ```
 
@@ -121,16 +121,16 @@ window.onIpcMessage = function(msg) {
 使用原生 CEF 进程消息传递，零编码开销，可高效传输二进制数据（图像、音频、协议缓冲区等）。
 
 ```gdscript
-# 发送原始二进制数据
+# Send raw binary data
 var data := PackedByteArray([0x01, 0x02, 0x03, 0x04])
 cef_texture.send_ipc_binary_message(data)
 
-# 发送图像作为二进制
+# Send an image as binary
 var image := Image.load_from_file("res://icon.png")
 var png_data := image.save_png_to_buffer()
 cef_texture.send_ipc_binary_message(png_data)
 
-# 发送文件内容
+# Send a file's contents
 var file := FileAccess.open("res://data.bin", FileAccess.READ)
 var file_data := file.get_buffer(file.get_length())
 cef_texture.send_ipc_binary_message(file_data)
@@ -139,18 +139,18 @@ cef_texture.send_ipc_binary_message(file_data)
 在您的 JavaScript 中（在 CEF 浏览器中运行）：
 
 ```javascript
-// 注册回调以接收来自 Godot 的二进制数据
+// Register the callback to receive binary data from Godot
 window.onIpcBinaryMessage = function(arrayBuffer) {
-    console.log("收到二进制数据:", arrayBuffer.byteLength, "字节");
+    console.log("Received binary data:", arrayBuffer.byteLength, "bytes");
     
-    // 示例：处理为图像
+    // Example: Process as an image
     const blob = new Blob([arrayBuffer], { type: 'image/png' });
     const url = URL.createObjectURL(blob);
     document.getElementById('image').src = url;
     
-    // 示例：处理为类型化数组
+    // Example: Process as typed array
     const view = new Uint8Array(arrayBuffer);
-    console.log("第一个字节:", view[0]);
+    console.log("First byte:", view[0]);
 };
 ```
 
@@ -161,9 +161,9 @@ window.onIpcBinaryMessage = function(arrayBuffer) {
 设置浏览器的缩放级别。`0.0` 是默认值（100%）。正值放大，负值缩小。
 
 ```gdscript
-cef_texture.set_zoom_level(1.0)   # 放大
-cef_texture.set_zoom_level(-1.0)  # 缩小
-cef_texture.set_zoom_level(0.0)   # 重置为默认
+cef_texture.set_zoom_level(1.0)   # Zoom in
+cef_texture.set_zoom_level(-1.0)  # Zoom out
+cef_texture.set_zoom_level(0.0)   # Reset to default
 ```
 
 ### `get_zoom_level() -> float`
@@ -172,7 +172,7 @@ cef_texture.set_zoom_level(0.0)   # 重置为默认
 
 ```gdscript
 var zoom = cef_texture.get_zoom_level()
-print("当前缩放: ", zoom)
+print("Current zoom: ", zoom)
 ```
 
 ## 音频控制
@@ -182,8 +182,8 @@ print("当前缩放: ", zoom)
 静音或取消静音浏览器音频。
 
 ```gdscript
-cef_texture.set_audio_muted(true)   # 静音
-cef_texture.set_audio_muted(false)  # 取消静音
+cef_texture.set_audio_muted(true)   # Mute
+cef_texture.set_audio_muted(false)  # Unmute
 ```
 
 ### `is_audio_muted() -> bool`
@@ -192,7 +192,7 @@ cef_texture.set_audio_muted(false)  # 取消静音
 
 ```gdscript
 if cef_texture.is_audio_muted():
-    print("音频已静音")
+    print("Audio is muted")
 ```
 
 ## 音频捕获
@@ -209,7 +209,7 @@ if cef_texture.is_audio_muted():
 
 ```gdscript
 if cef_texture.is_audio_capture_enabled():
-    print("音频捕获已启用")
+    print("Audio capture is enabled")
 ```
 
 ### `create_audio_stream() -> AudioStreamGenerator`
@@ -239,7 +239,7 @@ func _process(_delta):
 
 ```gdscript
 if cef_texture.has_audio_data():
-    print("有可用的音频数据")
+    print("Audio data available")
 ```
 
 ### `get_audio_buffer_size() -> int`
@@ -313,7 +313,7 @@ cef_texture.drag_source_system_ended()
 
 ```gdscript
 if cef_texture.is_dragging_from_browser():
-    print("浏览器拖动正在进行")
+    print("Browser drag in progress")
 ```
 
 ### `is_drag_over() -> bool`
@@ -322,6 +322,6 @@ if cef_texture.is_dragging_from_browser():
 
 ```gdscript
 if cef_texture.is_drag_over():
-    print("拖动在浏览器区域上方")
+    print("Drag is over browser area")
 ```
 

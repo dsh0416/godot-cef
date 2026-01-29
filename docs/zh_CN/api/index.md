@@ -12,7 +12,7 @@ extends Control
 func _ready():
     var cef_texture = CefTexture.new()
     cef_texture.url = "https://example.com"
-    cef_texture.enable_accelerated_osr = true  # 启用 GPU 加速
+    cef_texture.enable_accelerated_osr = true  # Enable GPU acceleration
     add_child(cef_texture)
 ```
 
@@ -99,30 +99,30 @@ extends Node2D
 @onready var browser = $CefTexture
 
 func _ready():
-    # 设置初始 URL
+    # Set initial URL
     browser.url = "https://example.com"
 
-    # 连接信号
+    # Connect to signals
     browser.load_finished.connect(_on_page_loaded)
     browser.ipc_message.connect(_on_message_received)
 
 func _on_page_loaded(url: String, status: int):
-    print("页面已加载: ", url)
+    print("Page loaded: ", url)
 
-    # 执行 JavaScript
+    # Execute JavaScript
     browser.eval("document.body.style.backgroundColor = '#f0f0f0'")
 
 func _on_message_received(message: String):
-    print("从网页收到: ", message)
+    print("Received from web: ", message)
 ```
 
 ## 导航
 
 ```gdscript
-# 导航到 URL
+# Navigate to URLs
 browser.url = "https://godotengine.org"
 
-# 浏览器控制
+# Browser controls
 if browser.can_go_back():
     browser.go_back()
 
@@ -141,12 +141,12 @@ func _ready():
     browser.download_updated.connect(_on_download_updated)
 
 func _on_download_requested(info: DownloadRequestInfo):
-    print("下载: %s (%s)" % [info.suggested_file_name, info.mime_type])
+    print("Download: %s (%s)" % [info.suggested_file_name, info.mime_type])
 
 func _on_download_updated(info: DownloadUpdateInfo):
     if info.is_complete:
-        print("下载完成: ", info.full_path)
+        print("Download complete: ", info.full_path)
     elif info.is_in_progress:
-        print("进度: %d%%" % info.percent_complete)
+        print("Progress: %d%%" % info.percent_complete)
 ```
 

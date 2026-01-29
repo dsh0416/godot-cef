@@ -14,10 +14,10 @@ Godot CEF 允许你完全接管网页触发的文件下载。当用户点击下�
 
 ```mermaid
 flowchart LR
-    A[网页] --> B[点击下载链接]
+    A[Web Page] --> B[Download Link Click]
     B --> C[download_requested]
-    C --> D[您的处理器]
-    D --> E[下载进度]
+    C --> D[Your Handler]
+    D --> E[Download Progress]
     E --> F[download_updated]
 ```
 
@@ -37,25 +37,25 @@ func _ready():
     cef_texture.download_updated.connect(_on_download_updated)
 
 func _on_download_requested(info: DownloadRequestInfo):
-    print("下载请求:")
-    print("  文件: ", info.suggested_file_name)
+    print("Download requested:")
+    print("  File: ", info.suggested_file_name)
     print("  URL: ", info.url)
-    print("  类型: ", info.mime_type)
-    print("  大小: ", _format_bytes(info.total_bytes))
+    print("  Type: ", info.mime_type)
+    print("  Size: ", _format_bytes(info.total_bytes))
     
-    # 显示确认对话框、保存到自定义位置等
+    # Show confirmation dialog, save to custom location, etc.
 
 func _on_download_updated(info: DownloadUpdateInfo):
     if info.is_complete:
-        print("✓ 下载完成: ", info.full_path)
+        print("✓ Download complete: ", info.full_path)
     elif info.is_canceled:
-        print("✗ 下载已取消")
+        print("✗ Download canceled")
     else:
-        print("下载中: %d%%" % info.percent_complete)
+        print("Downloading: %d%%" % info.percent_complete)
 
 func _format_bytes(bytes: int) -> String:
     if bytes < 0:
-        return "大小未知"
+        return "Unknown size"
     elif bytes < 1024:
         return "%d B" % bytes
     elif bytes < 1024 * 1024:
@@ -112,12 +112,12 @@ func _format_bytes(bytes: int) -> String:
 var pending_downloads: Dictionary = {}
 
 func _on_download_requested(info: DownloadRequestInfo):
-    # 存储下载信息
+    # Store the download info
     pending_downloads[info.id] = info
     
-    # 显示确认对话框
+    # Show confirmation dialog
     var dialog = ConfirmationDialog.new()
-    dialog.dialog_text = "下载 %s？\n大小: %s" % [
+    dialog.dialog_text = "Download %s?\nSize: %s" % [
         info.suggested_file_name,
         _format_bytes(info.total_bytes)
     ]
@@ -129,14 +129,14 @@ func _on_download_requested(info: DownloadRequestInfo):
 func _on_download_confirmed(download_id: int):
     var info = pending_downloads.get(download_id)
     if info:
-        print("用户批准下载: ", info.suggested_file_name)
-        # 注意：程序化开始下载尚未实现。
-        # 接受/开始下载的 API 仍在开发中。
+        print("User approved download: ", info.suggested_file_name)
+        # NOTE: Starting downloads programmatically is not implemented yet.
+        # The API to accept/start downloads is still pending.
         pending_downloads.erase(download_id)
 
 func _on_download_declined(download_id: int):
     pending_downloads.erase(download_id)
-    print("用户拒绝下载")
+    print("User declined download")
 ```
 
 ### 下载进度 UI
@@ -163,23 +163,23 @@ func _on_download_requested(info: DownloadRequestInfo):
     }
     progress_bar.visible = true
     progress_bar.value = 0
-    status_label.text = "开始: " + info.suggested_file_name
+    status_label.text = "Starting: " + info.suggested_file_name
 
 func _on_download_updated(info: DownloadUpdateInfo):
     if not active_downloads.has(info.id):
         return
     
     if info.is_complete:
-        status_label.text = "✓ 完成: " + active_downloads[info.id].name
+        status_label.text = "✓ Complete: " + active_downloads[info.id].name
         progress_bar.value = 100
         active_downloads.erase(info.id)
-        # 延迟后隐藏
+        # Hide after delay
         await get_tree().create_timer(2.0).timeout
         if active_downloads.is_empty():
             progress_bar.visible = false
     
     elif info.is_canceled:
-        status_label.text = "✗ 已取消"
+        status_label.text = "✗ Canceled"
         active_downloads.erase(info.id)
         if active_downloads.is_empty():
             progress_bar.visible = false
@@ -188,7 +188,7 @@ func _on_download_updated(info: DownloadUpdateInfo):
         progress_bar.value = info.percent_complete if info.percent_complete >= 0 else 0
         var speed_kb = info.current_speed / 1024.0
         speed_label.text = "%.1f KB/s" % speed_kb
-        status_label.text = "下载中: %s (%d%%)" % [
+        status_label.text = "Downloading: %s (%d%%)" % [
             active_downloads[info.id].name,
             info.percent_complete
         ]
@@ -207,20 +207,20 @@ const ALLOWED_MIME_TYPES = [
 const BLOCKED_EXTENSIONS = [".exe", ".bat", ".cmd", ".msi", ".scr"]
 
 func _on_download_requested(info: DownloadRequestInfo):
-    # 检查 MIME 类型
+    # Check MIME type
     if info.mime_type not in ALLOWED_MIME_TYPES:
-        print("下载被阻止 - 不允许的 MIME 类型: ", info.mime_type)
+        print("Blocked download - MIME type not allowed: ", info.mime_type)
         return
     
-    # 检查文件扩展名
+    # Check file extension
     var filename = info.suggested_file_name.to_lower()
     for ext in BLOCKED_EXTENSIONS:
         if filename.ends_with(ext):
-            print("下载被阻止 - 危险的扩展名: ", ext)
+            print("Blocked download - dangerous extension: ", ext)
             return
     
-    # 允许下载
-    print("允许下载: ", info.suggested_file_name)
+    # Download is allowed
+    print("Allowing download: ", info.suggested_file_name)
 ```
 
 ### 跟踪多个同时下载
@@ -241,7 +241,7 @@ func _on_download_requested(info: DownloadRequestInfo):
         "received_bytes": 0,
         "status": "pending"
     }
-    print("新下载 #%d: %s" % [info.id, info.suggested_file_name])
+    print("New download #%d: %s" % [info.id, info.suggested_file_name])
 
 func _on_download_updated(info: DownloadUpdateInfo):
     if not downloads.has(info.id):
@@ -253,12 +253,12 @@ func _on_download_updated(info: DownloadUpdateInfo):
     if info.is_complete:
         download.status = "complete"
         download.path = info.full_path
-        print("下载 #%d 完成" % info.id)
+        print("Download #%d complete" % info.id)
         _check_all_complete()
     
     elif info.is_canceled:
         download.status = "canceled"
-        print("下载 #%d 已取消" % info.id)
+        print("Download #%d canceled" % info.id)
         _check_all_complete()
     
     else:
@@ -311,7 +311,7 @@ const MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 const TRUSTED_DOMAINS = ["example.com", "cdn.example.com"]
 
 func _is_domain_trusted(url: String) -> bool:
-    # 从 URL 提取主机名（例如 "https://example.com/path" -> "example.com"）
+    # Extract hostname from URL (e.g. "https://example.com/path" -> "example.com")
     var start := url.find("://")
     if start == -1:
         start = 0
@@ -324,24 +324,24 @@ func _is_domain_trusted(url: String) -> bool:
     else:
         host = url.substr(start, end - start)
 
-    # 将主机名与受信任域名比较，允许子域名
+    # Compare hostname against trusted domains, allowing subdomains
     for domain in TRUSTED_DOMAINS:
         if host == domain or host.ends_with("." + domain):
             return true
     return false
 
 func is_download_safe(info: DownloadRequestInfo) -> bool:
-    # 检查文件大小
+    # Check file size
     if info.total_bytes > MAX_DOWNLOAD_SIZE:
-        push_warning("下载太大: %d 字节" % info.total_bytes)
+        push_warning("Download too large: %d bytes" % info.total_bytes)
         return false
     
-    # 使用主机名检查域名，而不是完整 URL 的子字符串
+    # Check domain using hostname, not substring of full URL
     var url = info.url
     var domain_allowed = _is_domain_trusted(url)
     
     if not domain_allowed:
-        push_warning("来自不受信任域名的下载: %s" % url)
+        push_warning("Download from untrusted domain: %s" % url)
         return false
     
     return true

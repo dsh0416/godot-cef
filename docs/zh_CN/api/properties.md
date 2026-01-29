@@ -50,7 +50,7 @@ security/allow_insecure_content=false
 或在创建任何 CefTexture 之前通过 GDScript 配置：
 
 ```gdscript
-# 在自动加载或早期加载脚本中
+# In an autoload or early-loading script
 func _init():
     ProjectSettings.set_setting("godot_cef/storage/data_path", "user://custom-cef-data")
 ```
@@ -60,11 +60,11 @@ func _init():
 `url` 属性带有副作用：当您从 GDScript 设置它时，浏览器会自动导航到新 URL：
 
 ```gdscript
-# 通过设置属性导航到新页面
+# Navigate to a new page by setting the property
 cef_texture.url = "https://example.com/game-ui"
 
-# 读取当前 URL（反映用户导航、重定向等）
-print("当前位置: ", cef_texture.url)
+# Read the current URL (reflects user navigation, redirects, etc.)
+print("Currently at: ", cef_texture.url)
 ```
 
 ## 加速离屏渲染
@@ -72,10 +72,10 @@ print("当前位置: ", cef_texture.url)
 `enable_accelerated_osr` 属性控制是否使用 GPU 加速渲染：
 
 ```gdscript
-# 启用 GPU 加速渲染（推荐以获得最佳性能）
+# Enable GPU-accelerated rendering (recommended for performance)
 cef_texture.enable_accelerated_osr = true
 
-# 使用软件渲染（不支持的平台会自动回退）
+# Use software rendering (fallback for unsupported platforms)
 cef_texture.enable_accelerated_osr = false
 ```
 

@@ -11,18 +11,18 @@ func _ready():
     cef_texture.ipc_message.connect(_on_ipc_message)
 
 func _on_ipc_message(message: String):
-    print("从网页收到: ", message)
+    print("Received from web: ", message)
     var data = JSON.parse_string(message)
-    # 处理消息...
+    # Handle the message...
 ```
 
 网页端 JavaScript（在 CEF 浏览器中运行）：
 
 ```javascript
-// 向 Godot 发送消息
+// Send a message to Godot
 window.sendIpcMessage("button_clicked");
 
-// 发送结构化数据作为 JSON
+// Send structured data as JSON
 window.sendIpcMessage(JSON.stringify({ action: "purchase", item_id: 42 }));
 ```
 
@@ -35,8 +35,8 @@ func _ready():
     cef_texture.ipc_binary_message.connect(_on_ipc_binary_message)
 
 func _on_ipc_binary_message(data: PackedByteArray):
-    print("收到二进制数据: ", data.size(), " 字节")
-    # 处理二进制数据（例如 protobuf、msgpack、原始字节）
+    print("Received binary data: ", data.size(), " bytes")
+    # Process binary data (e.g., protobuf, msgpack, raw bytes)
     var image = Image.new()
     image.load_png_from_buffer(data)
 ```
@@ -44,13 +44,13 @@ func _on_ipc_binary_message(data: PackedByteArray):
 在您的 JavaScript 中（在 CEF 浏览器中运行）：
 
 ```javascript
-// 向 Godot 发送二进制数据
+// Send binary data to Godot
 const buffer = new ArrayBuffer(8);
 const view = new Uint8Array(buffer);
-view.set([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]); // PNG 头
+view.set([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]); // PNG header
 window.sendIpcBinaryMessage(buffer);
 
-// 发送 Uint8Array（将使用其底层 ArrayBuffer）
+// Send a Uint8Array (will use its underlying ArrayBuffer)
 const data = new Uint8Array([1, 2, 3, 4, 5]);
 window.sendIpcBinaryMessage(data.buffer);
 ```
@@ -64,8 +64,8 @@ func _ready():
     cef_texture.url_changed.connect(_on_url_changed)
 
 func _on_url_changed(url: String):
-    print("导航到: ", url)
-    # 根据当前页面注入数据
+    print("Navigated to: ", url)
+    # Inject data based on the current page
     if "game-ui" in url:
         cef_texture.eval("window.playerData = %s" % JSON.stringify(player_data))
 ```
@@ -79,7 +79,7 @@ func _ready():
     cef_texture.title_changed.connect(_on_title_changed)
 
 func _on_title_changed(title: String):
-    print("页面标题: ", title)
+    print("Page title: ", title)
     $TitleLabel.text = title
 ```
 
@@ -92,7 +92,7 @@ func _ready():
     cef_texture.load_started.connect(_on_load_started)
 
 func _on_load_started(url: String):
-    print("正在加载: ", url)
+    print("Loading: ", url)
     $LoadingSpinner.visible = true
 ```
 
@@ -105,10 +105,10 @@ func _ready():
     cef_texture.load_finished.connect(_on_load_finished)
 
 func _on_load_finished(url: String, http_status_code: int):
-    print("已加载: ", url, " (状态: ", http_status_code, ")")
+    print("Loaded: ", url, " (status: ", http_status_code, ")")
     $LoadingSpinner.visible = false
     if http_status_code != 200:
-        print("警告: 页面返回状态 ", http_status_code)
+        print("Warning: Page returned status ", http_status_code)
 ```
 
 ## `load_error(url: String, error_code: int, error_text: String)`
@@ -120,9 +120,9 @@ func _ready():
     cef_texture.load_error.connect(_on_load_error)
 
 func _on_load_error(url: String, error_code: int, error_text: String):
-    print("加载失败: ", url)
-    print("错误 ", error_code, ": ", error_text)
-    # 显示错误页面或重试逻辑
+    print("Failed to load: ", url)
+    print("Error ", error_code, ": ", error_text)
+    # Show error page or retry
 ```
 
 ## `console_message(level: int, message: String, source: String, line: int)`
@@ -140,13 +140,13 @@ func _ready():
     cef_texture.console_message.connect(_on_console_message)
 
 func _on_console_message(level: int, message: String, source: String, line: int):
-    var level_names = ["调试", "信息", "警告", "错误", "致命"]
-    var level_name = level_names[level] if level < level_names.size() else "未知"
+    var level_names = ["DEBUG", "INFO", "WARNING", "ERROR", "FATAL"]
+    var level_name = level_names[level] if level < level_names.size() else "UNKNOWN"
     print("[%s] %s (%s:%d)" % [level_name, message, source, line])
     
-    # 捕获 JavaScript 错误用于调试
-    if level >= 3:  # 错误或致命
-        push_error("JS 错误: %s 在 %s:%d" % [message, source, line])
+    # Capture JavaScript errors for debugging
+    if level >= 3:  # ERROR or FATAL
+        push_error("JS Error: %s at %s:%d" % [message, source, line])
 ```
 
 ## `drag_started(drag_data: DragDataInfo, position: Vector2, allowed_ops: int)`
@@ -164,10 +164,10 @@ func _ready():
 
 func _on_drag_started(drag_data: DragDataInfo, position: Vector2, allowed_ops: int):
     if drag_data.is_link:
-        print("正在拖动链接: ", drag_data.link_url)
-        # 在游戏中开始自定义拖动处理
+        print("Dragging link: ", drag_data.link_url)
+        # Start custom drag handling in your game
     elif drag_data.is_fragment:
-        print("正在拖动文本: ", drag_data.fragment_text)
+        print("Dragging text: ", drag_data.fragment_text)
 ```
 
 ## `drag_cursor_updated(operation: int)`
@@ -202,7 +202,7 @@ func _ready():
     cef_texture.drag_entered.connect(_on_drag_entered)
 
 func _on_drag_entered(drag_data: DragDataInfo, mask: int):
-    print("拖动进入浏览器区域")
+    print("Drag entered browser area")
 ```
 
 ::: tip
@@ -227,7 +227,7 @@ func _ready():
     cef_texture.download_requested.connect(_on_download_requested)
 
 func _on_download_requested(download_info: DownloadRequestInfo):
-    print("下载: %s (%d 字节)" % [download_info.suggested_file_name, download_info.total_bytes])
+    print("Download: %s (%d bytes)" % [download_info.suggested_file_name, download_info.total_bytes])
 ```
 
 ::: tip
@@ -257,13 +257,13 @@ func _ready():
 
 func _on_download_updated(download_info: DownloadUpdateInfo):
     if download_info.is_complete:
-        print("下载完成: ", download_info.full_path)
+        print("Download complete: ", download_info.full_path)
     elif download_info.is_canceled:
-        print("下载已取消: ", download_info.url)
+        print("Download canceled: ", download_info.url)
     elif download_info.is_in_progress:
         var percent = download_info.percent_complete
         var speed_kb = download_info.current_speed / 1024.0
-        print("下载中: %d%% (%.1f KB/s)" % [percent, speed_kb])
+        print("Downloading: %d%% (%.1f KB/s)" % [percent, speed_kb])
 ```
 
 ## 信号使用模式
@@ -283,19 +283,19 @@ func _ready():
 
 func _on_load_started(url: String):
     loading_indicator.visible = true
-    print("开始加载: ", url)
+    print("Started loading: ", url)
 
 func _on_load_finished(url: String, status: int):
     loading_indicator.visible = false
     if status == 200:
-        print("成功加载: ", url)
+        print("Successfully loaded: ", url)
     else:
-        print("加载状态: ", status)
+        print("Loaded with status: ", status)
 
 func _on_load_error(url: String, error_code: int, error_text: String):
     loading_indicator.visible = false
-    print("加载 ", url, " 失败: ", error_text)
-    # 可以在这里显示错误页面或重试逻辑
+    print("Failed to load ", url, ": ", error_text)
+    # Could show error page or retry logic here
 ```
 
 ### IPC 通信
@@ -318,7 +318,7 @@ func _handle_web_message(message: String):
         "game_state":
             _update_game_state(data)
 
-# 向 Web UI 发送消息
+# Send messages to web UI
 func send_to_web_ui(action: String, payload: Dictionary):
     var message = {"type": action, "data": payload}
     browser.send_ipc_message(JSON.stringify(message))

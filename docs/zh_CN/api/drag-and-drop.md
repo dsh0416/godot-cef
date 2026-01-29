@@ -95,7 +95,7 @@ func _ready():
     cef_texture.url = "https://example.com/upload"
 
 func _can_drop_data(at_position: Vector2, data) -> bool:
-    # 接受文件路径数组
+    # Accept arrays of file paths
     if data is Array:
         cef_texture.drag_enter(data, at_position, DragOperation.COPY)
         is_dragging = true
@@ -107,7 +107,7 @@ func _drop_data(at_position: Vector2, data):
     is_dragging = false
 
 func _notification(what):
-    # 处理拖动离开控件
+    # Handle drag leaving the control
     if what == NOTIFICATION_DRAG_END and is_dragging:
         cef_texture.drag_leave()
         is_dragging = false
@@ -128,16 +128,16 @@ func _ready():
     cef_texture.drag_started.connect(_on_drag_started)
 
 func _on_drag_started(drag_data: DragDataInfo, position: Vector2, allowed_ops: int):
-    print("拖动开始于: ", position)
+    print("Drag started at: ", position)
     
     if drag_data.is_link:
-        print("正在拖动链接: ", drag_data.link_url)
-        # 为拖动的链接创建预览
+        print("Dragging link: ", drag_data.link_url)
+        # Create a preview for the dragged link
         start_custom_drag(drag_data.link_url, drag_data.link_title)
     elif drag_data.is_file:
-        print("正在拖动文件: ", drag_data.file_names)
+        print("Dragging files: ", drag_data.file_names)
     elif drag_data.is_fragment:
-        print("正在拖动文本: ", drag_data.fragment_text)
+        print("Dragging text: ", drag_data.fragment_text)
 ```
 
 #### `drag_cursor_updated(operation: int)`
@@ -167,7 +167,7 @@ func _ready():
     cef_texture.drag_entered.connect(_on_drag_entered)
 
 func _on_drag_entered(drag_data: DragDataInfo, mask: int):
-    print("外部拖动进入，操作掩码: ", mask)
+    print("External drag entered with ops mask: ", mask)
 ```
 
 ### 通知 CEF 浏览器拖动结束
@@ -212,14 +212,14 @@ func _notification(what):
 extends Control
 
 @onready var cef_texture = $CefTexture
-@onready var inventory = $Inventory  # 您游戏的物品栏系统
+@onready var inventory = $Inventory  # Your game's inventory system
 
 var browser_drag_data: DragDataInfo = null
 
 func _ready():
     cef_texture.url = "https://game-shop.example.com"
     
-    # 连接拖动信号
+    # Connect to drag signals
     cef_texture.drag_started.connect(_on_drag_started)
     cef_texture.drag_cursor_updated.connect(_on_drag_cursor_updated)
 
@@ -227,12 +227,12 @@ func _on_drag_started(drag_data: DragDataInfo, position: Vector2, allowed_ops: i
     browser_drag_data = drag_data
     
     if drag_data.is_link:
-        # 用户正在将商店物品链接拖到游戏中
+        # User is dragging a shop item link into the game
         var preview = _create_item_preview(drag_data.link_url)
         force_drag(drag_data, preview)
 
 func _on_drag_cursor_updated(operation: int):
-    # 根据放置目标有效性更新光标
+    # Update cursor based on drop target validity
     if operation == DragOperation.NONE:
         $DragPreview.modulate = Color.RED
     else:
@@ -243,7 +243,7 @@ func _create_item_preview(url: String) -> Control:
     preview.texture = preload("res://icons/item_placeholder.png")
     return preview
 
-# 在物品栏槽位的 _can_drop_data 中：
+# In your inventory slot's _can_drop_data:
 func _can_drop_data(at_position: Vector2, data) -> bool:
     if data is DragDataInfo and data.is_link:
         return _is_valid_shop_item(data.link_url)

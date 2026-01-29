@@ -27,7 +27,7 @@ Godot CEF 支持两种处理浏览器音频的模式：
 4. 每帧将缓冲的音频推送到播放器
 
 ```
-[CEF 浏览器] → [音频处理器] → [缓冲队列] → [AudioStreamGenerator] → [AudioStreamPlayer]
+[CEF Browser] → [Audio Handler] → [Buffer Queue] → [AudioStreamGenerator] → [AudioStreamPlayer]
 ```
 
 ## 基本用法
@@ -39,15 +39,15 @@ extends Control
 @onready var audio_player: AudioStreamPlayer = $AudioStreamPlayer
 
 func _ready():
-    # 检查项目设置中是否启用了音频捕获
+    # Check if audio capture is enabled in project settings
     if cef_texture.is_audio_capture_enabled():
-        # 创建并分配音频流
+        # Create and assign the audio stream
         var audio_stream = cef_texture.create_audio_stream()
         audio_player.stream = audio_stream
         audio_player.play()
 
 func _process(_delta):
-    # 每帧推送音频数据
+    # Push audio data every frame
     if cef_texture.is_audio_capture_enabled():
         var playback = audio_player.get_stream_playback()
         if playback:
@@ -64,7 +64,7 @@ func _process(_delta):
 
 ```gdscript
 if cef_texture.is_audio_capture_enabled():
-    print("音频捕获已启用")
+    print("Audio capture is enabled")
 ```
 
 #### `create_audio_stream() -> AudioStreamGenerator`
@@ -99,7 +99,7 @@ func _process(_delta):
 
 ```gdscript
 if cef_texture.has_audio_data():
-    print("有可用的音频数据")
+    print("Audio data available")
 ```
 
 #### `get_audio_buffer_size() -> int`
@@ -108,7 +108,7 @@ if cef_texture.has_audio_data():
 
 ```gdscript
 var buffer_size = cef_texture.get_audio_buffer_size()
-print("缓冲数据包: ", buffer_size)
+print("Buffered packets: ", buffer_size)
 ```
 
 ## 高级用法
@@ -173,7 +173,7 @@ func _process(_delta):
 3. 将您的 AudioStreamPlayer 设置为使用该总线
 
 ```gdscript
-audio_player.bus = "BrowserAudio"  # 带有效果的自定义总线
+audio_player.bus = "BrowserAudio"  # Custom bus with effects
 ```
 
 ## 对比：直接播放 vs 音频捕获

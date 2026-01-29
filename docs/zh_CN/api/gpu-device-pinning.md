@@ -31,23 +31,23 @@ Godot CEF 使用 Chromium 的 `--gpu-vendor-id` 和 `--gpu-device-id` 命令行�
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Godot 进程                                │
+│                        Godot Process                            │
 │                                                                 │
-│  1. 查询 RenderingDevice 获取 GPU 供应商/设备 ID                   │
-│     - Windows D3D12: DXGI 适配器描述                              │
-│     - Windows/Linux Vulkan: VkPhysicalDeviceProperties           │
-│     - macOS Metal: IOKit 注册表属性                               │
+│  1. Query RenderingDevice for GPU vendor/device IDs             │
+│     - Windows D3D12: DXGI adapter description                   │
+│     - Windows/Linux Vulkan: VkPhysicalDeviceProperties          │
+│     - macOS Metal: IOKit registry properties                    │
 │                                                                 │
-│  2. 通过命令行开关将 ID 传递给 CEF 子进程                           │
+│  2. Pass IDs to CEF subprocesses via command-line switches      │
 │     --gpu-vendor-id=4318 --gpu-device-id=7815                   │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     CEF 子进程                                   │
+│                     CEF Subprocess                              │
 │                                                                 │
-│  Chromium 的 GPU 进程使用供应商/设备 ID 来选择                      │
-│  匹配的 GPU 适配器进行渲染                                         │
+│  Chromium's GPU process uses the vendor/device IDs to select    │
+│  the matching GPU adapter for rendering                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -65,7 +65,7 @@ Godot CEF 使用 Chromium 的 `--gpu-vendor-id` 和 `--gpu-device-id` 命令行�
 **步骤 1：** 在 CEF 初始化期间，Godot CEF 查询 GPU ID：
 
 ```rust
-// 在 gdcef/src/cef_init.rs 中
+// In gdcef/src/cef_init.rs
 use crate::accelerated_osr::get_godot_gpu_device_ids;
 if let Some((vendor_id, device_id)) = get_godot_gpu_device_ids() {
     osr_app = osr_app.with_gpu_device_ids(vendor_id, device_id);
@@ -75,15 +75,15 @@ if let Some((vendor_id, device_id)) = get_godot_gpu_device_ids() {
 **步骤 2：** ID 在 `on_before_child_process_launch` 中传递给 CEF 子进程：
 
 ```rust
-// 在 cef_app/src/lib.rs 中
+// In cef_app/src/lib.rs
 if let Some(ids) = &self.handler.gpu_device_ids {
     command_line.append_switch_with_value(
         Some(&"gpu-vendor-id".into()),
-        Some(&ids.to_vendor_arg().as_str().into()),  // 例如 "4318"（十进制）
+        Some(&ids.to_vendor_arg().as_str().into()),  // e.g., "4318" (decimal)
     );
     command_line.append_switch_with_value(
         Some(&"gpu-device-id".into()),
-        Some(&ids.to_device_arg().as_str().into()),  // 例如 "7815"（十进制）
+        Some(&ids.to_device_arg().as_str().into()),  // e.g., "7815" (decimal)
     );
 }
 ```

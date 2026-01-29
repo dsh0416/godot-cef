@@ -43,14 +43,14 @@ CefTexture 为网页内容中的文本输入提供自动输入法（IME）支持
 3. 用户可以正常与 CefTexture 节点交互
 
 ```gdscript
-# 输入法无需特殊设置
+# No special setup needed for IME
 extends Control
 
 @onready var browser = $CefTexture
 
 func _ready():
-    browser.url = "https://example.com/form"  # 带有文本输入的页面
-    # 当用户点击输入字段时，输入法将自动工作
+    browser.url = "https://example.com/form"  # Page with text inputs
+    # IME will work automatically when users click on input fields
 ```
 
 ## 支持的元素类型
