@@ -57,6 +57,8 @@ pub fn register_project_settings() {
         &mut settings,
         SETTING_REMOTE_DEVTOOLS_PORT,
         DEFAULT_REMOTE_DEVTOOLS_PORT,
+        PropertyHint::RANGE,
+        "1,65535",
     );
 }
 
@@ -106,7 +108,13 @@ fn register_bool_setting(settings: &mut Gd<ProjectSettings>, name: &str, default
     settings.add_property_info(&property_info);
 }
 
-fn register_int_setting(settings: &mut Gd<ProjectSettings>, name: &str, default: i64) {
+fn register_int_setting(
+    settings: &mut Gd<ProjectSettings>,
+    name: &str,
+    default: i64,
+    hint: PropertyHint,
+    hint_string: &str,
+) {
     let name_gstring: GString = name.into();
 
     if !settings.has_setting(&name_gstring) {
@@ -119,8 +127,8 @@ fn register_int_setting(settings: &mut Gd<ProjectSettings>, name: &str, default:
     let property_info = vdict! {
         "name": name_gstring.clone(),
         "type": VariantType::INT.ord(),
-        "hint": PropertyHint::NONE.ord(),
-        "hint_string": "",
+        "hint": hint.ord(),
+        "hint_string": hint_string,
     };
 
     settings.add_property_info(&property_info);
