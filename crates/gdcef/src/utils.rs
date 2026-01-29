@@ -207,22 +207,3 @@ fn get_executable_paths() -> CefResult<Vec<PathBuf>> {
 
     Ok(paths)
 }
-
-/// Attempts to acquire a mutex lock, logging a warning on failure.
-macro_rules! try_lock {
-    ($mutex:expr, $context:literal) => {
-        match $mutex.lock() {
-            Ok(guard) => Some(guard),
-            Err(e) => {
-                godot::global::godot_warn!(
-                    "[CefTexture] Failed to acquire lock for {}: {}",
-                    $context,
-                    e
-                );
-                None
-            }
-        }
-    };
-}
-
-pub(crate) use try_lock;

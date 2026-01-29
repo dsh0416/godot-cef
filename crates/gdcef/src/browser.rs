@@ -13,18 +13,6 @@ use std::sync::{Arc, Mutex};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use crate::accelerated_osr::AcceleratedRenderState;
 
-/// Queue for IPC messages from the browser to Godot.
-pub type MessageQueue = Arc<Mutex<VecDeque<String>>>;
-
-/// Queue for binary IPC messages from the browser to Godot.
-pub type BinaryMessageQueue = Arc<Mutex<VecDeque<Vec<u8>>>>;
-
-/// Queue for URL change notifications from the browser to Godot.
-pub type UrlChangeQueue = Arc<Mutex<VecDeque<String>>>;
-
-/// Queue for title change notifications from the browser to Godot.
-pub type TitleChangeQueue = Arc<Mutex<VecDeque<String>>>;
-
 /// Represents a loading state event from the browser.
 #[derive(Debug, Clone)]
 pub enum LoadingStateEvent {
@@ -40,9 +28,6 @@ pub enum LoadingStateEvent {
     },
 }
 
-/// Queue for loading state events from the browser to Godot.
-pub type LoadingStateQueue = Arc<Mutex<VecDeque<LoadingStateEvent>>>;
-
 /// IME composition range info for caret positioning.
 #[derive(Clone, Copy, Debug)]
 pub struct ImeCompositionRange {
@@ -54,10 +39,6 @@ pub struct ImeCompositionRange {
     pub caret_height: i32,
 }
 
-pub type ImeEnableQueue = Arc<Mutex<VecDeque<bool>>>;
-/// Shared state for IME composition range.
-pub type ImeCompositionQueue = Arc<Mutex<Option<ImeCompositionRange>>>;
-
 #[derive(Debug, Clone)]
 pub struct ConsoleMessageEvent {
     pub level: u32,
@@ -65,9 +46,6 @@ pub struct ConsoleMessageEvent {
     pub source: String,
     pub line: i32,
 }
-
-/// Queue for console messages from the browser to Godot.
-pub type ConsoleMessageQueue = Arc<Mutex<VecDeque<ConsoleMessageEvent>>>;
 
 #[derive(Debug, Clone, Default)]
 pub struct DragDataInfo {
@@ -98,35 +76,6 @@ pub enum DragEvent {
     },
 }
 
-pub type DragEventQueue = Arc<Mutex<VecDeque<DragEvent>>>;
-
-/// Audio parameters from CEF audio stream.
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub struct AudioParameters {
-    pub channels: i32,
-    pub sample_rate: i32,
-    pub frames_per_buffer: i32,
-}
-
-/// Audio packet containing interleaved stereo f32 PCM data from CEF.
-#[derive(Clone)]
-#[allow(dead_code)]
-pub struct AudioPacket {
-    pub data: Vec<f32>,
-    pub frames: i32,
-    pub pts: i64,
-}
-
-/// Queue for audio packets from the browser to Godot.
-pub type AudioPacketQueue = Arc<Mutex<VecDeque<AudioPacket>>>;
-
-/// Shared audio parameters from CEF.
-pub type AudioParamsState = Arc<Mutex<Option<AudioParameters>>>;
-
-/// Shared sample rate for audio capture.
-pub type AudioSampleRateState = Arc<Mutex<i32>>;
-
 #[derive(Debug, Clone)]
 pub struct DownloadRequestEvent {
     pub id: u32,
@@ -151,8 +100,73 @@ pub struct DownloadUpdateEvent {
     pub is_canceled: bool,
 }
 
-pub type DownloadRequestQueue = Arc<Mutex<VecDeque<DownloadRequestEvent>>>;
-pub type DownloadUpdateQueue = Arc<Mutex<VecDeque<DownloadUpdateEvent>>>;
+/// Consolidated event queues for browser-to-Godot communication.
+///
+/// All UI-thread callbacks write to this single structure, which is then
+/// drained once per frame in `on_process`. This reduces lock overhead
+/// compared to having separate `Arc<Mutex<...>>` for each queue.
+#[derive(Default)]
+pub struct EventQueues {
+    /// IPC messages from the browser (string).
+    pub messages: VecDeque<String>,
+    /// Binary IPC messages from the browser.
+    pub binary_messages: VecDeque<Vec<u8>>,
+    /// URL change notifications.
+    pub url_changes: VecDeque<String>,
+    /// Title change notifications.
+    pub title_changes: VecDeque<String>,
+    /// Loading state events.
+    pub loading_states: VecDeque<LoadingStateEvent>,
+    /// IME enable/disable requests.
+    pub ime_enables: VecDeque<bool>,
+    /// IME composition range (latest value wins).
+    pub ime_composition_range: Option<ImeCompositionRange>,
+    /// Console messages.
+    pub console_messages: VecDeque<ConsoleMessageEvent>,
+    /// Drag events.
+    pub drag_events: VecDeque<DragEvent>,
+    /// Download request events.
+    pub download_requests: VecDeque<DownloadRequestEvent>,
+    /// Download update events.
+    pub download_updates: VecDeque<DownloadUpdateEvent>,
+}
+
+impl EventQueues {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// Shared handle to consolidated event queues.
+pub type EventQueuesHandle = Arc<Mutex<EventQueues>>;
+
+/// Audio parameters from CEF audio stream.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct AudioParameters {
+    pub channels: i32,
+    pub sample_rate: i32,
+    pub frames_per_buffer: i32,
+}
+
+/// Audio packet containing interleaved stereo f32 PCM data from CEF.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct AudioPacket {
+    pub data: Vec<f32>,
+    pub frames: i32,
+    pub pts: i64,
+}
+
+/// Queue for audio packets from the browser to Godot.
+/// Kept separate because audio callbacks may run on different threads.
+pub type AudioPacketQueue = Arc<Mutex<VecDeque<AudioPacket>>>;
+
+/// Shared audio parameters from CEF.
+pub type AudioParamsState = Arc<Mutex<Option<AudioParameters>>>;
+
+/// Shared sample rate for audio capture.
+pub type AudioSampleRateState = Arc<Mutex<i32>>;
 
 /// Shutdown flag for audio handler to suppress errors during cleanup.
 pub type AudioShutdownFlag = Arc<AtomicBool>;
@@ -208,34 +222,17 @@ pub struct App {
     pub cursor_type: Option<Arc<Mutex<CursorType>>>,
     /// Shared popup state for <select> dropdowns.
     pub popup_state: Option<PopupStateQueue>,
-    /// Queue for IPC messages from the browser.
-    pub message_queue: Option<MessageQueue>,
-    /// Queue for binary IPC messages from the browser.
-    pub binary_message_queue: Option<BinaryMessageQueue>,
-    /// Queue for URL change notifications from the browser.
-    pub url_change_queue: Option<UrlChangeQueue>,
-    /// Queue for title change notifications from the browser.
-    pub title_change_queue: Option<TitleChangeQueue>,
-    /// Queue for loading state events from the browser.
-    pub loading_state_queue: Option<LoadingStateQueue>,
-    /// Queue for IME enable/disable requests.
-    pub ime_enable_queue: Option<ImeEnableQueue>,
-    /// Shared IME composition range for caret positioning.
-    pub ime_composition_range: Option<ImeCompositionQueue>,
-    /// Queue for console messages from the browser.
-    pub console_message_queue: Option<ConsoleMessageQueue>,
-    /// Queue for drag events from the browser.
-    pub drag_event_queue: Option<DragEventQueue>,
+    /// Consolidated event queues for browser-to-Godot communication.
+    pub event_queues: Option<EventQueuesHandle>,
     /// Current drag state for this browser.
     pub drag_state: DragState,
     /// Queue for audio packets from the browser.
+    /// Kept separate because audio callbacks may run on different threads.
     pub audio_packet_queue: Option<AudioPacketQueue>,
     /// Shared audio parameters from CEF.
     pub audio_params: Option<AudioParamsState>,
     /// Shared sample rate configuration (from Godot's AudioServer).
     pub audio_sample_rate: Option<AudioSampleRateState>,
-    pub download_request_queue: Option<DownloadRequestQueue>,
-    pub download_update_queue: Option<DownloadUpdateQueue>,
     /// Shutdown flag for audio handler to suppress errors during cleanup.
     pub audio_shutdown_flag: Option<AudioShutdownFlag>,
 }

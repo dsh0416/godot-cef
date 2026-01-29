@@ -189,18 +189,9 @@ impl CefTexture {
 
         self.request_external_begin_frame();
         self.update_cursor();
-        self.process_message_queue();
-        self.process_binary_message_queue();
-        self.process_url_change_queue();
-        self.process_title_change_queue();
-        self.process_loading_state_queue();
-        self.process_console_message_queue();
-        self.process_drag_event_queue();
-        self.process_download_request_queue();
-        self.process_download_update_queue();
-        self.process_ime_enable_queue();
-        self.process_ime_composition_queue();
-        self.process_ime_position();
+
+        // Process all event queues with a single lock (more efficient than per-queue locks)
+        self.process_all_event_queues();
     }
 
     fn handle_input_event(&mut self, event: Gd<InputEvent>) {

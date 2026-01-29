@@ -7,53 +7,37 @@ use wide::{i8x16, u8x16};
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
-    BinaryMessageQueue, ConsoleMessageEvent, ConsoleMessageQueue, DownloadRequestEvent,
-    DownloadRequestQueue, DownloadUpdateEvent, DownloadUpdateQueue, DragDataInfo, DragEvent,
-    DragEventQueue, ImeCompositionQueue, ImeCompositionRange, ImeEnableQueue, LoadingStateEvent,
-    LoadingStateQueue, MessageQueue, TitleChangeQueue, UrlChangeQueue,
+    ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo, DragEvent,
+    EventQueues, EventQueuesHandle, ImeCompositionRange, LoadingStateEvent,
 };
 use crate::utils::get_display_scale_factor;
 
-/// Bundles all the event queues used for browser-to-Godot communication.
+/// Bundles all the event queues and audio state used for browser-to-Godot communication.
 pub(crate) struct ClientQueues {
-    pub message_queue: MessageQueue,
-    pub binary_message_queue: BinaryMessageQueue,
-    pub url_change_queue: UrlChangeQueue,
-    pub title_change_queue: TitleChangeQueue,
-    pub loading_state_queue: LoadingStateQueue,
-    pub ime_enable_queue: ImeEnableQueue,
-    pub ime_composition_queue: ImeCompositionQueue,
-    pub console_message_queue: ConsoleMessageQueue,
-    pub drag_event_queue: DragEventQueue,
+    /// Consolidated event queues (UI-thread callbacks).
+    pub event_queues: EventQueuesHandle,
+    /// Audio packet queue (may be called from audio thread).
     pub audio_packet_queue: AudioPacketQueue,
+    /// Audio parameters state.
     pub audio_params: AudioParamsState,
+    /// Audio sample rate.
     pub audio_sample_rate: AudioSampleRateState,
+    /// Audio shutdown flag.
     pub audio_shutdown_flag: AudioShutdownFlag,
+    /// Whether audio capture is enabled.
     pub enable_audio_capture: bool,
-    pub download_request_queue: DownloadRequestQueue,
-    pub download_update_queue: DownloadUpdateQueue,
 }
 
 impl ClientQueues {
     pub fn new(sample_rate: i32, enable_audio_capture: bool) -> Self {
         use std::sync::atomic::AtomicBool;
         Self {
-            message_queue: Arc::new(Mutex::new(VecDeque::new())),
-            binary_message_queue: Arc::new(Mutex::new(VecDeque::new())),
-            url_change_queue: Arc::new(Mutex::new(VecDeque::new())),
-            title_change_queue: Arc::new(Mutex::new(VecDeque::new())),
-            loading_state_queue: Arc::new(Mutex::new(VecDeque::new())),
-            ime_enable_queue: Arc::new(Mutex::new(VecDeque::new())),
-            ime_composition_queue: Arc::new(Mutex::new(None)),
-            console_message_queue: Arc::new(Mutex::new(VecDeque::new())),
-            drag_event_queue: Arc::new(Mutex::new(VecDeque::new())),
+            event_queues: Arc::new(Mutex::new(EventQueues::new())),
             audio_packet_queue: Arc::new(Mutex::new(VecDeque::new())),
             audio_params: Arc::new(Mutex::new(None)),
             audio_sample_rate: Arc::new(Mutex::new(sample_rate)),
             audio_shutdown_flag: Arc::new(AtomicBool::new(false)),
             enable_audio_capture,
-            download_request_queue: Arc::new(Mutex::new(VecDeque::new())),
-            download_update_queue: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 }
@@ -166,12 +150,12 @@ fn handle_start_dragging(
     allowed_ops: DragOperationsMask,
     x: ::std::os::raw::c_int,
     y: ::std::os::raw::c_int,
-    drag_event_queue: &DragEventQueue,
+    event_queues: &EventQueuesHandle,
 ) -> ::std::os::raw::c_int {
     if let Some(drag_data) = drag_data {
         let drag_info = extract_drag_data_info(drag_data);
-        if let Ok(mut queue) = drag_event_queue.lock() {
-            queue.push_back(DragEvent::Started {
+        if let Ok(mut queues) = event_queues.lock() {
+            queues.drag_events.push_back(DragEvent::Started {
                 drag_data: drag_info,
                 x,
                 y,
@@ -183,9 +167,9 @@ fn handle_start_dragging(
 }
 
 /// Common helper for update_drag_cursor implementation.
-fn handle_update_drag_cursor(operation: DragOperationsMask, drag_event_queue: &DragEventQueue) {
-    if let Ok(mut queue) = drag_event_queue.lock() {
-        queue.push_back(DragEvent::UpdateCursor {
+fn handle_update_drag_cursor(operation: DragOperationsMask, event_queues: &EventQueuesHandle) {
+    if let Ok(mut queues) = event_queues.lock() {
+        queues.drag_events.push_back(DragEvent::UpdateCursor {
             operation: drag_ops_to_u32(operation),
         });
     }
@@ -194,8 +178,7 @@ fn handle_update_drag_cursor(operation: DragOperationsMask, drag_event_queue: &D
 wrap_render_handler! {
     pub struct SoftwareOsrHandler {
         handler: cef_app::OsrRenderHandler,
-        ime_composition_queue: ImeCompositionQueue,
-        drag_event_queue: DragEventQueue,
+        event_queues: EventQueuesHandle,
     }
 
     impl RenderHandler {
@@ -274,8 +257,8 @@ wrap_render_handler! {
             character_bounds: Option<&[Rect]>,
         ) {
             if let Some(bounds) = character_bounds.and_then(|b| b.last())
-                && let Ok(mut queue) = self.ime_composition_queue.lock() {
-                    *queue = Some(ImeCompositionRange {
+                && let Ok(mut queues) = self.event_queues.lock() {
+                    queues.ime_composition_range = Some(ImeCompositionRange {
                         caret_x: bounds.x,
                         caret_y: bounds.y,
                         caret_height: bounds.height,
@@ -291,7 +274,7 @@ wrap_render_handler! {
             x: ::std::os::raw::c_int,
             y: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
-            handle_start_dragging(drag_data, allowed_ops, x, y, &self.drag_event_queue)
+            handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues)
         }
 
         fn update_drag_cursor(
@@ -299,7 +282,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             operation: DragOperationsMask,
         ) {
-            handle_update_drag_cursor(operation, &self.drag_event_queue);
+            handle_update_drag_cursor(operation, &self.event_queues);
         }
     }
 }
@@ -307,18 +290,16 @@ wrap_render_handler! {
 impl SoftwareOsrHandler {
     pub fn build(
         handler: cef_app::OsrRenderHandler,
-        ime_composition_queue: ImeCompositionQueue,
-        drag_event_queue: DragEventQueue,
+        event_queues: EventQueuesHandle,
     ) -> cef::RenderHandler {
-        Self::new(handler, ime_composition_queue, drag_event_queue)
+        Self::new(handler, event_queues)
     }
 }
 
 wrap_render_handler! {
     pub struct AcceleratedOsrHandler {
         handler: PlatformAcceleratedRenderHandler,
-        ime_composition_queue: ImeCompositionQueue,
-        drag_event_queue: DragEventQueue,
+        event_queues: EventQueuesHandle,
     }
 
     impl RenderHandler {
@@ -404,8 +385,8 @@ wrap_render_handler! {
             character_bounds: Option<&[Rect]>,
         ) {
             if let Some(bounds) = character_bounds.and_then(|b| b.last())
-                && let Ok(mut queue) = self.ime_composition_queue.lock() {
-                    *queue = Some(ImeCompositionRange {
+                && let Ok(mut queues) = self.event_queues.lock() {
+                    queues.ime_composition_range = Some(ImeCompositionRange {
                         caret_x: bounds.x,
                         caret_y: bounds.y,
                         caret_height: bounds.height,
@@ -421,7 +402,7 @@ wrap_render_handler! {
             x: ::std::os::raw::c_int,
             y: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
-            handle_start_dragging(drag_data, allowed_ops, x, y, &self.drag_event_queue)
+            handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues)
         }
 
         fn update_drag_cursor(
@@ -429,7 +410,7 @@ wrap_render_handler! {
             _browser: Option<&mut Browser>,
             operation: DragOperationsMask,
         ) {
-            handle_update_drag_cursor(operation, &self.drag_event_queue);
+            handle_update_drag_cursor(operation, &self.event_queues);
         }
     }
 }
@@ -437,10 +418,9 @@ wrap_render_handler! {
 impl AcceleratedOsrHandler {
     pub fn build(
         handler: PlatformAcceleratedRenderHandler,
-        ime_composition_queue: ImeCompositionQueue,
-        drag_event_queue: DragEventQueue,
+        event_queues: EventQueuesHandle,
     ) -> cef::RenderHandler {
-        Self::new(handler, ime_composition_queue, drag_event_queue)
+        Self::new(handler, event_queues)
     }
 }
 
@@ -540,7 +520,7 @@ fn extract_drag_data_info(drag_data: &impl ImplDragData) -> DragDataInfo {
 
 wrap_drag_handler! {
     pub(crate) struct DragHandlerImpl {
-        drag_event_queue: DragEventQueue,
+        event_queues: EventQueuesHandle,
     }
 
     impl DragHandler {
@@ -552,13 +532,13 @@ wrap_drag_handler! {
         ) -> ::std::os::raw::c_int {
             if let Some(drag_data) = drag_data {
                 let drag_info = extract_drag_data_info(drag_data);
-                if let Ok(mut queue) = self.drag_event_queue.lock() {
+                if let Ok(mut queues) = self.event_queues.lock() {
                     #[cfg(target_os = "windows")]
                     let mask: u32 = mask.as_ref().0 as u32;
                     #[cfg(not(target_os = "windows"))]
                     let mask: u32 = mask.as_ref().0;
 
-                    queue.push_back(DragEvent::Entered {
+                    queues.drag_events.push_back(DragEvent::Entered {
                         drag_data: drag_info,
                         mask,
                     });
@@ -570,17 +550,15 @@ wrap_drag_handler! {
 }
 
 impl DragHandlerImpl {
-    pub fn build(drag_event_queue: DragEventQueue) -> cef::DragHandler {
-        Self::new(drag_event_queue)
+    pub fn build(event_queues: EventQueuesHandle) -> cef::DragHandler {
+        Self::new(event_queues)
     }
 }
 
 wrap_display_handler! {
     pub(crate) struct DisplayHandlerImpl {
         cursor_type: Arc<Mutex<CursorType>>,
-        url_change_queue: UrlChangeQueue,
-        title_change_queue: TitleChangeQueue,
-        console_message_queue: ConsoleMessageQueue,
+        event_queues: EventQueuesHandle,
     }
 
     impl DisplayHandler {
@@ -625,8 +603,8 @@ wrap_display_handler! {
         ) {
             if let Some(url) = url {
                 let url_str = url.to_string();
-                if let Ok(mut queue) = self.url_change_queue.lock() {
-                    queue.push_back(url_str);
+                if let Ok(mut queues) = self.event_queues.lock() {
+                    queues.url_changes.push_back(url_str);
                 }
             }
         }
@@ -638,8 +616,8 @@ wrap_display_handler! {
         ) {
             if let Some(title) = title {
                 let title_str = title.to_string();
-                if let Ok(mut queue) = self.title_change_queue.lock() {
-                    queue.push_back(title_str);
+                if let Ok(mut queues) = self.event_queues.lock() {
+                    queues.title_changes.push_back(title_str);
                 }
             }
         }
@@ -659,8 +637,8 @@ wrap_display_handler! {
             #[cfg(not(target_os = "windows"))]
             let level: u32 = level.get_raw();
 
-            if let Ok(mut queue) = self.console_message_queue.lock() {
-                queue.push_back(ConsoleMessageEvent {
+            if let Ok(mut queues) = self.event_queues.lock() {
+                queues.console_messages.push_back(ConsoleMessageEvent {
                     level,
                     message: message_str,
                     source: source_str,
@@ -677,16 +655,9 @@ wrap_display_handler! {
 impl DisplayHandlerImpl {
     pub fn build(
         cursor_type: Arc<Mutex<CursorType>>,
-        url_change_queue: UrlChangeQueue,
-        title_change_queue: TitleChangeQueue,
-        console_message_queue: ConsoleMessageQueue,
+        event_queues: EventQueuesHandle,
     ) -> cef::DisplayHandler {
-        Self::new(
-            cursor_type,
-            url_change_queue,
-            title_change_queue,
-            console_message_queue,
-        )
+        Self::new(cursor_type, event_queues)
     }
 }
 
@@ -748,7 +719,7 @@ impl LifeSpanHandlerImpl {
 
 wrap_load_handler! {
     pub(crate) struct LoadHandlerImpl {
-        loading_state_queue: LoadingStateQueue,
+        event_queues: EventQueuesHandle,
     }
 
     impl LoadHandler {
@@ -762,8 +733,8 @@ wrap_load_handler! {
                 && frame.is_main() != 0
             {
                 let url = CefStringUtf16::from(&frame.url()).to_string();
-                if let Ok(mut queue) = self.loading_state_queue.lock() {
-                    queue.push_back(LoadingStateEvent::Started { url });
+                if let Ok(mut queues) = self.event_queues.lock() {
+                    queues.loading_states.push_back(LoadingStateEvent::Started { url });
                 }
             }
         }
@@ -778,8 +749,8 @@ wrap_load_handler! {
                 && frame.is_main() != 0
             {
                 let url = CefStringUtf16::from(&frame.url()).to_string();
-                if let Ok(mut queue) = self.loading_state_queue.lock() {
-                    queue.push_back(LoadingStateEvent::Finished {
+                if let Ok(mut queues) = self.event_queues.lock() {
+                    queues.loading_states.push_back(LoadingStateEvent::Finished {
                         url,
                         http_status_code,
                     });
@@ -806,8 +777,8 @@ wrap_load_handler! {
                     .unwrap_or_default();
                 // Use the get_raw() method to safely convert Errorcode to i32
                 let error_code_i32: i32 = error_code.get_raw();
-                if let Ok(mut queue) = self.loading_state_queue.lock() {
-                    queue.push_back(LoadingStateEvent::Error {
+                if let Ok(mut queues) = self.event_queues.lock() {
+                    queues.loading_states.push_back(LoadingStateEvent::Error {
                         url,
                         error_code: error_code_i32,
                         error_text,
@@ -819,8 +790,8 @@ wrap_load_handler! {
 }
 
 impl LoadHandlerImpl {
-    pub fn build(loading_state_queue: LoadingStateQueue) -> cef::LoadHandler {
-        Self::new(loading_state_queue)
+    pub fn build(event_queues: EventQueuesHandle) -> cef::LoadHandler {
+        Self::new(event_queues)
     }
 }
 
@@ -964,8 +935,7 @@ impl AudioHandlerImpl {
 
 wrap_download_handler! {
     pub(crate) struct DownloadHandlerImpl {
-        download_request_queue: DownloadRequestQueue,
-        download_update_queue: DownloadUpdateQueue,
+        event_queues: EventQueuesHandle,
     }
 
     impl DownloadHandler {
@@ -995,8 +965,8 @@ wrap_download_handler! {
                 let total_bytes = item.total_bytes();
                 let id = item.id();
 
-                if let Ok(mut queue) = self.download_request_queue.lock() {
-                    queue.push_back(DownloadRequestEvent {
+                if let Ok(mut queues) = self.event_queues.lock() {
+                    queues.download_requests.push_back(DownloadRequestEvent {
                         id,
                         url,
                         original_url,
@@ -1032,8 +1002,8 @@ wrap_download_handler! {
                 let is_complete = item.is_complete() != 0;
                 let is_canceled = item.is_canceled() != 0;
 
-                if let Ok(mut queue) = self.download_update_queue.lock() {
-                    queue.push_back(DownloadUpdateEvent {
+                if let Ok(mut queues) = self.event_queues.lock() {
+                    queues.download_updates.push_back(DownloadUpdateEvent {
                         id,
                         url,
                         full_path,
@@ -1052,11 +1022,8 @@ wrap_download_handler! {
 }
 
 impl DownloadHandlerImpl {
-    pub fn build(
-        download_request_queue: DownloadRequestQueue,
-        download_update_queue: DownloadUpdateQueue,
-    ) -> cef::DownloadHandler {
-        Self::new(download_request_queue, download_update_queue)
+    pub fn build(event_queues: EventQueuesHandle) -> cef::DownloadHandler {
+        Self::new(event_queues)
     }
 }
 
@@ -1069,8 +1036,8 @@ fn on_process_message_received(message: Option<&mut ProcessMessage>, ipc: &Clien
             if let Some(args) = message.argument_list() {
                 let arg = args.string(0);
                 let msg_str = CefStringUtf16::from(&arg).to_string();
-                if let Ok(mut queue) = ipc.message_queue.lock() {
-                    queue.push_back(msg_str);
+                if let Ok(mut queues) = ipc.event_queues.lock() {
+                    queues.messages.push_back(msg_str);
                 }
             }
         }
@@ -1084,8 +1051,8 @@ fn on_process_message_received(message: Option<&mut ProcessMessage>, ipc: &Clien
                     let copied = binary_value.data(Some(&mut buffer), 0);
                     if copied > 0 {
                         buffer.truncate(copied);
-                        if let Ok(mut queue) = ipc.binary_message_queue.lock() {
-                            queue.push_back(buffer);
+                        if let Ok(mut queues) = ipc.event_queues.lock() {
+                            queues.binary_messages.push_back(buffer);
                         }
                     }
                 }
@@ -1095,8 +1062,8 @@ fn on_process_message_received(message: Option<&mut ProcessMessage>, ipc: &Clien
             if let Some(args) = message.argument_list() {
                 let arg = args.bool(0);
                 let enabled = arg != 0;
-                if let Ok(mut queue) = ipc.ime_enable_queue.lock() {
-                    queue.push_back(enabled);
+                if let Ok(mut queues) = ipc.event_queues.lock() {
+                    queues.ime_enables.push_back(enabled);
                 }
             }
         }
@@ -1105,8 +1072,8 @@ fn on_process_message_received(message: Option<&mut ProcessMessage>, ipc: &Clien
                 let x = args.int(0);
                 let y = args.int(1);
                 let height = args.int(2);
-                if let Ok(mut queue) = ipc.ime_composition_queue.lock() {
-                    *queue = Some(ImeCompositionRange {
+                if let Ok(mut queues) = ipc.event_queues.lock() {
+                    queues.ime_composition_range = Some(ImeCompositionRange {
                         caret_x: x,
                         caret_y: y,
                         caret_height: height,
@@ -1134,18 +1101,12 @@ pub(crate) struct ClientHandlers {
 
 #[derive(Clone)]
 pub(crate) struct ClientIpcQueues {
-    pub message_queue: MessageQueue,
-    pub binary_message_queue: BinaryMessageQueue,
-    pub ime_enable_queue: ImeEnableQueue,
-    pub ime_composition_queue: ImeCompositionQueue,
+    pub event_queues: EventQueuesHandle,
 }
 
 fn build_ipc_queues(queues: &ClientQueues) -> ClientIpcQueues {
     ClientIpcQueues {
-        binary_message_queue: queues.binary_message_queue.clone(),
-        message_queue: queues.message_queue.clone(),
-        ime_enable_queue: queues.ime_enable_queue.clone(),
-        ime_composition_queue: queues.ime_composition_queue.clone(),
+        event_queues: queues.event_queues.clone(),
     }
 }
 
@@ -1218,21 +1179,13 @@ fn build_client_handlers(
 
     ClientHandlers {
         render_handler,
-        display_handler: DisplayHandlerImpl::build(
-            cursor_type,
-            queues.url_change_queue.clone(),
-            queues.title_change_queue.clone(),
-            queues.console_message_queue.clone(),
-        ),
+        display_handler: DisplayHandlerImpl::build(cursor_type, queues.event_queues.clone()),
         context_menu_handler: ContextMenuHandlerImpl::build(),
         life_span_handler: LifeSpanHandlerImpl::build(),
-        load_handler: LoadHandlerImpl::build(queues.loading_state_queue.clone()),
-        drag_handler: DragHandlerImpl::build(queues.drag_event_queue.clone()),
+        load_handler: LoadHandlerImpl::build(queues.event_queues.clone()),
+        drag_handler: DragHandlerImpl::build(queues.event_queues.clone()),
         audio_handler,
-        download_handler: DownloadHandlerImpl::build(
-            queues.download_request_queue.clone(),
-            queues.download_update_queue.clone(),
-        ),
+        download_handler: DownloadHandlerImpl::build(queues.event_queues.clone()),
     }
 }
 
@@ -1244,11 +1197,7 @@ impl SoftwareClientImpl {
         let cursor_type = render_handler.get_cursor_type();
         let ipc = build_ipc_queues(&queues);
         let handlers = build_client_handlers(
-            SoftwareOsrHandler::build(
-                render_handler,
-                queues.ime_composition_queue.clone(),
-                queues.drag_event_queue.clone(),
-            ),
+            SoftwareOsrHandler::build(render_handler, queues.event_queues.clone()),
             cursor_type,
             &queues,
         );
@@ -1315,11 +1264,7 @@ impl AcceleratedClientImpl {
     ) -> cef::Client {
         let ipc = build_ipc_queues(&queues);
         let handlers = build_client_handlers(
-            AcceleratedOsrHandler::build(
-                render_handler,
-                queues.ime_composition_queue.clone(),
-                queues.drag_event_queue.clone(),
-            ),
+            AcceleratedOsrHandler::build(render_handler, queues.event_queues.clone()),
             cursor_type,
             &queues,
         );

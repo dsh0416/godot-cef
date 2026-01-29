@@ -7,7 +7,6 @@ mod drag;
 mod error;
 mod godot_protocol;
 mod input;
-mod queue_processing;
 mod render;
 mod settings;
 mod utils;

@@ -65,20 +65,11 @@ impl CefTexture {
         self.app.device_scale_factor = None;
         self.app.cursor_type = None;
         self.app.popup_state = None;
-        self.app.message_queue = None;
-        self.app.url_change_queue = None;
-        self.app.title_change_queue = None;
-        self.app.loading_state_queue = None;
-        self.app.ime_enable_queue = None;
-        self.app.ime_composition_range = None;
-        self.app.console_message_queue = None;
-        self.app.drag_event_queue = None;
+        self.app.event_queues = None;
         self.app.drag_state = Default::default();
         self.app.audio_packet_queue = None;
         self.app.audio_params = None;
         self.app.audio_sample_rate = None;
-        self.app.download_request_queue = None;
-        self.app.download_update_queue = None;
         self.app.audio_shutdown_flag = None;
 
         self.ime_active = false;
@@ -229,22 +220,12 @@ impl CefTexture {
         let mut client = webrender::SoftwareClientImpl::build(
             render_handler,
             webrender::ClientQueues {
-                message_queue: queues.message_queue.clone(),
-                binary_message_queue: queues.binary_message_queue.clone(),
-                url_change_queue: queues.url_change_queue.clone(),
-                title_change_queue: queues.title_change_queue.clone(),
-                loading_state_queue: queues.loading_state_queue.clone(),
-                ime_enable_queue: queues.ime_enable_queue.clone(),
-                ime_composition_queue: queues.ime_composition_queue.clone(),
-                console_message_queue: queues.console_message_queue.clone(),
-                drag_event_queue: queues.drag_event_queue.clone(),
+                event_queues: queues.event_queues.clone(),
                 audio_packet_queue: queues.audio_packet_queue.clone(),
                 audio_params: queues.audio_params.clone(),
                 audio_sample_rate: queues.audio_sample_rate.clone(),
                 audio_shutdown_flag: queues.audio_shutdown_flag.clone(),
                 enable_audio_capture,
-                download_request_queue: queues.download_request_queue.clone(),
-                download_update_queue: queues.download_update_queue.clone(),
             },
         );
 
@@ -271,20 +252,10 @@ impl CefTexture {
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
         self.app.popup_state = Some(popup_state);
-        self.app.message_queue = Some(queues.message_queue);
-        self.app.binary_message_queue = Some(queues.binary_message_queue);
-        self.app.url_change_queue = Some(queues.url_change_queue);
-        self.app.title_change_queue = Some(queues.title_change_queue);
-        self.app.loading_state_queue = Some(queues.loading_state_queue);
-        self.app.ime_enable_queue = Some(queues.ime_enable_queue);
-        self.app.ime_composition_range = Some(queues.ime_composition_queue);
-        self.app.console_message_queue = Some(queues.console_message_queue);
-        self.app.drag_event_queue = Some(queues.drag_event_queue);
+        self.app.event_queues = Some(queues.event_queues);
         self.app.audio_packet_queue = Some(queues.audio_packet_queue);
         self.app.audio_params = Some(queues.audio_params);
         self.app.audio_sample_rate = Some(queues.audio_sample_rate);
-        self.app.download_request_queue = Some(queues.download_request_queue);
-        self.app.download_update_queue = Some(queues.download_update_queue);
         self.app.audio_shutdown_flag = Some(queues.audio_shutdown_flag);
 
         Ok(browser)
@@ -347,22 +318,12 @@ impl CefTexture {
             render_handler,
             cursor_type.clone(),
             webrender::ClientQueues {
-                message_queue: queues.message_queue.clone(),
-                binary_message_queue: queues.binary_message_queue.clone(),
-                url_change_queue: queues.url_change_queue.clone(),
-                title_change_queue: queues.title_change_queue.clone(),
-                loading_state_queue: queues.loading_state_queue.clone(),
-                ime_enable_queue: queues.ime_enable_queue.clone(),
-                ime_composition_queue: queues.ime_composition_queue.clone(),
-                console_message_queue: queues.console_message_queue.clone(),
-                drag_event_queue: queues.drag_event_queue.clone(),
+                event_queues: queues.event_queues.clone(),
                 audio_packet_queue: queues.audio_packet_queue.clone(),
                 audio_params: queues.audio_params.clone(),
                 audio_sample_rate: queues.audio_sample_rate.clone(),
                 audio_shutdown_flag: queues.audio_shutdown_flag.clone(),
                 enable_audio_capture,
-                download_request_queue: queues.download_request_queue.clone(),
-                download_update_queue: queues.download_update_queue.clone(),
             },
         );
 
@@ -395,20 +356,10 @@ impl CefTexture {
         self.app.device_scale_factor = Some(device_scale_factor);
         self.app.cursor_type = Some(cursor_type);
         self.app.popup_state = Some(popup_state);
-        self.app.message_queue = Some(queues.message_queue);
-        self.app.binary_message_queue = Some(queues.binary_message_queue);
-        self.app.url_change_queue = Some(queues.url_change_queue);
-        self.app.title_change_queue = Some(queues.title_change_queue);
-        self.app.loading_state_queue = Some(queues.loading_state_queue);
-        self.app.ime_enable_queue = Some(queues.ime_enable_queue);
-        self.app.ime_composition_range = Some(queues.ime_composition_queue);
-        self.app.console_message_queue = Some(queues.console_message_queue);
-        self.app.drag_event_queue = Some(queues.drag_event_queue);
+        self.app.event_queues = Some(queues.event_queues);
         self.app.audio_packet_queue = Some(queues.audio_packet_queue);
         self.app.audio_params = Some(queues.audio_params);
         self.app.audio_sample_rate = Some(queues.audio_sample_rate);
-        self.app.download_request_queue = Some(queues.download_request_queue);
-        self.app.download_update_queue = Some(queues.download_update_queue);
         self.app.audio_shutdown_flag = Some(queues.audio_shutdown_flag);
 
         Ok(browser)

@@ -10,7 +10,7 @@ use godot::classes::{Control, DisplayServer, LineEdit};
 use godot::prelude::*;
 
 use crate::input;
-use crate::utils::{get_display_scale_factor, try_lock};
+use crate::utils::get_display_scale_factor;
 
 impl CefTexture {
     /// Creates a hidden LineEdit to act as an IME input proxy.
@@ -28,49 +28,6 @@ impl CefTexture {
 
         self.base_mut().add_child(&line_edit);
         self.ime_proxy = Some(line_edit);
-    }
-
-    pub(super) fn process_ime_enable_queue(&mut self) {
-        let Some(queue) = &self.app.ime_enable_queue else {
-            return;
-        };
-
-        let final_req: Option<bool> = {
-            let Some(mut q) = try_lock!(queue, "ime_enable_queue") else {
-                return;
-            };
-            q.drain(..).next_back()
-        };
-
-        if let Some(enable) = final_req {
-            if enable && !self.ime_active {
-                self.activate_ime();
-            } else if !enable && self.ime_active {
-                self.deactivate_ime();
-            }
-        }
-    }
-
-    pub(super) fn process_ime_composition_queue(&mut self) {
-        let Some(queue) = &self.app.ime_composition_range else {
-            return;
-        };
-
-        let range = {
-            let Some(mut q) = try_lock!(queue, "ime_composition_queue") else {
-                return;
-            };
-            q.take()
-        };
-
-        if let Some(range) = range
-            && self.ime_active
-        {
-            // Directly assign to ime_position field instead of using setter
-            // to avoid conflict with GodotClass-generated setter
-            self.ime_position = Vector2i::new(range.caret_x, range.caret_y + range.caret_height);
-            self.process_ime_position();
-        }
     }
 
     pub(super) fn process_ime_position(&mut self) {
