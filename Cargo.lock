@@ -768,7 +768,6 @@ dependencies = [
  "percent-encoding",
  "process_path",
  "retour",
- "serde_json",
  "software_render",
  "url",
  "wide",

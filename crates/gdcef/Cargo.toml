@@ -17,7 +17,6 @@ cef-dll-sys = { workspace = true }
 process_path = { workspace = true }
 cef_app = { path = "../cef_app" }
 software_render = { path = "../software_render" }
-serde_json = { workspace = true }
 wide = { workspace = true }
 url = { workspace = true }
 percent-encoding = { workspace = true }
