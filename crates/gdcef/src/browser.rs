@@ -16,6 +16,9 @@ use crate::accelerated_osr::AcceleratedRenderState;
 /// Queue for IPC messages from the browser to Godot.
 pub type MessageQueue = Arc<Mutex<VecDeque<String>>>;
 
+/// Queue for binary IPC messages from the browser to Godot.
+pub type BinaryMessageQueue = Arc<Mutex<VecDeque<Vec<u8>>>>;
+
 /// Queue for URL change notifications from the browser to Godot.
 pub type UrlChangeQueue = Arc<Mutex<VecDeque<String>>>;
 
@@ -207,6 +210,8 @@ pub struct App {
     pub popup_state: Option<PopupStateQueue>,
     /// Queue for IPC messages from the browser.
     pub message_queue: Option<MessageQueue>,
+    /// Queue for binary IPC messages from the browser.
+    pub binary_message_queue: Option<BinaryMessageQueue>,
     /// Queue for URL change notifications from the browser.
     pub url_change_queue: Option<UrlChangeQueue>,
     /// Queue for title change notifications from the browser.

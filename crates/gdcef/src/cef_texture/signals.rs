@@ -147,6 +147,18 @@ impl CefTexture {
         }
     }
 
+    pub(super) fn process_binary_message_queue(&mut self) {
+        let Some(queue) = &self.app.binary_message_queue else {
+            return;
+        };
+
+        for data in drain_queue(queue) {
+            let byte_array = PackedByteArray::from(data.as_slice());
+            self.base_mut()
+                .emit_signal("ipc_binary_message", &[byte_array.to_variant()]);
+        }
+    }
+
     pub(super) fn process_url_change_queue(&mut self) {
         let Some(queue) = &self.app.url_change_queue else {
             return;

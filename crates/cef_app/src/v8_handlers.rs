@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use cef::{
     self, CefStringUtf16, Frame, ImplFrame, ImplListValue, ImplProcessMessage, ImplV8Handler,
-    ImplV8Value, ProcessId, V8Handler, V8Value, WrapV8Handler, process_message_create, rc::Rc,
-    v8_value_create_bool, wrap_v8_handler,
+    ImplV8Value, ProcessId, V8Handler, V8Value, WrapV8Handler, binary_value_create,
+    process_message_create, rc::Rc, v8_value_create_bool, wrap_v8_handler,
 };
 
 #[derive(Clone)]
@@ -69,6 +69,105 @@ wrap_v8_handler! {
                             }
                         }
                     }
+
+            if let Some(retval) = retval {
+                *retval = v8_value_create_bool(false as _);
+            }
+
+            return 0;
+        }
+    }
+}
+
+/// V8 handler for binary IPC messages from JavaScript to Godot.
+/// Accepts ArrayBuffer and sends binary data via CEF process messages.
+#[derive(Clone)]
+pub(crate) struct OsrIpcBinaryHandler {
+    frame: Option<Arc<Mutex<Frame>>>,
+}
+
+impl OsrIpcBinaryHandler {
+    pub fn new(frame: Option<Arc<Mutex<Frame>>>) -> Self {
+        Self { frame }
+    }
+}
+
+impl OsrIpcBinaryHandlerBuilder {
+    pub(crate) fn build(handler: OsrIpcBinaryHandler) -> V8Handler {
+        Self::new(handler)
+    }
+}
+
+wrap_v8_handler! {
+    pub(crate) struct OsrIpcBinaryHandlerBuilder {
+        handler: OsrIpcBinaryHandler,
+    }
+
+    impl V8Handler {
+        fn execute(
+            &self,
+            _name: Option<&CefStringUtf16>,
+            _object: Option<&mut V8Value>,
+            arguments: Option<&[Option<V8Value>]>,
+            retval: Option<&mut Option<cef::V8Value>>,
+            _exception: Option<&mut CefStringUtf16>
+        ) -> i32 {
+            if let Some(arguments) = arguments
+                && let Some(arg) = arguments.first()
+                && let Some(arg) = arg
+            {
+                // Check if argument is an ArrayBuffer
+                if arg.is_array_buffer() != 1 {
+                    if let Some(retval) = retval {
+                        *retval = v8_value_create_bool(false as _);
+                    }
+                    return 0;
+                }
+
+                // Get binary data from ArrayBuffer
+                let data_ptr = arg.array_buffer_data();
+                let data_len = arg.array_buffer_byte_length();
+
+                if data_ptr.is_null() || data_len == 0 {
+                    if let Some(retval) = retval {
+                        *retval = v8_value_create_bool(false as _);
+                    }
+                    return 0;
+                }
+
+                // Copy data to a Vec<u8>
+                let data: Vec<u8> = unsafe {
+                    std::slice::from_raw_parts(data_ptr as *const u8, data_len).to_vec()
+                };
+
+                // Create BinaryValue from the data
+                let Some(mut binary_value) = binary_value_create(Some(&data)) else {
+                    if let Some(retval) = retval {
+                        *retval = v8_value_create_bool(false as _);
+                    }
+                    return 0;
+                };
+
+                if let Some(frame) = self.handler.frame.as_ref() {
+                    let frame = frame.lock().unwrap();
+
+                    let route = CefStringUtf16::from("ipcBinaryRendererToGodot");
+                    let process_message = process_message_create(Some(&route));
+                    if let Some(mut process_message) = process_message {
+                        if let Some(argument_list) = process_message.argument_list() {
+                            argument_list.set_binary(0, Some(&mut binary_value));
+                        }
+
+                        frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+
+                        if let Some(retval) = retval {
+                            *retval = v8_value_create_bool(true as _);
+                        }
+
+                        return 1;
+                    }
+                }
+            }
 
             if let Some(retval) = retval {
                 *retval = v8_value_create_bool(false as _);

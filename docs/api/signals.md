@@ -26,6 +26,35 @@ window.sendIpcMessage("button_clicked");
 window.sendIpcMessage(JSON.stringify({ action: "purchase", item_id: 42 }));
 ```
 
+## `ipc_binary_message(data: PackedByteArray)`
+
+Emitted when JavaScript sends binary data to Godot via the `sendIpcBinaryMessage` function. Use this for efficient binary data transfer without Base64 encoding overhead.
+
+```gdscript
+func _ready():
+    cef_texture.ipc_binary_message.connect(_on_ipc_binary_message)
+
+func _on_ipc_binary_message(data: PackedByteArray):
+    print("Received binary data: ", data.size(), " bytes")
+    # Process binary data (e.g., protobuf, msgpack, raw bytes)
+    var image = Image.new()
+    image.load_png_from_buffer(data)
+```
+
+In your JavaScript (running in the CEF browser):
+
+```javascript
+// Send binary data to Godot
+const buffer = new ArrayBuffer(8);
+const view = new Uint8Array(buffer);
+view.set([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]); // PNG header
+window.sendIpcBinaryMessage(buffer);
+
+// Send a Uint8Array (will use its underlying ArrayBuffer)
+const data = new Uint8Array([1, 2, 3, 4, 5]);
+window.sendIpcBinaryMessage(data.buffer);
+```
+
 ## `url_changed(url: String)`
 
 Emitted when the browser navigates to a new URL. This fires for user-initiated navigation (clicking links), JavaScript navigation, redirects, and programmatic `load_url()` calls. Useful for injecting scripts or tracking navigation.

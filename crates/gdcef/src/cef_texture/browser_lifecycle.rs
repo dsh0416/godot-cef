@@ -224,6 +224,7 @@ impl CefTexture {
             render_handler,
             webrender::ClientQueues {
                 message_queue: queues.message_queue.clone(),
+                binary_message_queue: queues.binary_message_queue.clone(),
                 url_change_queue: queues.url_change_queue.clone(),
                 title_change_queue: queues.title_change_queue.clone(),
                 loading_state_queue: queues.loading_state_queue.clone(),
@@ -265,6 +266,7 @@ impl CefTexture {
         self.app.cursor_type = Some(cursor_type);
         self.app.popup_state = Some(popup_state);
         self.app.message_queue = Some(queues.message_queue);
+        self.app.binary_message_queue = Some(queues.binary_message_queue);
         self.app.url_change_queue = Some(queues.url_change_queue);
         self.app.title_change_queue = Some(queues.title_change_queue);
         self.app.loading_state_queue = Some(queues.loading_state_queue);
@@ -340,6 +342,7 @@ impl CefTexture {
             cursor_type.clone(),
             webrender::ClientQueues {
                 message_queue: queues.message_queue.clone(),
+                binary_message_queue: queues.binary_message_queue.clone(),
                 url_change_queue: queues.url_change_queue.clone(),
                 title_change_queue: queues.title_change_queue.clone(),
                 loading_state_queue: queues.loading_state_queue.clone(),
@@ -387,6 +390,7 @@ impl CefTexture {
         self.app.cursor_type = Some(cursor_type);
         self.app.popup_state = Some(popup_state);
         self.app.message_queue = Some(queues.message_queue);
+        self.app.binary_message_queue = Some(queues.binary_message_queue);
         self.app.url_change_queue = Some(queues.url_change_queue);
         self.app.title_change_queue = Some(queues.title_change_queue);
         self.app.loading_state_queue = Some(queues.loading_state_queue);

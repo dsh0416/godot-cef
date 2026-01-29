@@ -114,6 +114,46 @@ window.onIpcMessage = function(msg) {
 };
 ```
 
+### `send_ipc_binary_message(data: PackedByteArray)`
+
+Sends binary data from Godot to JavaScript. The data will be delivered as an `ArrayBuffer` via `window.onIpcBinaryMessage(arrayBuffer)` callback if it is registered.
+
+Uses native CEF process messaging with zero encoding overhead for efficient binary data transfer (images, audio, protocol buffers, etc.).
+
+```gdscript
+# Send raw binary data
+var data := PackedByteArray([0x01, 0x02, 0x03, 0x04])
+cef_texture.send_ipc_binary_message(data)
+
+# Send an image as binary
+var image := Image.load_from_file("res://icon.png")
+var png_data := image.save_png_to_buffer()
+cef_texture.send_ipc_binary_message(png_data)
+
+# Send a file's contents
+var file := FileAccess.open("res://data.bin", FileAccess.READ)
+var file_data := file.get_buffer(file.get_length())
+cef_texture.send_ipc_binary_message(file_data)
+```
+
+In your JavaScript (running in the CEF browser):
+
+```javascript
+// Register the callback to receive binary data from Godot
+window.onIpcBinaryMessage = function(arrayBuffer) {
+    console.log("Received binary data:", arrayBuffer.byteLength, "bytes");
+    
+    // Example: Process as an image
+    const blob = new Blob([arrayBuffer], { type: 'image/png' });
+    const url = URL.createObjectURL(blob);
+    document.getElementById('image').src = url;
+    
+    // Example: Process as typed array
+    const view = new Uint8Array(arrayBuffer);
+    console.log("First byte:", view[0]);
+};
+```
+
 ## Zoom Control
 
 ### `set_zoom_level(level: float)`

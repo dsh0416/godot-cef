@@ -3,7 +3,10 @@ mod ime;
 mod rendering;
 mod signals;
 
-use cef::{self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, do_message_loop_work};
+use cef::{
+    self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, ImplListValue,
+    ImplProcessMessage, do_message_loop_work,
+};
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
@@ -106,6 +109,9 @@ impl CefTexture {
     fn ipc_message(message: GString);
 
     #[signal]
+    fn ipc_binary_message(data: PackedByteArray);
+
+    #[signal]
     fn url_changed(url: GString);
 
     #[signal]
@@ -168,6 +174,7 @@ impl CefTexture {
         self.request_external_begin_frame();
         self.update_cursor();
         self.process_message_queue();
+        self.process_binary_message_queue();
         self.process_url_change_queue();
         self.process_title_change_queue();
         self.process_loading_state_queue();
@@ -251,9 +258,10 @@ impl CefTexture {
     ///
     /// This is intentionally separate from [`eval`]: callers could achieve a
     /// similar effect with `eval("window.onIpcMessage(...);")`, but this
-    /// helper:
-    /// - automatically escapes the string payload for safe JS embedding, and
-    /// - enforces a consistent IPC pattern (`window.onIpcMessage(message)`).
+    /// helper enforces a consistent IPC pattern (`window.onIpcMessage(message)`).
+    ///
+    /// Uses native CEF process messaging for efficient transfer without
+    /// script injection overhead.
     ///
     /// Use this when you want structured IPC into the page, and `eval` when
     /// you truly need arbitrary JavaScript execution.
@@ -267,20 +275,50 @@ impl CefTexture {
             return;
         };
 
-        // Use serde_json for proper JSON encoding which handles all edge cases:
-        // - Unicode line terminators (U+2028, U+2029) that can break JS strings
-        // - Backticks, single quotes, and all control characters
-        // - Proper backslash and quote escaping
-        // The result includes surrounding quotes, so we use it directly.
-        let msg_str = message.to_string();
-        let json_msg = serde_json::to_string(&msg_str).unwrap_or_else(|_| "\"\"".to_string());
+        // Send via native CEF process message to renderer
+        let route = cef::CefStringUtf16::from("ipcGodotToRenderer");
+        let msg_str: cef::CefStringUtf16 = message.to_string().as_str().into();
 
-        let js_code = format!(
-            r#"if (typeof window.onIpcMessage === 'function') {{ window.onIpcMessage({}); }}"#,
-            json_msg
-        );
-        let js_code_str: cef::CefStringUtf16 = js_code.as_str().into();
-        frame.execute_java_script(Some(&js_code_str), None, 0);
+        if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
+            if let Some(argument_list) = process_message.argument_list() {
+                argument_list.set_string(0, Some(&msg_str));
+            }
+            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+        }
+    }
+
+    #[func]
+    /// Sends binary data into the page via `window.onIpcBinaryMessage`.
+    ///
+    /// The data will be delivered as an ArrayBuffer to the JavaScript callback
+    /// `window.onIpcBinaryMessage(arrayBuffer)` if it is registered.
+    ///
+    /// Uses native CEF process messaging with BinaryValue for zero-copy
+    /// binary transfer without encoding overhead.
+    pub fn send_ipc_binary_message(&mut self, data: PackedByteArray) {
+        let Some(browser) = self.app.browser.as_ref() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send binary IPC message: no browser");
+            return;
+        };
+        let Some(frame) = browser.main_frame() else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send binary IPC message: no main frame"
+            );
+            return;
+        };
+
+        // Send via native CEF process message with BinaryValue
+        let route = cef::CefStringUtf16::from("ipcBinaryGodotToRenderer");
+        let bytes = data.to_vec();
+
+        if let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) {
+            if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
+                if let Some(argument_list) = process_message.argument_list() {
+                    argument_list.set_binary(0, Some(&mut binary_value));
+                }
+                frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+            }
+        }
     }
 
     #[func]
