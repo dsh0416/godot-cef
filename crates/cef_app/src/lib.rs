@@ -68,8 +68,9 @@ wrap_app! {
             // Only enable remote debugging in debug builds or when running from the editor
             // for security purposes. In production builds, this should be disabled.
             if self.app.enable_remote_debugging() {
+                let port = self.app.remote_debugging_port().to_string();
                 command_line
-                    .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&"9229".into()));
+                    .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&port.as_str().into()));
             }
         }
 

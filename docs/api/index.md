@@ -42,6 +42,7 @@ Navigate to **Project > Project Settings > godot_cef** to configure:
 | `godot_cef/security/ignore_certificate_errors` | Ignore SSL/TLS certificate errors |
 | `godot_cef/security/disable_web_security` | Disable web security (CORS, same-origin policy) |
 | `godot_cef/audio/enable_audio_capture` | Route browser audio through Godot's audio system (default: `false`) |
+| `godot_cef/debug/remote_devtools_port` | Port for Chrome DevTools remote debugging (default: `9229`) |
 
 These parameters are passed as command-line switches to the CEF subprocess during initialization and cannot be modified at runtime. If you need to change these settings, you must restart your Godot application.
 
@@ -63,10 +64,11 @@ Remote debugging is automatically disabled in production/release builds.
 
 ### Accessing DevTools
 
-When remote debugging is enabled, CEF listens on **port 9229**.
+When remote debugging is enabled, CEF listens on the configured port (default: **9229**). You can change this port via the `godot_cef/debug/remote_devtools_port` project setting.
+
 1. Open Chrome and navigate to `chrome://inspect`
 2. Click on **"Configure..."** next to "Discover network targets"
-3. Add `localhost:9229` to the target discovery list
+3. Add `localhost:<port>` to the target discovery list (e.g., `localhost:9229`)
 4. Your CEF browser instances will appear under "Remote Target"
 5. Click **"inspect"** to open DevTools for that page
 

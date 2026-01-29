@@ -31,6 +31,12 @@ These settings are dangerous and should only be enabled for specific use cases (
 | `godot_cef/security/ignore_certificate_errors` | `bool` | `false` | Skip SSL/TLS certificate validation |
 | `godot_cef/security/disable_web_security` | `bool` | `false` | Disable CORS and same-origin policy |
 
+### Debug Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `godot_cef/debug/remote_devtools_port` | `int` | `9229` | Port for Chrome DevTools remote debugging. Only active in debug builds or when running from the editor. |
+
 ### Example Configuration
 
 In your `project.godot` file:
