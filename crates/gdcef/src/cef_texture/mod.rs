@@ -160,11 +160,27 @@ impl CefTexture {
 
         // Create hidden LineEdit for IME proxy
         self.create_ime_proxy();
-        self.create_browser();
+
+        // Only create browser if we have a valid size.
+        // If size is 0 (e.g., inside a Container that hasn't laid out yet),
+        // browser creation will be deferred to on_process().
+        let size = self.base().get_size();
+        if size.x > 0.0 && size.y > 0.0 {
+            self.create_browser();
+        }
     }
 
     #[func]
     fn on_process(&mut self) {
+        // Lazy browser creation: if browser doesn't exist yet (e.g., size was 0 in on_ready
+        // because we're inside a Container), try to create it now that layout may be complete.
+        if self.app.browser.is_none() {
+            let size = self.base().get_size();
+            if size.x > 0.0 && size.y > 0.0 {
+                self.create_browser();
+            }
+        }
+
         self.handle_max_fps_change();
         _ = self.handle_size_change();
         self.update_texture();
