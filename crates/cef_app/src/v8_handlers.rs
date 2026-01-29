@@ -79,8 +79,6 @@ wrap_v8_handler! {
     }
 }
 
-/// V8 handler for binary IPC messages from JavaScript to Godot.
-/// Accepts ArrayBuffer and sends binary data via CEF process messages.
 #[derive(Clone)]
 pub(crate) struct OsrIpcBinaryHandler {
     frame: Option<Arc<Mutex<Frame>>>,
@@ -116,7 +114,6 @@ wrap_v8_handler! {
                 && let Some(arg) = arguments.first()
                 && let Some(arg) = arg
             {
-                // Check if argument is an ArrayBuffer
                 if arg.is_array_buffer() != 1 {
                     if let Some(retval) = retval {
                         *retval = v8_value_create_bool(false as _);
@@ -124,7 +121,6 @@ wrap_v8_handler! {
                     return 0;
                 }
 
-                // Get binary data from ArrayBuffer
                 let data_ptr = arg.array_buffer_data();
                 let data_len = arg.array_buffer_byte_length();
 
@@ -135,12 +131,10 @@ wrap_v8_handler! {
                     return 0;
                 }
 
-                // Copy data to a Vec<u8>
                 let data: Vec<u8> = unsafe {
                     std::slice::from_raw_parts(data_ptr as *const u8, data_len).to_vec()
                 };
 
-                // Create BinaryValue from the data
                 let Some(mut binary_value) = binary_value_create(Some(&data)) else {
                     if let Some(retval) = retval {
                         *retval = v8_value_create_bool(false as _);

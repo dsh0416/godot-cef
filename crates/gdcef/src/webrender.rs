@@ -1084,18 +1084,17 @@ fn on_process_message_received(
             }
         }
         "ipcBinaryRendererToGodot" => {
-            if let Some(args) = message.argument_list() {
-                if let Some(binary_value) = args.binary(0) {
-                    use cef::ImplBinaryValue;
-                    let size = binary_value.size();
-                    if size > 0 {
-                        let mut buffer = vec![0u8; size];
-                        let copied = binary_value.data(Some(&mut buffer), 0);
-                        if copied > 0 {
-                            buffer.truncate(copied);
-                            if let Ok(mut queue) = binary_message_queue.lock() {
-                                queue.push_back(buffer);
-                            }
+            if let Some(args) = message.argument_list()
+                && let Some(binary_value) = args.binary(0)
+            {
+                let size = binary_value.size();
+                if size > 0 {
+                    let mut buffer = vec![0u8; size];
+                    let copied = binary_value.data(Some(&mut buffer), 0);
+                    if copied > 0 {
+                        buffer.truncate(copied);
+                        if let Ok(mut queue) = binary_message_queue.lock() {
+                            queue.push_back(buffer);
                         }
                     }
                 }

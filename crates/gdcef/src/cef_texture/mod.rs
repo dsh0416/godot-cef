@@ -4,8 +4,8 @@ mod rendering;
 mod signals;
 
 use cef::{
-    self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, ImplListValue,
-    ImplProcessMessage, do_message_loop_work,
+    self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, ImplListValue, ImplProcessMessage,
+    do_message_loop_work,
 };
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
@@ -275,7 +275,6 @@ impl CefTexture {
             return;
         };
 
-        // Send via native CEF process message to renderer
         let route = cef::CefStringUtf16::from("ipcGodotToRenderer");
         let msg_str: cef::CefStringUtf16 = message.to_string().as_str().into();
 
@@ -307,17 +306,16 @@ impl CefTexture {
             return;
         };
 
-        // Send via native CEF process message with BinaryValue
         let route = cef::CefStringUtf16::from("ipcBinaryGodotToRenderer");
         let bytes = data.to_vec();
 
-        if let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) {
-            if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
-                if let Some(argument_list) = process_message.argument_list() {
-                    argument_list.set_binary(0, Some(&mut binary_value));
-                }
-                frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+        if let Some(mut binary_value) = cef::binary_value_create(Some(&bytes))
+            && let Some(mut process_message) = cef::process_message_create(Some(&route))
+        {
+            if let Some(argument_list) = process_message.argument_list() {
+                argument_list.set_binary(0, Some(&mut binary_value));
             }
+            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
         }
     }
 
