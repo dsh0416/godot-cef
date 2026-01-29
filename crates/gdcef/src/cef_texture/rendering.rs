@@ -13,6 +13,13 @@ use crate::{cursor, render};
 
 impl CefTexture {
     pub(super) fn get_max_fps(&self) -> i32 {
+        // Check project setting first
+        let setting_fps = crate::settings::get_max_frame_rate();
+        if setting_fps > 0 {
+            return setting_fps;
+        }
+
+        // Fall back to Godot engine's max fps or screen refresh rate
         let engine_cap_fps = Engine::singleton().get_max_fps();
         let screen_cap_fps = DisplayServer::singleton().screen_get_refresh_rate().round() as i32;
         if engine_cap_fps > 0 {

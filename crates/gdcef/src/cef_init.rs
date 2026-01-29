@@ -113,13 +113,23 @@ fn initialize_cef() -> CefResult<()> {
     let remote_debugging_port = settings::get_remote_devtools_port();
 
     let security_config = settings::get_security_config();
+    let user_agent = settings::get_user_agent();
+    let proxy_server = settings::get_proxy_server();
+    let proxy_bypass_list = settings::get_proxy_bypass_list();
+    let cache_size_mb = settings::get_cache_size_mb();
+    let custom_switches = settings::get_custom_switches();
 
     #[allow(unused_mut)]
     let mut app_builder = cef_app::OsrApp::builder()
         .godot_backend(godot_backend)
         .remote_debugging(enable_remote_debugging)
         .remote_debugging_port(remote_debugging_port)
-        .security_config(security_config);
+        .security_config(security_config)
+        .user_agent(user_agent)
+        .proxy_server(proxy_server)
+        .proxy_bypass_list(proxy_bypass_list)
+        .cache_size_mb(cache_size_mb)
+        .custom_switches(custom_switches);
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     {

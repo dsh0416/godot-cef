@@ -10,6 +10,12 @@ const SETTING_IGNORE_CERTIFICATE_ERRORS: &str = "godot_cef/security/ignore_certi
 const SETTING_DISABLE_WEB_SECURITY: &str = "godot_cef/security/disable_web_security";
 const SETTING_ENABLE_AUDIO_CAPTURE: &str = "godot_cef/audio/enable_audio_capture";
 const SETTING_REMOTE_DEVTOOLS_PORT: &str = "godot_cef/debug/remote_devtools_port";
+const SETTING_MAX_FRAME_RATE: &str = "godot_cef/performance/max_frame_rate";
+const SETTING_CACHE_SIZE_MB: &str = "godot_cef/storage/cache_size_mb";
+const SETTING_USER_AGENT: &str = "godot_cef/network/user_agent";
+const SETTING_PROXY_SERVER: &str = "godot_cef/network/proxy_server";
+const SETTING_PROXY_BYPASS_LIST: &str = "godot_cef/network/proxy_bypass_list";
+const SETTING_CUSTOM_SWITCHES: &str = "godot_cef/advanced/custom_command_line_switches";
 
 const DEFAULT_DATA_PATH: &str = "user://cef-data";
 const DEFAULT_ALLOW_INSECURE_CONTENT: bool = false;
@@ -17,6 +23,12 @@ const DEFAULT_IGNORE_CERTIFICATE_ERRORS: bool = false;
 const DEFAULT_DISABLE_WEB_SECURITY: bool = false;
 const DEFAULT_ENABLE_AUDIO_CAPTURE: bool = false;
 const DEFAULT_REMOTE_DEVTOOLS_PORT: i64 = 9229;
+const DEFAULT_MAX_FRAME_RATE: i64 = 0; // 0 = follow Godot engine FPS
+const DEFAULT_CACHE_SIZE_MB: i64 = 0; // 0 = use CEF default
+const DEFAULT_USER_AGENT: &str = ""; // Empty = use CEF default
+const DEFAULT_PROXY_SERVER: &str = ""; // Empty = direct connection
+const DEFAULT_PROXY_BYPASS_LIST: &str = ""; // Empty = no bypass
+const DEFAULT_CUSTOM_SWITCHES: &str = ""; // Empty = no custom switches
 
 pub fn register_project_settings() {
     let mut settings = ProjectSettings::singleton();
@@ -59,6 +71,58 @@ pub fn register_project_settings() {
         DEFAULT_REMOTE_DEVTOOLS_PORT,
         PropertyHint::RANGE,
         "1,65535",
+    );
+
+    // Performance settings
+    register_int_setting(
+        &mut settings,
+        SETTING_MAX_FRAME_RATE,
+        DEFAULT_MAX_FRAME_RATE,
+        PropertyHint::RANGE,
+        "0,240,or_greater",
+    );
+
+    // Storage settings
+    register_int_setting(
+        &mut settings,
+        SETTING_CACHE_SIZE_MB,
+        DEFAULT_CACHE_SIZE_MB,
+        PropertyHint::RANGE,
+        "0,10240,or_greater",
+    );
+
+    // Network settings
+    register_string_setting(
+        &mut settings,
+        SETTING_USER_AGENT,
+        DEFAULT_USER_AGENT,
+        PropertyHint::PLACEHOLDER_TEXT,
+        "Custom user agent string (empty = CEF default)",
+    );
+
+    register_string_setting(
+        &mut settings,
+        SETTING_PROXY_SERVER,
+        DEFAULT_PROXY_SERVER,
+        PropertyHint::PLACEHOLDER_TEXT,
+        "e.g., socks5://127.0.0.1:1080 or http://proxy:8080",
+    );
+
+    register_string_setting(
+        &mut settings,
+        SETTING_PROXY_BYPASS_LIST,
+        DEFAULT_PROXY_BYPASS_LIST,
+        PropertyHint::PLACEHOLDER_TEXT,
+        "Comma-separated list, e.g., localhost,127.0.0.1",
+    );
+
+    // Advanced settings
+    register_string_setting(
+        &mut settings,
+        SETTING_CUSTOM_SWITCHES,
+        DEFAULT_CUSTOM_SWITCHES,
+        PropertyHint::MULTILINE_TEXT,
+        "",
     );
 }
 
@@ -195,6 +259,95 @@ pub fn get_remote_devtools_port() -> u16 {
 
     // Clamp to valid port range
     port.clamp(1, 65535) as u16
+}
+
+/// Returns the max frame rate setting. Returns 0 if using Godot engine's FPS.
+pub fn get_max_frame_rate() -> i32 {
+    let settings = ProjectSettings::singleton();
+    let name_gstring: GString = SETTING_MAX_FRAME_RATE.into();
+    let variant = settings.get_setting(&name_gstring);
+
+    let fps = if variant.is_nil() {
+        DEFAULT_MAX_FRAME_RATE
+    } else {
+        variant.to::<i64>()
+    };
+
+    fps.max(0) as i32
+}
+
+/// Returns the cache size limit in megabytes. Returns 0 for CEF default.
+pub fn get_cache_size_mb() -> i32 {
+    let settings = ProjectSettings::singleton();
+    let name_gstring: GString = SETTING_CACHE_SIZE_MB.into();
+    let variant = settings.get_setting(&name_gstring);
+
+    let size = if variant.is_nil() {
+        DEFAULT_CACHE_SIZE_MB
+    } else {
+        variant.to::<i64>()
+    };
+
+    size.max(0) as i32
+}
+
+/// Returns the custom user agent string. Empty string means use CEF default.
+pub fn get_user_agent() -> String {
+    let settings = ProjectSettings::singleton();
+    let name_gstring: GString = SETTING_USER_AGENT.into();
+    let variant = settings.get_setting(&name_gstring);
+
+    if variant.is_nil() {
+        DEFAULT_USER_AGENT.to_string()
+    } else {
+        variant.to::<GString>().to_string()
+    }
+}
+
+/// Returns the proxy server URL. Empty string means direct connection.
+pub fn get_proxy_server() -> String {
+    let settings = ProjectSettings::singleton();
+    let name_gstring: GString = SETTING_PROXY_SERVER.into();
+    let variant = settings.get_setting(&name_gstring);
+
+    if variant.is_nil() {
+        DEFAULT_PROXY_SERVER.to_string()
+    } else {
+        variant.to::<GString>().to_string()
+    }
+}
+
+/// Returns the proxy bypass list. Empty string means no bypass.
+pub fn get_proxy_bypass_list() -> String {
+    let settings = ProjectSettings::singleton();
+    let name_gstring: GString = SETTING_PROXY_BYPASS_LIST.into();
+    let variant = settings.get_setting(&name_gstring);
+
+    if variant.is_nil() {
+        DEFAULT_PROXY_BYPASS_LIST.to_string()
+    } else {
+        variant.to::<GString>().to_string()
+    }
+}
+
+/// Returns custom command-line switches as a list of strings.
+/// Each line in the multiline string is treated as a separate switch.
+pub fn get_custom_switches() -> Vec<String> {
+    let settings = ProjectSettings::singleton();
+    let name_gstring: GString = SETTING_CUSTOM_SWITCHES.into();
+    let variant = settings.get_setting(&name_gstring);
+
+    let raw = if variant.is_nil() {
+        DEFAULT_CUSTOM_SWITCHES.to_string()
+    } else {
+        variant.to::<GString>().to_string()
+    };
+
+    raw.lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.to_string())
+        .collect()
 }
 
 pub fn warn_if_insecure_settings() {

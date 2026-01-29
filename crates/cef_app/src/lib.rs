@@ -72,6 +72,53 @@ wrap_app! {
                 command_line
                     .append_switch_with_value(Some(&"remote-debugging-port".into()), Some(&port.as_str().into()));
             }
+
+            // Apply custom user agent if configured
+            let user_agent = self.app.user_agent();
+            if !user_agent.is_empty() {
+                command_line
+                    .append_switch_with_value(Some(&"user-agent".into()), Some(&user_agent.into()));
+            }
+
+            // Apply proxy settings if configured
+            let proxy_server = self.app.proxy_server();
+            if !proxy_server.is_empty() {
+                command_line
+                    .append_switch_with_value(Some(&"proxy-server".into()), Some(&proxy_server.into()));
+
+                // Apply proxy bypass list if configured
+                let proxy_bypass_list = self.app.proxy_bypass_list();
+                if !proxy_bypass_list.is_empty() {
+                    command_line
+                        .append_switch_with_value(Some(&"proxy-bypass-list".into()), Some(&proxy_bypass_list.into()));
+                }
+            }
+
+            // Apply cache size limit if configured (in bytes)
+            let cache_size_mb = self.app.cache_size_mb();
+            if cache_size_mb > 0 {
+                let cache_size_bytes = (cache_size_mb as i64 * 1024 * 1024).to_string();
+                command_line
+                    .append_switch_with_value(Some(&"disk-cache-size".into()), Some(&cache_size_bytes.as_str().into()));
+            }
+
+            // Apply custom command-line switches
+            for switch in self.app.custom_switches() {
+                let trimmed = switch.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                // Handle switches with and without values
+                // Format: "--switch-name" or "--switch-name=value" or "switch-name" or "switch-name=value"
+                let switch_str = trimmed.trim_start_matches('-');
+                if let Some((name, value)) = switch_str.split_once('=') {
+                    command_line
+                        .append_switch_with_value(Some(&name.into()), Some(&value.into()));
+                } else {
+                    command_line.append_switch(Some(&switch_str.into()));
+                }
+            }
         }
 
         fn browser_process_handler(&self) -> Option<cef::BrowserProcessHandler> {

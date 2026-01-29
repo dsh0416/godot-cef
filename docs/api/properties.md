@@ -37,6 +37,39 @@ These settings are dangerous and should only be enabled for specific use cases (
 |---------|------|---------|-------------|
 | `godot_cef/debug/remote_devtools_port` | `int` | `9229` | Port for Chrome DevTools remote debugging. Only active in debug builds or when running from the editor. |
 
+### Performance Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `godot_cef/performance/max_frame_rate` | `int` | `0` | Maximum frame rate for browser rendering. Set to `0` to follow Godot engine's FPS setting. Valid range: 1-240+. |
+
+### Cache Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `godot_cef/storage/cache_size_mb` | `int` | `0` | Maximum disk cache size in megabytes. Set to `0` for CEF default. |
+
+### Network Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `godot_cef/network/user_agent` | `String` | `""` | Custom user agent string. Leave empty to use CEF's default user agent. |
+| `godot_cef/network/proxy_server` | `String` | `""` | Proxy server URL (e.g., `socks5://127.0.0.1:1080` or `http://proxy:8080`). Leave empty for direct connection. |
+| `godot_cef/network/proxy_bypass_list` | `String` | `""` | Comma-separated list of hosts to bypass proxy (e.g., `localhost,127.0.0.1,*.local`). |
+
+### Advanced Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `godot_cef/advanced/custom_command_line_switches` | `String` | `""` | Custom CEF command-line switches (one per line). Prefix with `#` to comment out. Format: `switch-name` or `switch-name=value`. |
+
+::: tip Custom Switches
+The custom command-line switches setting allows you to pass additional CEF/Chromium flags. Each line should contain one switch. Lines starting with `#` are ignored. Examples:
+- `disable-gpu-compositing`
+- `enable-features=WebRTC`
+- `js-flags=--max-old-space-size=4096`
+:::
+
 ### Example Configuration
 
 In your `project.godot` file:
@@ -44,7 +77,14 @@ In your `project.godot` file:
 ```ini
 [godot_cef]
 storage/data_path="user://my-app-browser-data"
+storage/cache_size_mb=512
 security/allow_insecure_content=false
+performance/max_frame_rate=60
+network/user_agent="MyApp/1.0 (Godot Engine)"
+network/proxy_server="socks5://127.0.0.1:1080"
+network/proxy_bypass_list="localhost,127.0.0.1"
+advanced/custom_command_line_switches="disable-gpu-compositing
+enable-features=WebRTC"
 ```
 
 Or configure via GDScript before any CefTexture is created:

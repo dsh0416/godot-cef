@@ -54,6 +54,16 @@ pub struct OsrApp {
     security_config: SecurityConfig,
     /// GPU device IDs for GPU selection (all platforms)
     gpu_device_ids: Option<GpuDeviceIds>,
+    /// Custom user agent string (empty = use CEF default)
+    user_agent: String,
+    /// Proxy server URL (empty = direct connection)
+    proxy_server: String,
+    /// Proxy bypass list (empty = no bypass)
+    proxy_bypass_list: String,
+    /// Cache size limit in MB (0 = use CEF default)
+    cache_size_mb: i32,
+    /// Custom command-line switches
+    custom_switches: Vec<String>,
 }
 
 impl Default for OsrApp {
@@ -70,6 +80,11 @@ impl OsrApp {
             remote_debugging_port: 9229,
             security_config: SecurityConfig::default(),
             gpu_device_ids: None,
+            user_agent: String::new(),
+            proxy_server: String::new(),
+            proxy_bypass_list: String::new(),
+            cache_size_mb: 0,
+            custom_switches: Vec::new(),
         }
     }
 
@@ -96,6 +111,26 @@ impl OsrApp {
     pub fn gpu_device_ids(&self) -> Option<GpuDeviceIds> {
         self.gpu_device_ids
     }
+
+    pub fn user_agent(&self) -> &str {
+        &self.user_agent
+    }
+
+    pub fn proxy_server(&self) -> &str {
+        &self.proxy_server
+    }
+
+    pub fn proxy_bypass_list(&self) -> &str {
+        &self.proxy_bypass_list
+    }
+
+    pub fn cache_size_mb(&self) -> i32 {
+        self.cache_size_mb
+    }
+
+    pub fn custom_switches(&self) -> &[String] {
+        &self.custom_switches
+    }
 }
 
 pub struct OsrAppBuilder {
@@ -104,6 +139,11 @@ pub struct OsrAppBuilder {
     remote_debugging_port: u16,
     security_config: SecurityConfig,
     gpu_device_ids: Option<GpuDeviceIds>,
+    user_agent: String,
+    proxy_server: String,
+    proxy_bypass_list: String,
+    cache_size_mb: i32,
+    custom_switches: Vec<String>,
 }
 
 impl Default for OsrAppBuilder {
@@ -120,6 +160,11 @@ impl OsrAppBuilder {
             remote_debugging_port: 9229,
             security_config: SecurityConfig::default(),
             gpu_device_ids: None,
+            user_agent: String::new(),
+            proxy_server: String::new(),
+            proxy_bypass_list: String::new(),
+            cache_size_mb: 0,
+            custom_switches: Vec::new(),
         }
     }
 
@@ -148,6 +193,31 @@ impl OsrAppBuilder {
         self
     }
 
+    pub fn user_agent(mut self, user_agent: String) -> Self {
+        self.user_agent = user_agent;
+        self
+    }
+
+    pub fn proxy_server(mut self, proxy_server: String) -> Self {
+        self.proxy_server = proxy_server;
+        self
+    }
+
+    pub fn proxy_bypass_list(mut self, proxy_bypass_list: String) -> Self {
+        self.proxy_bypass_list = proxy_bypass_list;
+        self
+    }
+
+    pub fn cache_size_mb(mut self, cache_size_mb: i32) -> Self {
+        self.cache_size_mb = cache_size_mb;
+        self
+    }
+
+    pub fn custom_switches(mut self, custom_switches: Vec<String>) -> Self {
+        self.custom_switches = custom_switches;
+        self
+    }
+
     pub fn build(self) -> OsrApp {
         OsrApp {
             godot_backend: self.godot_backend,
@@ -155,6 +225,11 @@ impl OsrAppBuilder {
             remote_debugging_port: self.remote_debugging_port,
             security_config: self.security_config,
             gpu_device_ids: self.gpu_device_ids,
+            user_agent: self.user_agent,
+            proxy_server: self.proxy_server,
+            proxy_bypass_list: self.proxy_bypass_list,
+            cache_size_mb: self.cache_size_mb,
+            custom_switches: self.custom_switches,
         }
     }
 }
