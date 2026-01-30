@@ -39,11 +39,17 @@ func _ready():
 | 设置 | 描述 |
 |------|------|
 | `godot_cef/storage/data_path` | Cookie、缓存和 localStorage 的存储路径（默认：`user://cef-data`） |
+| `godot_cef/storage/cache_size_mb` | 磁盘缓存最大容量（MB）（默认：`0` = CEF 默认） |
 | `godot_cef/security/allow_insecure_content` | 允许在 HTTPS 页面中加载不安全（HTTP）内容 |
 | `godot_cef/security/ignore_certificate_errors` | 忽略 SSL/TLS 证书错误 |
 | `godot_cef/security/disable_web_security` | 禁用网页安全（CORS、同源策略） |
 | `godot_cef/audio/enable_audio_capture` | 将浏览器音频通过 Godot 音频系统路由（默认：`false`） |
 | `godot_cef/debug/remote_devtools_port` | Chrome DevTools 远程调试端口（默认：`9229`） |
+| `godot_cef/performance/max_frame_rate` | 浏览器最大帧率（默认：`0` = 跟随 Godot FPS） |
+| `godot_cef/network/user_agent` | 自定义 User-Agent 字符串（默认：空 = CEF 默认） |
+| `godot_cef/network/proxy_server` | 代理服务器 URL（默认：空 = 直连） |
+| `godot_cef/network/proxy_bypass_list` | 不走代理的主机列表（默认：空） |
+| `godot_cef/advanced/custom_command_line_switches` | 自定义 CEF 命令行开关（每行一个） |
 
 这些参数会在初始化期间以命令行开关的形式传递给 CEF 子进程，运行时无法修改。如需更改这些设置，请重启 Godot 应用程序。
 

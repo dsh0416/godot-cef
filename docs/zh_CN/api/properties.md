@@ -37,6 +37,39 @@
 |------|------|--------|------|
 | `godot_cef/debug/remote_devtools_port` | `int` | `9229` | Chrome DevTools 远程调试端口。仅在调试版本或从编辑器运行时激活。 |
 
+### 性能设置
+
+| 设置 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `godot_cef/performance/max_frame_rate` | `int` | `0` | 浏览器渲染的最大帧率。设为 `0` 则跟随 Godot 引擎的 FPS 设置。有效范围：1–240+。 |
+
+### 缓存设置
+
+| 设置 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `godot_cef/storage/cache_size_mb` | `int` | `0` | 磁盘缓存最大容量（MB）。设为 `0` 使用 CEF 默认值。 |
+
+### 网络设置
+
+| 设置 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `godot_cef/network/user_agent` | `String` | `""` | 自定义 User-Agent 字符串。留空则使用 CEF 默认 User-Agent。 |
+| `godot_cef/network/proxy_server` | `String` | `""` | 代理服务器 URL（如 `socks5://127.0.0.1:1080` 或 `http://proxy:8080`）。留空表示直连。 |
+| `godot_cef/network/proxy_bypass_list` | `String` | `""` | 不走代理的主机列表（逗号分隔，如 `localhost,127.0.0.1,*.local`）。 |
+
+### 高级设置
+
+| 设置 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `godot_cef/advanced/custom_command_line_switches` | `String` | `""` | 自定义 CEF 命令行开关（每行一个）。以 `#` 开头表示注释。格式：`switch-name` 或 `switch-name=value`。 |
+
+::: tip 自定义开关
+自定义命令行开关可用于传递额外的 CEF/Chromium 参数。每行一个开关，以 `#` 开头的行会被忽略。示例：
+- `disable-gpu-compositing`
+- `enable-features=WebRTC`
+- `js-flags=--max-old-space-size=4096`
+:::
+
 ### 配置示例
 
 在您的 `project.godot` 文件中：
@@ -44,13 +77,20 @@
 ```ini
 [godot_cef]
 storage/data_path="user://my-app-browser-data"
+storage/cache_size_mb=512
 security/allow_insecure_content=false
+performance/max_frame_rate=60
+network/user_agent="MyApp/1.0 (Godot Engine)"
+network/proxy_server="socks5://127.0.0.1:1080"
+network/proxy_bypass_list="localhost,127.0.0.1"
+advanced/custom_command_line_switches="disable-gpu-compositing
+enable-features=WebRTC"
 ```
 
 或在创建任何 CefTexture 之前通过 GDScript 配置：
 
 ```gdscript
-# In an autoload or early-loading script
+# 在自动加载或较早加载的脚本中
 func _init():
     ProjectSettings.set_setting("godot_cef/storage/data_path", "user://custom-cef-data")
 ```
