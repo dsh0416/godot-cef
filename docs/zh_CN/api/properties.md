@@ -63,6 +63,9 @@
 |------|------|--------|------|
 | `godot_cef/advanced/custom_command_line_switches` | `String` | `""` | 自定义 CEF 命令行开关（每行一个）。以 `#` 开头表示注释。格式：`switch-name` 或 `switch-name=value`。 |
 
+::: danger 安全警告
+使用此设置可以传递任意 Chromium/CEF 命令行开关，其中部分开关会绕过浏览器安全机制（例如 `disable-web-security`、`allow-running-insecure-content`）。仅在充分了解风险、且用于本地开发或受信环境时使用；不要在生产环境中禁用安全特性。
+:::
 ::: tip 自定义开关
 自定义命令行开关可用于传递额外的 CEF/Chromium 参数。每行一个开关，以 `#` 开头的行会被忽略。示例：
 - `disable-gpu-compositing`

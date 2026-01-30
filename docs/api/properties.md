@@ -63,8 +63,10 @@ These settings are dangerous and should only be enabled for specific use cases (
 |---------|------|---------|-------------|
 | `godot_cef/advanced/custom_command_line_switches` | `String` | `""` | Custom CEF command-line switches (one per line). Prefix with `#` to comment out. Format: `switch-name` or `switch-name=value`. |
 
-::: tip Custom Switches
-The custom command-line switches setting allows you to pass additional CEF/Chromium flags. Each line should contain one switch. Lines starting with `#` are ignored. Examples:
+::: danger Security Warning
+The custom command-line switches setting allows you to pass additional CEF/Chromium flags, including ones that can disable important security features (for example, `disable-web-security` or `allow-running-insecure-content`). Use this setting **only** if you fully understand the implications of each switch, and never enable insecure flags for untrusted content or in production builds.
+
+Each line should contain one switch. Lines starting with `#` are ignored. Examples:
 - `disable-gpu-compositing`
 - `enable-features=WebRTC`
 - `js-flags=--max-old-space-size=4096`
