@@ -96,13 +96,12 @@ wrap_app! {
 
             // Apply cache size limit if configured (in bytes)
             let cache_size_mb = self.app.cache_size_mb();
-            if cache_size_mb > 0 {
-                if let Some(cache_size_bytes) = (cache_size_mb as i64).checked_mul(1024 * 1024) {
+            if cache_size_mb > 0
+                && let Some(cache_size_bytes) = (cache_size_mb as i64).checked_mul(1024 * 1024) {
                     let cache_size_bytes = cache_size_bytes.to_string();
                     command_line
                         .append_switch_with_value(Some(&"disk-cache-size".into()), Some(&cache_size_bytes.as_str().into()));
                 }
-            }
 
             // Apply custom command-line switches
             for switch in self.app.custom_switches() {

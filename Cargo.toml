@@ -15,7 +15,6 @@ cef-dll-sys = { version = "144.2.0", features = ["sandbox"] }
 process_path = "0.1.4"
 plist = { version = "1" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 libloading = { version = "0.9" }
 wide = "1.0"
 ash = { version = "0.38", default-features = false, features = ["std", "debug", "loaded"] }
