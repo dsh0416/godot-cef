@@ -86,8 +86,7 @@ performance/max_frame_rate=60
 network/user_agent="MyApp/1.0 (Godot Engine)"
 network/proxy_server="socks5://127.0.0.1:1080"
 network/proxy_bypass_list="localhost,127.0.0.1"
-advanced/custom_command_line_switches="disable-gpu-compositing
-enable-features=WebRTC"
+advanced/custom_command_line_switches="disable-gpu-compositing\nenable-features=WebRTC"
 ```
 
 或在创建任何 CefTexture 之前通过 GDScript 配置：
