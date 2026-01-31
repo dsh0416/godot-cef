@@ -117,7 +117,7 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 2. **Install CEF binaries**:
    ```bash
    cargo install export-cef-dir
-   export-cef-dir --version "144.0.11" --force $HOME/.local/share/cef
+   export-cef-dir --version "144.0.12" --force $HOME/.local/share/cef
    export CEF_PATH="$HOME/.local/share/cef"
    ```
 
