@@ -131,7 +131,7 @@ ffmpeg -i input.mp4 -c:v libaom-av1 -crf 30 -c:a libopus -b:a 128k output.webm
 **Recommended for audio:** Opus in WebM/Ogg container
 ```bash
 # Convert audio to Opus
-ffmpeg -i input.mp3 -c:a libopus -b:a 128k output.opus
+ffmpeg -i input.mp3 -c:a libopus -b:a 128k output.ogg
 ```
 
 These formats offer comparable or better quality than proprietary alternatives and work out of the box.
