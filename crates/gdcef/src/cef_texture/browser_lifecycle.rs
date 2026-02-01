@@ -17,10 +17,10 @@ fn get_godot_audio_sample_rate() -> i32 {
 }
 
 fn color_to_cef_color(color: Color) -> u32 {
-    let a = (color.a * 255.0) as u32;
-    let r = (color.r * 255.0) as u32;
-    let g = (color.g * 255.0) as u32;
-    let b = (color.b * 255.0) as u32;
+    let a = (color.a.clamp(0.0, 1.0) * 255.0) as u32;
+    let r = (color.r.clamp(0.0, 1.0) * 255.0) as u32;
+    let g = (color.g.clamp(0.0, 1.0) * 255.0) as u32;
+    let b = (color.b.clamp(0.0, 1.0) * 255.0) as u32;
     (a << 24) | (r << 16) | (g << 8) | b
 }
 
