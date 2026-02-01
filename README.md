@@ -104,7 +104,59 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 
 ## Limitations
 
-**Video and audio playback:** CEF video playback and audio playback (H.264 and MP3 codecs support) are limited by proprietary code in the Chromium/CEF stack. You can replace them with av1 and opus codecs. These constraints come from upstream and cannot be addressed within this project.
+### Media Codec Support
+
+The prebuilt CEF binaries do not include proprietary codecs (H.264, AAC, MP3) due to licensing restrictions in the Chromium/CEF stack. This is an upstream limitation that cannot be addressed within this project.
+
+| Codec Type | Supported (Royalty-Free) | Not Supported (Proprietary) |
+|------------|--------------------------|----------------------------|
+| **Video** | VP8, VP9, AV1, Theora | H.264/AVC, H.265/HEVC |
+| **Audio** | Opus, Vorbis, FLAC, WAV, PCM | MP3, AAC |
+| **Container** | WebM, Ogg, WAV | MP4 (with H.264/AAC) |
+
+<details>
+<summary><strong>Using Royalty-Free Alternatives</strong></summary>
+
+For best compatibility, encode your media using these royalty-free formats:
+
+**Recommended for video:** WebM container with VP9 or AV1 video and Opus audio
+```bash
+# Convert video to WebM (VP9 + Opus)
+ffmpeg -i input.mp4 -c:v libvpx-vp9 -crf 30 -b:v 0 -c:a libopus -b:a 128k output.webm
+
+# Convert video to WebM (AV1 + Opus) - better compression, slower encoding
+ffmpeg -i input.mp4 -c:v libaom-av1 -crf 30 -c:a libopus -b:a 128k output.webm
+```
+
+**Recommended for audio:** Opus in WebM/Ogg container
+```bash
+# Convert audio to Opus
+ffmpeg -i input.mp3 -c:a libopus -b:a 128k output.opus
+```
+
+These formats offer comparable or better quality than proprietary alternatives and work out of the box.
+
+</details>
+
+<details>
+<summary><strong>Building CEF with Proprietary Codecs (Advanced)</strong></summary>
+
+If you require H.264/AAC/MP3 support, you must build CEF from source with proprietary codec flags enabled:
+
+```
+proprietary_codecs=true
+ffmpeg_branding=Chrome
+```
+
+**Important considerations:**
+- Building CEF requires ~100GB disk space and several hours
+- H.264 licensing may apply depending on distribution scale
+- FFmpeg licensing terms (LGPL/GPL) must be followed
+- You assume responsibility for codec licensing compliance
+
+See the [CEF build documentation](https://bitbucket.org/chromiumembedded/cef/wiki/BranchesAndBuilding) for detailed instructions.
+
+</details>
 
 ## Building from Source
 
