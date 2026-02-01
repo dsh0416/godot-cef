@@ -31,6 +31,9 @@ pub struct CefTexture {
     #[export]
     enable_accelerated_osr: bool,
 
+    #[export]
+    background_color: Color,
+
     #[var]
     /// Stores the IME cursor position in local coordinates (relative to this `CefTexture` node),
     /// automatically updated from the browser's caret position.
@@ -62,6 +65,7 @@ impl ITextureRect for CefTexture {
             app: App::default(),
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
+            background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
             ime_position: Vector2i::new(0, 0),
             last_size: Vector2::ZERO,
             last_dpi: 1.0,

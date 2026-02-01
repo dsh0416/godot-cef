@@ -8,6 +8,7 @@
 |------|------|--------|------|
 | `url` | `String` | `"https://google.com"` | 要显示的 URL。设置该属性会让浏览器导航到新地址；读取时返回当前 URL（可能因用户操作/重定向而变化）。 |
 | `enable_accelerated_osr` | `bool` | `true` | 启用 GPU 加速渲染 |
+| `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色。将 alpha 设为 0 表示透明背景，或使用实色以禁用透明效果。 |
 
 ## 项目设置
 
@@ -125,3 +126,14 @@ cef_texture.enable_accelerated_osr = false
 GPU 加速可显著提升性能，但并非所有平台都可用；当不可用时系统会自动回退为软件渲染。
 :::
 
+## 背景颜色
+
+`background_color` 属性控制浏览器的背景色。将 alpha 设为 `0` 表示透明。
+
+```gdscript
+# 透明背景（默认）
+cef_texture.background_color = Color(0, 0, 0, 0)
+
+# 实心背景
+cef_texture.background_color = Color(0.2, 0.3, 0.4, 1)
+```

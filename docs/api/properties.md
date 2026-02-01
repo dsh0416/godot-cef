@@ -8,6 +8,7 @@ The `CefTexture` node provides several properties for configuration and state ma
 |----------|------|---------|-------------|
 | `url` | `String` | `"https://google.com"` | The URL to display. Setting this property navigates the browser to the new URL. Reading it returns the current URL from the browser. |
 | `enable_accelerated_osr` | `bool` | `true` | Enable GPU-accelerated rendering |
+| `background_color` | `Color` | `Color(0, 0, 0, 0)` | Background color for the browser. Set alpha to 0 for transparent background, or use a solid color to disable transparency. |
 
 ## Project Settings
 
@@ -123,3 +124,15 @@ cef_texture.enable_accelerated_osr = false
 ::: tip
 GPU acceleration provides significantly better performance but may not be available on all platforms. The system automatically falls back to software rendering when accelerated rendering is unavailable.
 :::
+
+## Background Color
+
+The `background_color` property controls the browser's background color. Set alpha to `0` for transparency.
+
+```gdscript
+# Transparent background (default)
+cef_texture.background_color = Color(0, 0, 0, 0)
+
+# Solid background
+cef_texture.background_color = Color(0.2, 0.3, 0.4, 1)
+```

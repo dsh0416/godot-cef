@@ -16,6 +16,14 @@ fn get_godot_audio_sample_rate() -> i32 {
     AudioServer::singleton().get_mix_rate() as i32
 }
 
+fn color_to_cef_color(color: Color) -> u32 {
+    let a = (color.a * 255.0) as u32;
+    let r = (color.r * 255.0) as u32;
+    let g = (color.g * 255.0) as u32;
+    let b = (color.b * 255.0) as u32;
+    (a << 24) | (r << 16) | (g << 8) | b
+}
+
 impl CefTexture {
     pub(super) fn cleanup_instance(&mut self) {
         if self.app.browser.is_none() {
@@ -133,6 +141,7 @@ impl CefTexture {
 
         let browser_settings = BrowserSettings {
             windowless_frame_rate: self.get_max_fps(),
+            background_color: color_to_cef_color(self.background_color),
             ..Default::default()
         };
 
