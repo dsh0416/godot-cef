@@ -14,7 +14,7 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator,
     ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
 };
-use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory4};
+use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIAdapter, IDXGIFactory};
 use windows::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, INFINITE, WaitForSingleObject,
 };
@@ -457,16 +457,17 @@ pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     // Device is from Godot, we don't need to close it
     std::mem::forget(device);
 
-    let factory: IDXGIFactory4 = unsafe { CreateDXGIFactory1() }.ok()?;
+    // Use the original DXGI factory (available since Windows Vista) for maximum compatibility
+    let factory: IDXGIFactory = unsafe { CreateDXGIFactory() }.ok()?;
 
     let mut adapter_index = 0u32;
     loop {
-        let adapter: IDXGIAdapter1 = match unsafe { factory.EnumAdapters1(adapter_index) } {
+        let adapter: IDXGIAdapter = match unsafe { factory.EnumAdapters(adapter_index) } {
             Ok(a) => a,
             Err(_) => break, // No more adapters
         };
 
-        let desc = match unsafe { adapter.GetDesc1() } {
+        let desc = match unsafe { adapter.GetDesc() } {
             Ok(d) => d,
             Err(_) => {
                 adapter_index += 1;
