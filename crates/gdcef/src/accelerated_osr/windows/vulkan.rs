@@ -545,7 +545,7 @@ impl VulkanTextureImporter {
                     }
                     let (handle_type, memory_type_index) =
                         self.select_handle_type_and_memory_index(duplicated_handle)?;
-                    let memory = self.import_memory_for_image(
+                    self.import_memory_for_image(
                         duplicated_handle,
                         handle_type,
                         memory_type_index,
@@ -553,7 +553,6 @@ impl VulkanTextureImporter {
                         width,
                         height,
                     )?;
-                    memory
                 } else {
                     unsafe {
                         (fns.destroy_image)(self.device, image, std::ptr::null());
