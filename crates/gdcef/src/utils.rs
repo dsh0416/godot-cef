@@ -34,9 +34,17 @@ fn get_dylib_path_checked() -> CefResult<PathBuf> {
     get_dylib_path().ok_or_else(|| CefError::ResourceNotFound("dylib path".to_string()))
 }
 
+fn get_dylib_dir() -> CefResult<PathBuf> {
+    let dylib_path = get_dylib_path_checked()?;
+    dylib_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| CefError::ResourceNotFound("dylib directory".to_string()))
+}
+
 #[cfg(target_os = "macos")]
 pub fn get_framework_path() -> CefResult<PathBuf> {
-    let dylib_path = get_dylib_path_checked()?;
+    let dylib_dir = get_dylib_dir()?;
 
     let framework_name = match std::env::consts::ARCH {
         "aarch64" => "Chromium Embedded Framework (ARM64).framework",
@@ -53,8 +61,8 @@ pub fn get_framework_path() -> CefResult<PathBuf> {
     //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework/libgdcef.dylib
     // framework is at:
     //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.app/Contents/Frameworks/Chromium Embedded Framework (ARM64|X86_64).framework
-    dylib_path
-        .join("../..")
+    dylib_dir
+        .join("..")
         .join("Godot CEF.app/Contents/Frameworks")
         .join(framework_name)
         .canonicalize()
@@ -63,14 +71,14 @@ pub fn get_framework_path() -> CefResult<PathBuf> {
 
 #[cfg(target_os = "macos")]
 pub fn get_subprocess_path() -> CefResult<PathBuf> {
-    let dylib_path = get_dylib_path_checked()?;
+    let dylib_dir = get_dylib_dir()?;
 
     // current dylib path:
     //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework/libgdcef.dylib
     // subprocess is at:
     //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.app/Contents/Frameworks/Godot CEF Helper.app/Contents/MacOS/Godot CEF Helper
-    dylib_path
-        .join("../..")
+    dylib_dir
+        .join("..")
         .join("Godot CEF.app/Contents/Frameworks")
         .join("Godot CEF Helper.app/Contents/MacOS")
         .join("Godot CEF Helper")
@@ -80,28 +88,28 @@ pub fn get_subprocess_path() -> CefResult<PathBuf> {
 
 #[cfg(target_os = "windows")]
 pub fn get_subprocess_path() -> CefResult<PathBuf> {
-    let dylib_path = get_dylib_path_checked()?;
+    let dylib_dir = get_dylib_dir()?;
 
     // current dylib path:
     //   project/addons/godot_cef/bin/x86_64-pc-windows-msvc/gdcef.dll
     // subprocess is at:
     //   project/addons/godot_cef/bin/x86_64-pc-windows-msvc/gdcef_helper.exe
-    dylib_path
-        .join("../gdcef_helper.exe")
+    dylib_dir
+        .join("gdcef_helper.exe")
         .canonicalize()
         .map_err(CefError::from)
 }
 
 #[cfg(target_os = "linux")]
 pub fn get_subprocess_path() -> CefResult<PathBuf> {
-    let dylib_path = get_dylib_path_checked()?;
+    let dylib_dir = get_dylib_dir()?;
 
     // current dylib path:
     //   project/addons/godot_cef/bin/x86_64-unknown-linux-gnu/libgdcef.so
     // subprocess is at:
     //   project/addons/godot_cef/bin/x86_64-unknown-linux-gnu/gdcef_helper
-    dylib_path
-        .join("../gdcef_helper")
+    dylib_dir
+        .join("gdcef_helper")
         .canonicalize()
         .map_err(CefError::from)
 }
