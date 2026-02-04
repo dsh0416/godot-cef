@@ -6,6 +6,14 @@ use std::ffi::c_void;
 use windows::Win32::Foundation::{
     CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, LUID,
 };
+use windows::Win32::Graphics::Direct3D::{D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0};
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, ID3D11Device, ID3D11Device1,
+    ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
+};
+use windows::Win32::Graphics::Direct3D11on12::{
+    D3D11_RESOURCE_FLAGS, D3D11On12CreateDevice, ID3D11On12Device,
+};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_BARRIER,
     D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
@@ -18,7 +26,7 @@ use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIAdapter, IDXGIFacto
 use windows::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, INFINITE, WaitForSingleObject,
 };
-use windows::core::Interface;
+use windows::core::{IUnknown, Interface};
 
 pub struct PendingD3D12Copy {
     duplicated_handle: HANDLE,
@@ -58,6 +66,136 @@ fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
     Ok(duplicated)
 }
 
+struct D3D11On12Fallback {
+    d3d11_device: ID3D11Device,
+    d3d11_context: ID3D11DeviceContext,
+    d3d11on12_device: ID3D11On12Device,
+}
+
+impl D3D11On12Fallback {
+    fn new(device: &ID3D12Device, command_queue: &ID3D12CommandQueue) -> Option<Self> {
+        let command_queue_unknown: IUnknown = match command_queue.cast() {
+            Ok(queue) => queue,
+            Err(e) => {
+                godot_warn!(
+                    "[AcceleratedOSR/D3D12] Failed to cast command queue to IUnknown: {:?}",
+                    e
+                );
+                return None;
+            }
+        };
+
+        let command_queues = [Some(command_queue_unknown)];
+        let feature_levels = [D3D_FEATURE_LEVEL_11_0];
+        let mut d3d11_device: Option<ID3D11Device> = None;
+        let mut d3d11_context: Option<ID3D11DeviceContext> = None;
+
+        if let Err(e) = unsafe {
+            D3D11On12CreateDevice(
+                device,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT.0,
+                Some(&feature_levels),
+                Some(&command_queues),
+                0,
+                Some(&mut d3d11_device),
+                Some(&mut d3d11_context),
+                None,
+            )
+        } {
+            godot_warn!(
+                "[AcceleratedOSR/D3D12] Failed to create D3D11On12 device: {:?}",
+                e
+            );
+            return None;
+        }
+
+        let Some(d3d11_device) = d3d11_device else {
+            godot_warn!("[AcceleratedOSR/D3D12] D3D11On12 device creation returned null device");
+            return None;
+        };
+        let Some(d3d11_context) = d3d11_context else {
+            godot_warn!("[AcceleratedOSR/D3D12] D3D11On12 device creation returned null context");
+            return None;
+        };
+
+        let d3d11on12_device = match d3d11_device.cast::<ID3D11On12Device>() {
+            Ok(device) => device,
+            Err(e) => {
+                godot_warn!(
+                    "[AcceleratedOSR/D3D12] Failed to query ID3D11On12Device: {:?}",
+                    e
+                );
+                return None;
+            }
+        };
+
+        Some(Self {
+            d3d11_device,
+            d3d11_context,
+            d3d11on12_device,
+        })
+    }
+
+    fn copy_from_handle(
+        &self,
+        handle: HANDLE,
+        dst_resource: &ID3D12Resource,
+        command_queue: &ID3D12CommandQueue,
+        fence: &ID3D12Fence,
+        fence_value: &mut u64,
+    ) -> Result<(), String> {
+        let d3d11_device1: ID3D11Device1 = self
+            .d3d11_device
+            .cast()
+            .map_err(|e| format!("Failed to query ID3D11Device1: {:?}", e))?;
+        let src_texture: ID3D11Texture2D = unsafe { d3d11_device1.OpenSharedResource1(handle) }
+            .map_err(|e| format!("D3D11 OpenSharedResource1 failed: {:?}", e))?;
+        let src_resource: ID3D11Resource = src_texture
+            .cast()
+            .map_err(|e| format!("Failed to cast source texture: {:?}", e))?;
+
+        let flags = D3D11_RESOURCE_FLAGS {
+            BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+            ..Default::default()
+        };
+        let mut wrapped_resource: Option<ID3D11Resource> = None;
+        unsafe {
+            self.d3d11on12_device.CreateWrappedResource(
+                dst_resource,
+                &flags,
+                D3D12_RESOURCE_STATE_COMMON,
+                D3D12_RESOURCE_STATE_COMMON,
+                &mut wrapped_resource,
+            )
+        }
+        .map_err(|e| format!("CreateWrappedResource failed: {:?}", e))?;
+
+        let wrapped_resource = wrapped_resource
+            .ok_or_else(|| "CreateWrappedResource returned null resource".to_string())?;
+        let wrapped_resources = [Some(wrapped_resource.clone())];
+
+        unsafe {
+            self.d3d11on12_device
+                .AcquireWrappedResources(&wrapped_resources)
+        };
+        unsafe {
+            self.d3d11_context
+                .CopyResource(&wrapped_resource, &src_resource)
+        };
+        unsafe {
+            self.d3d11on12_device
+                .ReleaseWrappedResources(&wrapped_resources)
+        };
+        unsafe { self.d3d11_context.Flush() };
+
+        *fence_value += 1;
+        unsafe { command_queue.Signal(fence, *fence_value) }
+            .map_err(|e| format!("Failed to signal fence (D3D11 path): {:?}", e))?;
+
+        Ok(())
+    }
+}
+
 pub struct D3D12TextureImporter {
     device: std::mem::ManuallyDrop<ID3D12Device>,
     command_queue: ID3D12CommandQueue,
@@ -69,6 +207,7 @@ pub struct D3D12TextureImporter {
     pending_copy: Option<PendingD3D12Copy>,
     imported_resource: Option<ImportedD3D12Resource>,
     copy_in_flight: bool,
+    d3d11_fallback: Option<D3D11On12Fallback>,
 }
 
 impl D3D12TextureImporter {
@@ -106,6 +245,8 @@ impl D3D12TextureImporter {
                 )
             })
             .ok()?;
+
+        let d3d11_fallback = D3D11On12Fallback::new(&device, &command_queue);
 
         // Create command allocator using Godot's device
         let command_allocator: ID3D12CommandAllocator =
@@ -150,6 +291,7 @@ impl D3D12TextureImporter {
             pending_copy: None,
             imported_resource: None,
             copy_in_flight: false,
+            d3d11_fallback,
         })
     }
 
@@ -187,18 +329,24 @@ impl D3D12TextureImporter {
 
         if let Err(e) = result {
             let device_reason = unsafe { self.device.GetDeviceRemovedReason() };
-            if !self.device_removed_logged {
-                if device_reason.is_err() {
+            if device_reason.is_err() {
+                if !self.device_removed_logged {
                     godot_warn!(
                         "[AcceleratedOSR/D3D12] Device removed: {:?}",
                         device_reason.err()
                     );
-                } else {
-                    godot_warn!("[AcceleratedOSR/D3D12] OpenSharedHandle failed: {:?}", e);
+                    self.device_removed_logged = true;
                 }
-                self.device_removed_logged = true;
+                return Err("D3D12 device removed".into());
             }
-            return Err("D3D12 device removed".into());
+
+            // Handle is not valid for D3D12. This can happen when CEF produces a D3D11
+            // shared texture handle (opaque NT handle with no API tag).
+            godot_warn!(
+                "[AcceleratedOSR/D3D12] OpenSharedHandle failed (likely non-D3D12 handle): {:?}",
+                e
+            );
+            return Err("Shared handle is not a D3D12 resource".into());
         }
 
         self.device_removed_logged = false;
@@ -265,20 +413,6 @@ impl D3D12TextureImporter {
         // Free previous imported resource
         self.free_imported_resource();
 
-        // Import the resource using our duplicated handle
-        let src_resource = match self.import_shared_handle(
-            pending.duplicated_handle,
-            pending.width,
-            pending.height,
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888,
-        ) {
-            Ok(res) => res,
-            Err(e) => {
-                // pending will be dropped here, closing its handle
-                return Err(e);
-            }
-        };
-
         // Get destination D3D12 resource from Godot's RenderingDevice
         let dst_resource = {
             let mut rd = RenderingServer::singleton()
@@ -294,22 +428,61 @@ impl D3D12TextureImporter {
             unsafe { ID3D12Resource::from_raw(resource_ptr as *mut c_void) }
         };
 
-        // Submit copy command (non-blocking)
-        self.submit_copy_async(&src_resource, &dst_resource)?;
-        self.copy_in_flight = true;
+        // Import the resource using our duplicated handle
+        let src_resource = match self.import_shared_handle(
+            pending.duplicated_handle,
+            pending.width,
+            pending.height,
+            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888,
+        ) {
+            Ok(res) => Some(res),
+            Err(e) => {
+                if e.contains("Shared handle is not a D3D12 resource") {
+                    None
+                } else {
+                    // pending will be dropped here, closing its handle
+                    return Err(e);
+                }
+            }
+        };
 
-        // Don't drop dst_resource - it's owned by Godot
-        std::mem::forget(dst_resource);
+        if let Some(src_resource) = src_resource {
+            // Submit copy command (non-blocking)
+            self.submit_copy_async(&src_resource, &dst_resource)?;
+            self.copy_in_flight = true;
 
-        // Store the imported resource (keeps it alive for the GPU operation)
-        // Transfer handle ownership from pending to imported_resource
-        self.imported_resource = Some(ImportedD3D12Resource {
-            duplicated_handle: pending.duplicated_handle,
-            resource: src_resource,
-        });
+            // Don't drop dst_resource - it's owned by Godot
+            std::mem::forget(dst_resource);
 
-        // Prevent pending's Drop from closing the handle (we transferred ownership)
-        std::mem::forget(pending);
+            // Store the imported resource (keeps it alive for the GPU operation)
+            // Transfer handle ownership from pending to imported_resource
+            self.imported_resource = Some(ImportedD3D12Resource {
+                duplicated_handle: pending.duplicated_handle,
+                resource: src_resource,
+            });
+
+            // Prevent pending's Drop from closing the handle (we transferred ownership)
+            std::mem::forget(pending);
+        } else {
+            godot_warn!(
+                "[AcceleratedOSR/D3D12] D3D12 open failed; trying D3D11 handle via D3D11On12"
+            );
+            let Some(d3d11_fallback) = &self.d3d11_fallback else {
+                return Err("D3D11 fallback is not initialized".into());
+            };
+            d3d11_fallback.copy_from_handle(
+                pending.duplicated_handle,
+                &dst_resource,
+                &self.command_queue,
+                &self.fence,
+                &mut self.fence_value,
+            )?;
+            self.copy_in_flight = true;
+
+            // Don't drop dst_resource - it's owned by Godot
+            std::mem::forget(dst_resource);
+            // pending will be dropped here, closing its handle
+        }
 
         Ok(())
     }

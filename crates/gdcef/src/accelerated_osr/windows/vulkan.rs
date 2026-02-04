@@ -36,7 +36,8 @@ pub struct VulkanTextureImporter {
     queue_family_index: u32,
     uses_separate_queue: bool,
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
-    cached_memory_type_index: Option<u32>,
+    cached_memory_type_index_d3d12: Option<u32>,
+    cached_memory_type_index_d3d11: Option<u32>,
     imported_image: Option<ImportedVulkanImage>,
     pending_copy: Option<PendingVulkanCopy>,
     copy_in_flight: bool,
@@ -231,7 +232,8 @@ impl VulkanTextureImporter {
             uses_separate_queue,
             fence,
             get_memory_win32_handle_properties: fns.get_memory_win32_handle_properties,
-            cached_memory_type_index: None,
+            cached_memory_type_index_d3d12: None,
+            cached_memory_type_index_d3d11: None,
             imported_image: None,
             pending_copy: None,
             copy_in_flight: false,
@@ -490,9 +492,12 @@ impl VulkanTextureImporter {
         // Always free previous image - we get a new handle every frame
         self.free_imported_image();
 
+        let (handle_type, memory_type_index) =
+            self.select_handle_type_and_memory_index(duplicated_handle)?;
+
         // Create new image with external memory flag
-        let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
-            .handle_types(vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE);
+        let mut external_memory_info =
+            vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_type);
 
         let image_info = vk::ImageCreateInfo::default()
             .push_next(&mut external_memory_info)
@@ -519,7 +524,14 @@ impl VulkanTextureImporter {
         }
 
         // Import memory using the duplicated handle
-        let memory = match self.import_memory_for_image(duplicated_handle, image, width, height) {
+        let memory = match self.import_memory_for_image(
+            duplicated_handle,
+            handle_type,
+            memory_type_index,
+            image,
+            width,
+            height,
+        ) {
             Ok(mem) => mem,
             Err(e) => {
                 unsafe {
@@ -540,42 +552,17 @@ impl VulkanTextureImporter {
     fn import_memory_for_image(
         &mut self,
         handle: HANDLE,
+        handle_type: vk::ExternalMemoryHandleTypeFlags,
+        memory_type_index: u32,
         image: vk::Image,
         width: u32,
         height: u32,
     ) -> Result<vk::DeviceMemory, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
 
-        // Get or cache the memory type index (same for all D3D12 imports)
-        let memory_type_index = if let Some(cached) = self.cached_memory_type_index {
-            cached
-        } else {
-            // Query memory properties for this handle (only once)
-            let mut handle_props = vk::MemoryWin32HandlePropertiesKHR::default();
-            let result = unsafe {
-                (self.get_memory_win32_handle_properties)(
-                    self.device,
-                    vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE,
-                    handle,
-                    &mut handle_props,
-                )
-            };
-            if result != vk::Result::SUCCESS {
-                return Err(format!(
-                    "Failed to get memory handle properties: {:?}",
-                    result
-                ));
-            }
-
-            let idx = Self::find_memory_type_index(handle_props.memory_type_bits)
-                .ok_or("Failed to find suitable memory type")?;
-            self.cached_memory_type_index = Some(idx);
-            idx
-        };
-
         // Import the memory with the Win32 handle
         let mut import_info = vk::ImportMemoryWin32HandleInfoKHR::default()
-            .handle_type(vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE)
+            .handle_type(handle_type)
             .handle(handle.0 as isize);
 
         let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().image(image);
@@ -606,6 +593,60 @@ impl VulkanTextureImporter {
         }
 
         Ok(memory)
+    }
+
+    fn select_handle_type_and_memory_index(
+        &mut self,
+        handle: HANDLE,
+    ) -> Result<(vk::ExternalMemoryHandleTypeFlags, u32), String> {
+        let d3d12 = vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE;
+        if let Ok(index) = self.probe_handle_memory_type(handle, d3d12) {
+            return Ok((d3d12, index));
+        }
+
+        let d3d11 = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE;
+        if let Ok(index) = self.probe_handle_memory_type(handle, d3d11) {
+            return Ok((d3d11, index));
+        }
+
+        Err("Handle is not a supported D3D11/D3D12 external memory type".into())
+    }
+
+    fn probe_handle_memory_type(
+        &mut self,
+        handle: HANDLE,
+        handle_type: vk::ExternalMemoryHandleTypeFlags,
+    ) -> Result<u32, String> {
+        let mut handle_props = vk::MemoryWin32HandlePropertiesKHR::default();
+        let result = unsafe {
+            (self.get_memory_win32_handle_properties)(
+                self.device,
+                handle_type,
+                handle,
+                &mut handle_props,
+            )
+        };
+        if result != vk::Result::SUCCESS {
+            return Err(format!(
+                "Failed to get memory handle properties for {:?}: {:?}",
+                handle_type, result
+            ));
+        }
+
+        let idx = Self::find_memory_type_index(handle_props.memory_type_bits)
+            .ok_or("Failed to find suitable memory type")?;
+
+        match handle_type {
+            vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE => {
+                self.cached_memory_type_index_d3d12 = Some(idx);
+            }
+            vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE => {
+                self.cached_memory_type_index_d3d11 = Some(idx);
+            }
+            _ => {}
+        }
+
+        Ok(idx)
     }
 
     fn find_memory_type_index(type_filter: u32) -> Option<u32> {
