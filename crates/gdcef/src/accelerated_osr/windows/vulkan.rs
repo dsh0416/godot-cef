@@ -552,7 +552,7 @@ impl VulkanTextureImporter {
                         image,
                         width,
                         height,
-                    )?;
+                    )?
                 } else {
                     unsafe {
                         (fns.destroy_image)(self.device, image, std::ptr::null());
