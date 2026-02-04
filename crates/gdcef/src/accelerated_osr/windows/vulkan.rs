@@ -38,6 +38,7 @@ pub struct VulkanTextureImporter {
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
     cached_memory_type_index_d3d12: Option<u32>,
     cached_memory_type_index_d3d11: Option<u32>,
+    last_handle_type: Option<vk::ExternalMemoryHandleTypeFlags>,
     imported_image: Option<ImportedVulkanImage>,
     pending_copy: Option<PendingVulkanCopy>,
     copy_in_flight: bool,
@@ -234,6 +235,7 @@ impl VulkanTextureImporter {
             get_memory_win32_handle_properties: fns.get_memory_win32_handle_properties,
             cached_memory_type_index_d3d12: None,
             cached_memory_type_index_d3d11: None,
+            last_handle_type: None,
             imported_image: None,
             pending_copy: None,
             copy_in_flight: false,
@@ -534,10 +536,30 @@ impl VulkanTextureImporter {
         ) {
             Ok(mem) => mem,
             Err(e) => {
-                unsafe {
-                    (fns.destroy_image)(self.device, image, std::ptr::null());
+                // If we guessed the handle type based on cached data and it failed, reset
+                // and probe again (CEF can switch between D3D11 and D3D12).
+                if self.last_handle_type.is_some() {
+                    self.last_handle_type = None;
+                    unsafe {
+                        (fns.destroy_image)(self.device, image, std::ptr::null());
+                    }
+                    let (handle_type, memory_type_index) =
+                        self.select_handle_type_and_memory_index(duplicated_handle)?;
+                    let memory = self.import_memory_for_image(
+                        duplicated_handle,
+                        handle_type,
+                        memory_type_index,
+                        image,
+                        width,
+                        height,
+                    )?;
+                    memory
+                } else {
+                    unsafe {
+                        (fns.destroy_image)(self.device, image, std::ptr::null());
+                    }
+                    return Err(e);
                 }
-                return Err(e);
             }
         };
 
@@ -600,12 +622,29 @@ impl VulkanTextureImporter {
         handle: HANDLE,
     ) -> Result<(vk::ExternalMemoryHandleTypeFlags, u32), String> {
         let d3d12 = vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE;
+        if let Some(handle_type) = self.last_handle_type {
+            let cached_index = match handle_type {
+                vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE => {
+                    self.cached_memory_type_index_d3d12
+                }
+                vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE => {
+                    self.cached_memory_type_index_d3d11
+                }
+                _ => None,
+            };
+            if let Some(index) = cached_index {
+                return Ok((handle_type, index));
+            }
+        }
+
         if let Ok(index) = self.probe_handle_memory_type(handle, d3d12) {
+            self.last_handle_type = Some(d3d12);
             return Ok((d3d12, index));
         }
 
         let d3d11 = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE;
         if let Ok(index) = self.probe_handle_memory_type(handle, d3d11) {
+            self.last_handle_type = Some(d3d11);
             return Ok((d3d11, index));
         }
 
