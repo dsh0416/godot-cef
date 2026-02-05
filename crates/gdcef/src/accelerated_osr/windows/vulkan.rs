@@ -497,40 +497,8 @@ impl VulkanTextureImporter {
         let (handle_type, memory_type_index) =
             self.select_handle_type_and_memory_index(duplicated_handle)?;
 
-        let mut create_image =
-            |handle_type: vk::ExternalMemoryHandleTypeFlags| -> Result<vk::Image, String> {
-                // Create new image with external memory flag
-                let mut external_memory_info =
-                    vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_type);
-
-                let image_info = vk::ImageCreateInfo::default()
-                    .push_next(&mut external_memory_info)
-                    .image_type(vk::ImageType::TYPE_2D)
-                    .format(vk::Format::B8G8R8A8_SRGB)
-                    .extent(vk::Extent3D {
-                        width,
-                        height,
-                        depth: 1,
-                    })
-                    .mip_levels(1)
-                    .array_layers(1)
-                    .samples(vk::SampleCountFlags::TYPE_1)
-                    .tiling(vk::ImageTiling::OPTIMAL)
-                    .usage(vk::ImageUsageFlags::TRANSFER_SRC)
-                    .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                    .initial_layout(vk::ImageLayout::UNDEFINED);
-
-                let mut image = vk::Image::null();
-                let result = unsafe {
-                    (fns.create_image)(self.device, &image_info, std::ptr::null(), &mut image)
-                };
-                if result != vk::Result::SUCCESS {
-                    return Err(format!("Failed to create image: {:?}", result));
-                }
-                Ok(image)
-            };
-
-        let mut image = create_image(handle_type)?;
+        let mut image =
+            Self::create_image_with_handle_type(fns, self.device, handle_type, width, height)?;
 
         // Import memory using the duplicated handle
         let memory = match self.import_memory_for_image(
@@ -552,7 +520,13 @@ impl VulkanTextureImporter {
                     }
                     let (handle_type, memory_type_index) =
                         self.select_handle_type_and_memory_index(duplicated_handle)?;
-                    image = create_image(handle_type)?;
+                    image = Self::create_image_with_handle_type(
+                        fns,
+                        self.device,
+                        handle_type,
+                        width,
+                        height,
+                    )?;
                     self.import_memory_for_image(
                         duplicated_handle,
                         handle_type,
@@ -622,6 +596,43 @@ impl VulkanTextureImporter {
         }
 
         Ok(memory)
+    }
+
+    fn create_image_with_handle_type(
+        fns: &VulkanFunctions,
+        device: vk::Device,
+        handle_type: vk::ExternalMemoryHandleTypeFlags,
+        width: u32,
+        height: u32,
+    ) -> Result<vk::Image, String> {
+        // Create new image with external memory flag
+        let mut external_memory_info =
+            vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_type);
+
+        let image_info = vk::ImageCreateInfo::default()
+            .push_next(&mut external_memory_info)
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(vk::Format::B8G8R8A8_SRGB)
+            .extent(vk::Extent3D {
+                width,
+                height,
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::TRANSFER_SRC)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+
+        let mut image = vk::Image::null();
+        let result =
+            unsafe { (fns.create_image)(device, &image_info, std::ptr::null(), &mut image) };
+        if result != vk::Result::SUCCESS {
+            return Err(format!("Failed to create image: {:?}", result));
+        }
+        Ok(image)
     }
 
     fn select_handle_type_and_memory_index(
