@@ -497,36 +497,38 @@ impl VulkanTextureImporter {
         let (handle_type, memory_type_index) =
             self.select_handle_type_and_memory_index(duplicated_handle)?;
 
-        let mut create_image = |handle_type: vk::ExternalMemoryHandleTypeFlags| -> Result<vk::Image, String> {
-            // Create new image with external memory flag
-            let mut external_memory_info =
-                vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_type);
+        let mut create_image =
+            |handle_type: vk::ExternalMemoryHandleTypeFlags| -> Result<vk::Image, String> {
+                // Create new image with external memory flag
+                let mut external_memory_info =
+                    vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_type);
 
-            let image_info = vk::ImageCreateInfo::default()
-                .push_next(&mut external_memory_info)
-                .image_type(vk::ImageType::TYPE_2D)
-                .format(vk::Format::B8G8R8A8_SRGB)
-                .extent(vk::Extent3D {
-                    width,
-                    height,
-                    depth: 1,
-                })
-                .mip_levels(1)
-                .array_layers(1)
-                .samples(vk::SampleCountFlags::TYPE_1)
-                .tiling(vk::ImageTiling::OPTIMAL)
-                .usage(vk::ImageUsageFlags::TRANSFER_SRC)
-                .sharing_mode(vk::SharingMode::EXCLUSIVE)
-                .initial_layout(vk::ImageLayout::UNDEFINED);
+                let image_info = vk::ImageCreateInfo::default()
+                    .push_next(&mut external_memory_info)
+                    .image_type(vk::ImageType::TYPE_2D)
+                    .format(vk::Format::B8G8R8A8_SRGB)
+                    .extent(vk::Extent3D {
+                        width,
+                        height,
+                        depth: 1,
+                    })
+                    .mip_levels(1)
+                    .array_layers(1)
+                    .samples(vk::SampleCountFlags::TYPE_1)
+                    .tiling(vk::ImageTiling::OPTIMAL)
+                    .usage(vk::ImageUsageFlags::TRANSFER_SRC)
+                    .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                    .initial_layout(vk::ImageLayout::UNDEFINED);
 
-            let mut image = vk::Image::null();
-            let result =
-                unsafe { (fns.create_image)(self.device, &image_info, std::ptr::null(), &mut image) };
-            if result != vk::Result::SUCCESS {
-                return Err(format!("Failed to create image: {:?}", result));
-            }
-            Ok(image)
-        };
+                let mut image = vk::Image::null();
+                let result = unsafe {
+                    (fns.create_image)(self.device, &image_info, std::ptr::null(), &mut image)
+                };
+                if result != vk::Result::SUCCESS {
+                    return Err(format!("Failed to create image: {:?}", result));
+                }
+                Ok(image)
+            };
 
         let mut image = create_image(handle_type)?;
 
