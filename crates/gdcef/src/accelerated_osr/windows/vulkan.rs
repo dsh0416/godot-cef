@@ -575,7 +575,7 @@ impl VulkanTextureImporter {
 
         // Import the memory with the Win32 handle
         let mut import_info = vk::ImportMemoryWin32HandleInfoKHR::default()
-            .handle_type(vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE)
+            .handle_type(vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE)
             .handle(handle.0 as isize);
 
         let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().image(image);

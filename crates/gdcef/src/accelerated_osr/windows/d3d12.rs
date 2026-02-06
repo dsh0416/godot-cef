@@ -15,7 +15,7 @@ use windows::Win32::Graphics::Direct3D11on12::{
 };
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_STATE_COMMON,
-    D3D12_RESOURCE_STATE_COPY_DEST, ID3D12CommandAllocator, ID3D12CommandQueue, ID3D12Device,
+    D3D12_RESOURCE_STATE_COPY_DEST, ID3D12CommandQueue, ID3D12Device,
     ID3D12Fence, ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIAdapter, IDXGIFactory};
@@ -40,8 +40,6 @@ impl Drop for PendingD3D12Copy {
 
 struct ImportedD3D11Resource {
     duplicated_handle: HANDLE,
-    #[allow(dead_code)]
-    resource: ID3D11Texture2D,
 }
 
 fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
@@ -68,7 +66,6 @@ pub struct D3D12TextureImporter {
     d3d11_context: ID3D11DeviceContext,
     d3d11on12_device: ID3D11On12Device,
     command_queue: ID3D12CommandQueue,
-    command_allocator: ID3D12CommandAllocator,
     fence: ID3D12Fence,
     fence_value: u64,
     fence_event: HANDLE,
@@ -114,17 +111,6 @@ impl D3D12TextureImporter {
             })
             .ok()?;
 
-        // Create command allocator using Godot's device
-        let command_allocator: ID3D12CommandAllocator =
-            unsafe { device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT) }
-                .map_err(|e| {
-                    godot_error!(
-                        "[AcceleratedOSR/D3D12] Failed to create command allocator: {:?}",
-                        e
-                    )
-                })
-                .ok()?;
-
         // Create fence for synchronization
         let fence: ID3D12Fence = unsafe {
             device.CreateFence(
@@ -152,15 +138,13 @@ impl D3D12TextureImporter {
         let mut d3d11_context: Option<ID3D11DeviceContext> = None;
         unsafe {
             D3D11On12CreateDevice(
-                device.clone(),
+                &device,
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT.0,
                 None,
-                0,
                 Some(&command_queues),
-                1,
                 0,
-                Some(&mut d3d11_device),
-                Some(&mut d3d11_context),
+                Some(&mut d3d11_device as *mut _),
+                Some(&mut d3d11_context as *mut _),
                 None,
             )
         }
@@ -200,7 +184,6 @@ impl D3D12TextureImporter {
             d3d11_context,
             d3d11on12_device,
             command_queue,
-            command_allocator,
             fence,
             fence_value: 0,
             fence_event,
@@ -239,9 +222,6 @@ impl D3D12TextureImporter {
             return Err("Shared handle is invalid".into());
         }
 
-        // CEF provides D3D11 shared texture handles. Open with ID3D11Device1::OpenSharedResource1
-        // (not ID3D12Device::OpenSharedHandle, which expects D3D12 handles and causes NT Handle
-        // errors on older Windows 10).
         let d3d11_device1: ID3D11Device1 = self.d3d11_device.clone().cast().map_err(|e| {
             format!("Failed to query ID3D11Device1: {:?}", e)
         })?;
@@ -260,15 +240,6 @@ impl D3D12TextureImporter {
         })?;
 
         self.device_removed_logged = false;
-
-        // Validate the texture description
-        let desc = unsafe { resource.GetDesc() };
-        if desc.ArraySize != 1 {
-            return Err(format!(
-                "Expected single-subresource 2D texture, got ArraySize {}",
-                desc.ArraySize
-            ));
-        }
 
         Ok(resource)
     }
@@ -360,7 +331,6 @@ impl D3D12TextureImporter {
         // Transfer handle ownership from pending to imported_resource
         self.imported_resource = Some(ImportedD3D11Resource {
             duplicated_handle: pending.duplicated_handle,
-            resource: src_resource,
         });
 
         // Prevent pending's Drop from closing the handle (we transferred ownership)
@@ -469,9 +439,7 @@ impl Drop for D3D12TextureImporter {
         self.pending_copy = None;
         self.free_imported_resource();
 
-        // Release D3D11on12 resources. Order: context, then devices.
-        // d3d11_context and d3d11on12_device are released automatically.
-        // d3d11_device is ManuallyDrop, so we must drop it explicitly.
+        // d3d11_device is ManuallyDrop — drop before the D3D12 device.
         unsafe {
             std::mem::ManuallyDrop::drop(&mut self.d3d11_device);
         }
