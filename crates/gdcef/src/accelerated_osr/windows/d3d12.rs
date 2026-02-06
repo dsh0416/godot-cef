@@ -7,16 +7,15 @@ use windows::Win32::Foundation::{
     CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, LUID,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, ID3D11Device, ID3D11DeviceContext,
-    ID3D11Device1, ID3D11Resource, ID3D11Texture2D,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, ID3D11Device, ID3D11Device1,
+    ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Direct3D11on12::{
-    D3D11On12CreateDevice, D3D11_RESOURCE_FLAGS, ID3D11On12Device,
+    D3D11_RESOURCE_FLAGS, D3D11On12CreateDevice, ID3D11On12Device,
 };
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_STATE_COMMON,
-    D3D12_RESOURCE_STATE_COPY_DEST, ID3D12CommandQueue, ID3D12Device,
-    ID3D12Fence, ID3D12Resource,
+    D3D12_RESOURCE_STATE_COPY_DEST, ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIAdapter, IDXGIFactory};
 use windows::Win32::System::Threading::{
@@ -133,7 +132,12 @@ impl D3D12TextureImporter {
         // Create D3D11on12 device to open CEF's D3D11 shared texture handles.
         // CEF provides D3D11 handles (OpenSharedResource1), not D3D12 handles (OpenSharedHandle).
         // Using D3D12::OpenSharedHandle with CEF's handle causes NT Handle errors on older Windows 10.
-        let command_queues = [Some(command_queue.clone().cast::<windows::core::IUnknown>().unwrap())];
+        let command_queues = [Some(
+            command_queue
+                .clone()
+                .cast::<windows::core::IUnknown>()
+                .unwrap(),
+        )];
         let mut d3d11_device: Option<ID3D11Device> = None;
         let mut d3d11_context: Option<ID3D11DeviceContext> = None;
         unsafe {
@@ -157,14 +161,18 @@ impl D3D12TextureImporter {
         })
         .ok()?;
 
-        let d3d11_device = d3d11_device.ok_or_else(|| {
-            godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null device");
-            "D3D11 device is null"
-        }).ok()?;
-        let d3d11_context = d3d11_context.ok_or_else(|| {
-            godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null context");
-            "D3D11 context is null"
-        }).ok()?;
+        let d3d11_device = d3d11_device
+            .ok_or_else(|| {
+                godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null device");
+                "D3D11 device is null"
+            })
+            .ok()?;
+        let d3d11_context = d3d11_context
+            .ok_or_else(|| {
+                godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null context");
+                "D3D11 context is null"
+            })
+            .ok()?;
 
         let d3d11on12_device: ID3D11On12Device = d3d11_device
             .cast()
@@ -176,7 +184,9 @@ impl D3D12TextureImporter {
             })
             .ok()?;
 
-        godot_print!("[AcceleratedOSR/D3D12] Using D3D11on12 for CEF texture import (Godot D3D12 device)");
+        godot_print!(
+            "[AcceleratedOSR/D3D12] Using D3D11on12 for CEF texture import (Godot D3D12 device)"
+        );
 
         Some(Self {
             device: std::mem::ManuallyDrop::new(device),
@@ -222,22 +232,22 @@ impl D3D12TextureImporter {
             return Err("Shared handle is invalid".into());
         }
 
-        let d3d11_device1: ID3D11Device1 = self.d3d11_device.clone().cast().map_err(|e| {
-            format!("Failed to query ID3D11Device1: {:?}", e)
-        })?;
+        let d3d11_device1: ID3D11Device1 = self
+            .d3d11_device
+            .clone()
+            .cast()
+            .map_err(|e| format!("Failed to query ID3D11Device1: {:?}", e))?;
 
-        let resource: ID3D11Texture2D = unsafe {
-            d3d11_device1.OpenSharedResource1::<ID3D11Texture2D>(handle)
-        }.map_err(|e| {
-            if !self.device_removed_logged {
-                godot_warn!(
-                    "[AcceleratedOSR/D3D12] OpenSharedResource1 failed: {:?}",
-                    e
-                );
-                self.device_removed_logged = true;
-            }
-            format!("OpenSharedResource1 failed: {:?}", e)
-        })?;
+        let resource: ID3D11Texture2D =
+            unsafe { d3d11_device1.OpenSharedResource1::<ID3D11Texture2D>(handle) }.map_err(
+                |e| {
+                    if !self.device_removed_logged {
+                        godot_warn!("[AcceleratedOSR/D3D12] OpenSharedResource1 failed: {:?}", e);
+                        self.device_removed_logged = true;
+                    }
+                    format!("OpenSharedResource1 failed: {:?}", e)
+                },
+            )?;
 
         self.device_removed_logged = false;
 
