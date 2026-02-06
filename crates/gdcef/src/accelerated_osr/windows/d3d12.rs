@@ -6,13 +6,17 @@ use std::ffi::c_void;
 use windows::Win32::Foundation::{
     CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, LUID,
 };
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, ID3D11Device, ID3D11DeviceContext,
+    ID3D11Device1, ID3D11Resource, ID3D11Texture2D,
+};
+use windows::Win32::Graphics::Direct3D11on12::{
+    D3D11On12CreateDevice, D3D11_RESOURCE_FLAGS, ID3D11On12Device,
+};
 use windows::Win32::Graphics::Direct3D12::{
-    D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_BARRIER,
-    D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-    D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_DESC,
-    D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_STATE_COMMON,
-    D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_TRANSITION_BARRIER, ID3D12CommandAllocator,
-    ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12Resource,
+    D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_STATE_COMMON,
+    D3D12_RESOURCE_STATE_COPY_DEST, ID3D12CommandAllocator, ID3D12CommandQueue, ID3D12Device,
+    ID3D12Fence, ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIAdapter, IDXGIFactory};
 use windows::Win32::System::Threading::{
@@ -34,10 +38,10 @@ impl Drop for PendingD3D12Copy {
     }
 }
 
-struct ImportedD3D12Resource {
+struct ImportedD3D11Resource {
     duplicated_handle: HANDLE,
     #[allow(dead_code)]
-    resource: ID3D12Resource,
+    resource: ID3D11Texture2D,
 }
 
 fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
@@ -60,6 +64,9 @@ fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
 
 pub struct D3D12TextureImporter {
     device: std::mem::ManuallyDrop<ID3D12Device>,
+    d3d11_device: std::mem::ManuallyDrop<ID3D11Device>,
+    d3d11_context: ID3D11DeviceContext,
+    d3d11on12_device: ID3D11On12Device,
     command_queue: ID3D12CommandQueue,
     command_allocator: ID3D12CommandAllocator,
     fence: ID3D12Fence,
@@ -67,7 +74,7 @@ pub struct D3D12TextureImporter {
     fence_event: HANDLE,
     device_removed_logged: bool,
     pending_copy: Option<PendingD3D12Copy>,
-    imported_resource: Option<ImportedD3D12Resource>,
+    imported_resource: Option<ImportedD3D11Resource>,
     copy_in_flight: bool,
 }
 
@@ -137,10 +144,61 @@ impl D3D12TextureImporter {
             })
             .ok()?;
 
-        godot_print!("[AcceleratedOSR/D3D12] Using Godot's D3D12 device for accelerated OSR");
+        // Create D3D11on12 device to open CEF's D3D11 shared texture handles.
+        // CEF provides D3D11 handles (OpenSharedResource1), not D3D12 handles (OpenSharedHandle).
+        // Using D3D12::OpenSharedHandle with CEF's handle causes NT Handle errors on older Windows 10.
+        let command_queues = [Some(command_queue.clone().cast::<windows::core::IUnknown>().unwrap())];
+        let mut d3d11_device: Option<ID3D11Device> = None;
+        let mut d3d11_context: Option<ID3D11DeviceContext> = None;
+        unsafe {
+            D3D11On12CreateDevice(
+                device.clone(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT.0,
+                None,
+                0,
+                Some(&command_queues),
+                1,
+                0,
+                Some(&mut d3d11_device),
+                Some(&mut d3d11_context),
+                None,
+            )
+        }
+        .map_err(|e| {
+            godot_error!(
+                "[AcceleratedOSR/D3D12] D3D11On12CreateDevice failed: {:?}. \
+                 Accelerated OSR requires D3D11on12 (Windows 10+).",
+                e
+            )
+        })
+        .ok()?;
+
+        let d3d11_device = d3d11_device.ok_or_else(|| {
+            godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null device");
+            "D3D11 device is null"
+        }).ok()?;
+        let d3d11_context = d3d11_context.ok_or_else(|| {
+            godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null context");
+            "D3D11 context is null"
+        }).ok()?;
+
+        let d3d11on12_device: ID3D11On12Device = d3d11_device
+            .cast()
+            .map_err(|e| {
+                godot_error!(
+                    "[AcceleratedOSR/D3D12] Failed to query ID3D11On12Device: {:?}",
+                    e
+                )
+            })
+            .ok()?;
+
+        godot_print!("[AcceleratedOSR/D3D12] Using D3D11on12 for CEF texture import (Godot D3D12 device)");
 
         Some(Self {
             device: std::mem::ManuallyDrop::new(device),
+            d3d11_device: std::mem::ManuallyDrop::new(d3d11_device),
+            d3d11_context,
+            d3d11on12_device,
             command_queue,
             command_allocator,
             fence,
@@ -176,42 +234,39 @@ impl D3D12TextureImporter {
         _width: u32,
         _height: u32,
         _format: cef::sys::cef_color_type_t,
-    ) -> Result<ID3D12Resource, String> {
+    ) -> Result<ID3D11Texture2D, String> {
         if handle.is_invalid() {
             return Err("Shared handle is invalid".into());
         }
 
-        // Open the shared handle to get the D3D12 resource
-        let mut resource: Option<ID3D12Resource> = None;
-        let result = unsafe { self.device.OpenSharedHandle(handle, &mut resource) };
+        // CEF provides D3D11 shared texture handles. Open with ID3D11Device1::OpenSharedResource1
+        // (not ID3D12Device::OpenSharedHandle, which expects D3D12 handles and causes NT Handle
+        // errors on older Windows 10).
+        let d3d11_device1: ID3D11Device1 = self.d3d11_device.clone().cast().map_err(|e| {
+            format!("Failed to query ID3D11Device1: {:?}", e)
+        })?;
 
-        if let Err(e) = result {
-            let device_reason = unsafe { self.device.GetDeviceRemovedReason() };
+        let resource: ID3D11Texture2D = unsafe {
+            d3d11_device1.OpenSharedResource1::<ID3D11Texture2D>(handle)
+        }.map_err(|e| {
             if !self.device_removed_logged {
-                if device_reason.is_err() {
-                    godot_warn!(
-                        "[AcceleratedOSR/D3D12] Device removed: {:?}",
-                        device_reason.err()
-                    );
-                } else {
-                    godot_warn!("[AcceleratedOSR/D3D12] OpenSharedHandle failed: {:?}", e);
-                }
+                godot_warn!(
+                    "[AcceleratedOSR/D3D12] OpenSharedResource1 failed: {:?}",
+                    e
+                );
                 self.device_removed_logged = true;
             }
-            return Err("D3D12 device removed".into());
-        }
+            format!("OpenSharedResource1 failed: {:?}", e)
+        })?;
 
         self.device_removed_logged = false;
 
-        let resource =
-            resource.ok_or_else(|| "OpenSharedHandle returned null resource".to_string())?;
-
-        // Validate the resource description
-        let desc: D3D12_RESOURCE_DESC = unsafe { resource.GetDesc() };
-        if desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D {
+        // Validate the texture description
+        let desc = unsafe { resource.GetDesc() };
+        if desc.ArraySize != 1 {
             return Err(format!(
-                "Expected 2D texture, got dimension {:?}",
-                desc.Dimension
+                "Expected single-subresource 2D texture, got ArraySize {}",
+                desc.ArraySize
             ));
         }
 
@@ -303,7 +358,7 @@ impl D3D12TextureImporter {
 
         // Store the imported resource (keeps it alive for the GPU operation)
         // Transfer handle ownership from pending to imported_resource
-        self.imported_resource = Some(ImportedD3D12Resource {
+        self.imported_resource = Some(ImportedD3D11Resource {
             duplicated_handle: pending.duplicated_handle,
             resource: src_resource,
         });
@@ -337,10 +392,10 @@ impl D3D12TextureImporter {
 
     fn submit_copy_async(
         &mut self,
-        src_resource: &ID3D12Resource,
+        src_resource: &ID3D11Texture2D,
         dst_resource: &ID3D12Resource,
     ) -> Result<(), String> {
-        // Wait for previous copy before reusing command allocator
+        // Wait for previous copy before reusing D3D11 context
         if self.fence_value > 0 {
             let completed = unsafe { self.fence.GetCompletedValue() };
             if completed < self.fence_value {
@@ -353,63 +408,42 @@ impl D3D12TextureImporter {
             }
         }
 
-        unsafe { self.command_allocator.Reset() }
-            .map_err(|e| format!("Failed to reset command allocator: {:?}", e))?;
-
-        // Create command list
-        let command_list: ID3D12GraphicsCommandList = unsafe {
-            self.device.CreateCommandList(
-                0,
-                D3D12_COMMAND_LIST_TYPE_DIRECT,
-                &self.command_allocator,
-                None,
+        // Wrap Godot's D3D12 texture for D3D11 copy. D3D11on12 handles resource transitions.
+        let flags = D3D11_RESOURCE_FLAGS {
+            BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+            MiscFlags: 0,
+            CPUAccessFlags: 0,
+            StructureByteStride: 0,
+        };
+        let mut wrapped_dst: Option<ID3D11Resource> = None;
+        unsafe {
+            self.d3d11on12_device.CreateWrappedResource(
+                dst_resource,
+                &flags,
+                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_COMMON,
+                &mut wrapped_dst,
             )
         }
-        .map_err(|e| format!("Failed to create command list: {:?}", e))?;
+        .map_err(|e| format!("CreateWrappedResource failed: {:?}", e))?;
 
-        // Transition only the destination to COPY_DEST.
-        let dst_barrier = D3D12_RESOURCE_BARRIER {
-            Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
-            Anonymous: D3D12_RESOURCE_BARRIER_0 {
-                Transition: std::mem::ManuallyDrop::new(D3D12_RESOURCE_TRANSITION_BARRIER {
-                    pResource: unsafe { std::mem::transmute_copy(dst_resource) },
-                    Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                    StateBefore: D3D12_RESOURCE_STATE_COMMON,
-                    StateAfter: D3D12_RESOURCE_STATE_COPY_DEST,
-                }),
-            },
-        };
+        let wrapped_dst = wrapped_dst.ok_or("CreateWrappedResource returned null")?;
 
-        unsafe { command_list.ResourceBarrier(&[dst_barrier]) };
-        unsafe { command_list.CopyResource(dst_resource, src_resource) };
+        // Copy CEF texture (D3D11) to wrapped Godot texture
+        unsafe {
+            self.d3d11_context.CopyResource(&wrapped_dst, src_resource);
+        }
 
-        // Transition back to COMMON for shader read
-        let dst_barrier_after = D3D12_RESOURCE_BARRIER {
-            Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
-            Anonymous: D3D12_RESOURCE_BARRIER_0 {
-                Transition: std::mem::ManuallyDrop::new(D3D12_RESOURCE_TRANSITION_BARRIER {
-                    pResource: unsafe { std::mem::transmute_copy(dst_resource) },
-                    Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-                    StateBefore: D3D12_RESOURCE_STATE_COPY_DEST,
-                    StateAfter: D3D12_RESOURCE_STATE_COMMON,
-                }),
-            },
-        };
+        // Release wrapped resource - transitions it back to COMMON for Godot
+        unsafe {
+            let resources = [Some(wrapped_dst)];
+            self.d3d11on12_device.ReleaseWrappedResources(&resources);
+        }
 
-        unsafe { command_list.ResourceBarrier(&[dst_barrier_after]) };
-
-        // Close and execute command list
-        unsafe { command_list.Close() }
-            .map_err(|e| format!("Failed to close command list: {:?}", e))?;
-
-        let command_lists = [Some(
-            command_list
-                .cast::<windows::Win32::Graphics::Direct3D12::ID3D12CommandList>()
-                .unwrap(),
-        )];
-        unsafe { self.command_queue.ExecuteCommandLists(&command_lists) };
+        // Flush to submit D3D11on12 work to our command queue
+        unsafe {
+            self.d3d11_context.Flush();
+        }
 
         self.fence_value += 1;
         unsafe { self.command_queue.Signal(&self.fence, self.fence_value) }
@@ -434,6 +468,13 @@ impl Drop for D3D12TextureImporter {
 
         self.pending_copy = None;
         self.free_imported_resource();
+
+        // Release D3D11on12 resources. Order: context, then devices.
+        // d3d11_context and d3d11on12_device are released automatically.
+        // d3d11_device is ManuallyDrop, so we must drop it explicitly.
+        unsafe {
+            std::mem::ManuallyDrop::drop(&mut self.d3d11_device);
+        }
 
         if !self.fence_event.is_invalid() {
             let _ = unsafe { CloseHandle(self.fence_event) };
