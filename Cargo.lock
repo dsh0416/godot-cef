@@ -99,9 +99,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.100"
+version = "1.0.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
+checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
 name = "arrayvec"
@@ -270,9 +270,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "144.3.0+144.0.12"
+version = "144.4.0+144.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7801a61c5e9b7bc812454643058f8f3cd2034780a824bad1fab9de803995f1ba"
+checksum = "42320c2356f3fe4ed3f875b8fc93cbbabd1be3c59fcc0a8eb1e5b5c25616ac28"
 dependencies = [
  "anyhow",
  "ash",
@@ -298,9 +298,9 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "144.3.0+144.0.12"
+version = "144.4.0+144.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0e47d4de5a6ac47b72b3c3653d952ae69cfd635eeb8bec8a8f203109b258393"
+checksum = "6d802abd4ac0b8c12be11b6af24100c6e21543c265867ad53067268048bc7e3a"
 dependencies = [
  "anyhow",
  "cmake",
@@ -2247,9 +2247,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "ureq"
-version = "3.1.4"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d39cb1dbab692d82a977c0392ffac19e188bd9186a9f32806f0aaa859d75585a"
+checksum = "fdc97a28575b85cfedf2a7e7d3cc64b3e11bd8ac766666318003abbacc7a21fc"
 dependencies = [
  "base64",
  "cookie_store",
@@ -2867,18 +2867,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.38"
+version = "0.8.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57cf3aa6855b23711ee9852dfc97dfaa51c45feaba5b645d0c777414d494a961"
+checksum = "db6d35d663eadb6c932438e763b262fe1a70987f9ae936e60158176d710cae4a"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.38"
+version = "0.8.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a616990af1a287837c4fe6596ad77ef57948f787e46ce28e166facc0cc1cb75"
+checksum = "4122cd3169e94605190e77839c9a40d40ed048d305bfdc146e7df40ab0f3e517"
 dependencies = [
  "proc-macro2",
  "quote",
