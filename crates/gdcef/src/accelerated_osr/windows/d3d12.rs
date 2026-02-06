@@ -136,7 +136,13 @@ impl D3D12TextureImporter {
             command_queue
                 .clone()
                 .cast::<windows::core::IUnknown>()
-                .unwrap(),
+                .map_err(|e| {
+                    godot_error!(
+                        "[AcceleratedOSR/D3D12] Failed to cast command queue to IUnknown: {:?}",
+                        e
+                    )
+                })
+                .ok()?,
         )];
         let mut d3d11_device: Option<ID3D11Device> = None;
         let mut d3d11_context: Option<ID3D11DeviceContext> = None;
