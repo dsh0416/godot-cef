@@ -6,6 +6,10 @@ This section provides comprehensive documentation for the `CefTexture` node, whi
 
 Once the Godot CEF addon is installed, you can use the `CefTexture` node in your scenes:
 
+::: info Packaging note
+During export/package builds, Godot may convert some imported assets into other formats. If your frontend is built with Vite and needs specific source files to stay unchanged, consider using [`vite-plugin-godot-keep-import`](https://github.com/LemonNekoGH/vite-plugin-keep-import-for-godot) to keep imports for selected file types.
+:::
+
 ```gdscript
 extends Control
 

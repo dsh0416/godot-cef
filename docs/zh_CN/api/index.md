@@ -6,6 +6,10 @@
 
 安装 Godot CEF 插件后，您可以直接在场景中使用 `CefTexture`：
 
+::: info 打包说明
+在导出/打包阶段，Godot 可能会把部分已导入资源转换为其他格式。如果您的前端使用 Vite，且需要让某些源文件保持原样，可考虑使用 [`vite-plugin-godot-keep-import`](https://github.com/LemonNekoGH/vite-plugin-keep-import-for-godot) 来为指定文件类型保留 import。
+:::
+
 ```gdscript
 extends Control
 
