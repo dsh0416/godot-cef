@@ -6,173 +6,58 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report a bug! Please fill out the sections below to help us understand and reproduce the issue.
+        Thanks for the report. Keep it short and include only what helps reproduce the issue.
 
   - type: textarea
     id: description
     attributes:
-      label: Bug Description
-      description: A clear and concise description of the bug.
-      placeholder: Describe the bug...
+      label: What happened?
+      description: Tell us the bug in one or two sentences.
+      placeholder: The browser view is blank after loading a URL.
     validations:
       required: true
 
   - type: textarea
     id: reproduction
     attributes:
-      label: Steps to Reproduce
-      description: Steps to reproduce the behavior.
+      label: How to reproduce
+      description: Provide the smallest set of steps.
       placeholder: |
-        1. Create a CefTexture node
-        2. Set URL to '...'
-        3. Enable accelerated rendering
-        4. See error
+        1. ...
+        2. ...
+        3. ...
     validations:
       required: true
 
   - type: textarea
-    id: expected
+    id: environment
     attributes:
-      label: Expected Behavior
-      description: What did you expect to happen?
-      placeholder: Describe the expected behavior...
-    validations:
-      required: true
-
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual Behavior
-      description: What actually happened?
-      placeholder: Describe what happened instead...
-    validations:
-      required: true
-
-  - type: dropdown
-    id: os
-    attributes:
-      label: Operating System
-      description: Which operating system are you using?
-      options:
-        - Windows 11
-        - Windows 10
-        - macOS Tahoe (26)
-        - macOS Sequoia (15)
-        - macOS Sonoma (14)
-        - macOS Ventura (13)
-        - Ubuntu 24.04
-        - Ubuntu 22.04
-        - Other Linux (please specify below)
-        - Other (please specify below)
-    validations:
-      required: true
-
-  - type: dropdown
-    id: arch
-    attributes:
-      label: CPU Architecture
-      description: What CPU architecture are you running?
-      options:
-        - x86_64 (Intel/AMD 64-bit)
-        - aarch64/arm64 (Apple Silicon, ARM)
-        - Other
-    validations:
-      required: true
-
-  - type: input
-    id: godot_version
-    attributes:
-      label: Godot Version
-      description: Which version of Godot are you using?
-      placeholder: "e.g., 4.5.1, 4.6 beta 2"
-    validations:
-      required: true
-
-  - type: dropdown
-    id: graphics_api
-    attributes:
-      label: Graphics API
-      description: Which rendering backend are you using in Godot?
-      options:
-        - Vulkan
-        - DirectX 12
-        - Metal
-        - OpenGL / Compatibility
-        - Not sure
-    validations:
-      required: true
-
-  - type: input
-    id: gpu
-    attributes:
-      label: GPU Model
-      description: What GPU are you using?
-      placeholder: "e.g., NVIDIA RTX 4090, Apple M3 Pro, AMD Radeon RX 7900"
-    validations:
-      required: false
-
-  - type: input
-    id: extension_version
-    attributes:
-      label: Godot CEF Version
-      description: Which version of the extension are you using?
-      placeholder: "e.g., 0.1.0, main branch, commit abc1234"
-    validations:
-      required: true
-
-  - type: dropdown
-    id: rendering_mode
-    attributes:
-      label: Rendering Mode
-      description: Are you using accelerated (GPU) or software rendering?
-      options:
-        - Accelerated (GPU)
-        - Software (CPU)
-        - Both / Either
-        - Not sure
+      label: Environment
+      description: Share versions/platform info.
+      placeholder: |
+        - Godot:
+        - godot-cef:
+        - OS:
     validations:
       required: true
 
   - type: textarea
     id: logs
     attributes:
-      label: Logs / Error Messages
-      description: |
-        Please include any relevant logs, error messages, or console output.
-        Tip: Check Godot's Output panel and the system console for CEF-related messages.
+      label: Logs or screenshots (optional)
       render: shell
-      placeholder: Paste logs here...
-
-  - type: textarea
-    id: code
-    attributes:
-      label: Minimal Reproduction Code
-      description: If applicable, provide a minimal code sample that reproduces the issue.
-      render: gdscript
-      placeholder: |
-        extends Control
-
-        func _ready():
-            var cef = CefTexture.new()
-            cef.url = "https://example.com"
-            add_child(cef)
+      placeholder: Paste logs/screenshots links here.
 
   - type: textarea
     id: additional
     attributes:
-      label: Additional Context
-      description: Add any other context, screenshots, or screen recordings about the problem here.
-      placeholder: Any additional information...
+      label: Additional context (optional)
+      placeholder: Anything else that might help.
 
   - type: checkboxes
     id: checklist
     attributes:
-      label: Checklist
+      label: Before submitting
       options:
         - label: I have searched existing issues to make sure this isn't a duplicate
           required: true
-        - label: I have read the [documentation](https://dsh0416.github.io/godot-cef/)
-          required: true
-        - label: I am using a supported platform and Godot version (4.5+)
-          required: true
-
