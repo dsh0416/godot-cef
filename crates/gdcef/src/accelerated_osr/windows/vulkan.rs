@@ -23,10 +23,10 @@ pub struct PendingVulkanCopy {
 
 impl Drop for PendingVulkanCopy {
     fn drop(&mut self) {
-        if let Some(handle) = self.duplicated_handle {
-            if !handle.is_invalid() {
-                let _ = unsafe { CloseHandle(handle) };
-            }
+        if let Some(handle) = self.duplicated_handle
+            && !handle.is_invalid()
+        {
+            let _ = unsafe { CloseHandle(handle) };
         }
     }
 }
@@ -455,10 +455,10 @@ impl VulkanTextureImporter {
 
         // Check if we need to invalidate cache due to resize
         if let Some(cached) = self.cache.get(&pending.source_handle) {
-            if cached.width != pending.width || cached.height != pending.height {
-                if let Some(removed) = self.cache.remove(&pending.source_handle) {
-                    self.destroy_imported_image(removed);
-                }
+            if (cached.width != pending.width || cached.height != pending.height)
+                && let Some(removed) = self.cache.remove(&pending.source_handle)
+            {
+                self.destroy_imported_image(removed);
             }
         }
 
@@ -513,10 +513,10 @@ impl VulkanTextureImporter {
                     oldest_key = Some(*k);
                 }
             }
-            if let Some(k) = oldest_key {
-                if let Some(removed) = self.cache.remove(&k) {
-                    self.destroy_imported_image(removed);
-                }
+            if let Some(k) = oldest_key
+                && let Some(removed) = self.cache.remove(&k)
+            {
+                self.destroy_imported_image(removed);
             }
         }
 

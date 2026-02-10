@@ -406,7 +406,7 @@ impl VulkanTextureImporter {
     fn get_dmabuf_inode(fd: RawFd) -> Option<u64> {
         let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
         if unsafe { libc::fstat(fd, &mut stat) } == 0 {
-            Some(stat.st_ino as u64)
+            Some(stat.st_ino)
         } else {
             None
         }
@@ -427,7 +427,7 @@ impl VulkanTextureImporter {
         }
 
         // Get inode from first plane
-        let first_fd = info.planes.get(0).ok_or("Missing first plane")?.fd;
+        let first_fd = info.planes.first().ok_or("Missing first plane")?.fd;
         let inode = Self::get_dmabuf_inode(first_fd).ok_or("Failed to get inode for DMA-BUF")?;
 
         let mut fds = Vec::new();
@@ -514,12 +514,11 @@ impl VulkanTextureImporter {
         }
 
         // Check cache invalidation
-        if let Some(cached) = self.cache.get(&pending.inode) {
-            if cached.width != pending.width || cached.height != pending.height {
-                if let Some(removed) = self.cache.remove(&pending.inode) {
-                    self.destroy_imported_image(removed);
-                }
-            }
+        if let Some(cached) = self.cache.get(&pending.inode)
+            && (cached.width != pending.width || cached.height != pending.height)
+            && let Some(removed) = self.cache.remove(&pending.inode)
+        {
+            self.destroy_imported_image(removed);
         }
 
         // Import if needed
@@ -588,10 +587,10 @@ impl VulkanTextureImporter {
                     oldest_key = Some(*k);
                 }
             }
-            if let Some(k) = oldest_key {
-                if let Some(removed) = self.cache.remove(&k) {
-                    self.destroy_imported_image(removed);
-                }
+            if let Some(k) = oldest_key
+                && let Some(removed) = self.cache.remove(&k)
+            {
+                self.destroy_imported_image(removed);
             }
         }
 
