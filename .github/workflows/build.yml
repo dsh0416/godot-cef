@@ -318,8 +318,8 @@ jobs:
             --artifacts artifacts \
             --output dist/addons/godot_cef \
             --addon-src addons/godot_cef
-          # Create zip for Godot Asset Store (contains addons/godot_cef/)
-          cd dist && zip -r ../godot_cef.zip addons
+          # Use dist as ZIP root so Asset Library installs into res://addons/godot_cef.
+          zip -r godot_cef.zip dist
 
       - name: Upload packed addon
         uses: actions/upload-artifact@v4
