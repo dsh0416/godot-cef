@@ -469,11 +469,8 @@ impl VulkanTextureImporter {
                 .take()
                 .ok_or("Missing duplicated handle for new import")?;
 
-            let imported = self.import_handle_to_image_from_duplicated(
-                handle,
-                pending.width,
-                pending.height,
-            )?;
+            let imported =
+                self.import_handle_to_image_from_duplicated(handle, pending.width, pending.height)?;
 
             self.cache.insert(pending.source_handle, imported);
         }
