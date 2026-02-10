@@ -1,6 +1,6 @@
 use crate::bundle_common::{
     FrameworkInfoPlist, deploy_bundle_to_addon, get_target_dir, get_target_dir_for_target,
-    run_cargo, run_lipo,
+    run_cargo_for_macos_targets, run_lipo, TARGET_ARM64, TARGET_X64,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 const PLATFORM_TARGET: &str = "universal-apple-darwin";
 
 const RESOURCES_PATH: &str = "Resources";
-const TARGET_ARM64: &str = "aarch64-apple-darwin";
-const TARGET_X64: &str = "x86_64-apple-darwin";
 
 fn create_framework_layout(fmwk_path: &Path) -> PathBuf {
     fs::create_dir_all(fmwk_path.join(RESOURCES_PATH)).unwrap();
@@ -52,31 +50,7 @@ fn bundle(
 }
 
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cargo_args_arm64 = vec![
-        "build",
-        "--lib",
-        "--package",
-        "gdcef",
-        "--target",
-        TARGET_ARM64,
-    ];
-    if release {
-        cargo_args_arm64.push("--release");
-    }
-    run_cargo(&cargo_args_arm64)?;
-
-    let mut cargo_args_x64 = vec![
-        "build",
-        "--lib",
-        "--package",
-        "gdcef",
-        "--target",
-        TARGET_X64,
-    ];
-    if release {
-        cargo_args_x64.push("--release");
-    }
-    run_cargo(&cargo_args_x64)?;
+    run_cargo_for_macos_targets(&["build", "--lib", "--package", "gdcef"], release)?;
 
     let target_dir_arm64 = get_target_dir_for_target(release, TARGET_ARM64, target_dir);
     let target_dir_x64 = get_target_dir_for_target(release, TARGET_X64, target_dir);

@@ -131,13 +131,13 @@ fn bundle(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn run(release: bool, target_dir: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cargo_args = vec!["build", "--lib", "--package", "gdcef"];
-    if release {
-        cargo_args.push("--release");
-    }
-    run_cargo(&cargo_args)?;
-
-    let mut cargo_args = vec!["build", "--bin", "gdcef_helper"];
+    let mut cargo_args = vec![
+        "build",
+        "--package",
+        "gdcef",
+        "--package",
+        "gdcef_helper",
+    ];
     if release {
         cargo_args.push("--release");
     }
