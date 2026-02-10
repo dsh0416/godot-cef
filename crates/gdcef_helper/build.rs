@@ -14,4 +14,3 @@ fn main() {
         println!("cargo:rustc-link-arg=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA");
     }
 }
-
