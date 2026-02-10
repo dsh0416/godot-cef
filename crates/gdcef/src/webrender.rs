@@ -56,7 +56,8 @@ fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
     let simd_chunks = bgra.len() / 16;
     for i in 0..simd_chunks {
         let offset = i * 16;
-        let src: [u8; 16] = bgra[offset..offset + 16].try_into().unwrap();
+        let mut src = [0u8; 16];
+        src.copy_from_slice(&bgra[offset..offset + 16]);
         let v = u8x16::new(src);
         // Swizzle BGRA -> RGBA using precomputed indices
         let shuffled = v.swizzle(BGRA_TO_RGBA_INDICES);

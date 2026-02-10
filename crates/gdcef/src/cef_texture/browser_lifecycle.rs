@@ -25,6 +25,25 @@ fn color_to_cef_color(color: Color) -> u32 {
 }
 
 impl CefTexture {
+    fn log_cleanup_state_violations(&self) {
+        if self.app.browser.is_some()
+            || self.app.render_mode.is_some()
+            || self.app.render_size.is_some()
+            || self.app.device_scale_factor.is_some()
+            || self.app.cursor_type.is_some()
+            || self.app.popup_state.is_some()
+            || self.app.event_queues.is_some()
+            || self.app.audio_packet_queue.is_some()
+            || self.app.audio_params.is_some()
+            || self.app.audio_sample_rate.is_some()
+            || self.app.audio_shutdown_flag.is_some()
+        {
+            godot::global::godot_warn!(
+                "[CefTexture] Cleanup invariant violation: runtime state not fully cleared"
+            );
+        }
+    }
+
     pub(super) fn cleanup_instance(&mut self) {
         if self.app.browser.is_none() {
             crate::cef_init::cef_release();
@@ -68,17 +87,7 @@ impl CefTexture {
             host.close_browser(true as _);
         }
 
-        self.app.render_mode = None;
-        self.app.render_size = None;
-        self.app.device_scale_factor = None;
-        self.app.cursor_type = None;
-        self.app.popup_state = None;
-        self.app.event_queues = None;
-        self.app.drag_state = Default::default();
-        self.app.audio_packet_queue = None;
-        self.app.audio_params = None;
-        self.app.audio_sample_rate = None;
-        self.app.audio_shutdown_flag = None;
+        self.app.clear_runtime_state();
 
         self.ime_active = false;
         self.ime_proxy = None;
@@ -93,6 +102,7 @@ impl CefTexture {
             self.popup_texture_2d_rd = None;
         }
 
+        self.log_cleanup_state_violations();
         crate::cef_init::cef_release();
     }
 
@@ -185,7 +195,22 @@ impl CefTexture {
     }
 
     fn should_use_accelerated_osr(&self) -> bool {
-        self.enable_accelerated_osr && accelerated_osr::is_accelerated_osr_supported()
+        if !self.enable_accelerated_osr {
+            godot::global::godot_print!(
+                "[CefTexture] Accelerated OSR disabled by `enable_accelerated_osr = false`; using software rendering"
+            );
+            return false;
+        }
+
+        let supported = accelerated_osr::is_accelerated_osr_supported();
+        let (_, reason) = accelerated_osr::accelerated_osr_support_diagnostic();
+        if !supported {
+            godot::global::godot_warn!(
+                "[CefTexture] Accelerated OSR unavailable: {}. Falling back to software rendering.",
+                reason
+            );
+        }
+        supported
     }
 
     fn create_software_browser(
@@ -197,6 +222,7 @@ impl CefTexture {
         pixel_width: i32,
         pixel_height: i32,
     ) -> Result<cef::Browser, CefError> {
+        godot::global::godot_print!("[CefTexture] Creating browser in software rendering mode");
         let window_info = WindowInfo {
             bounds: cef::Rect {
                 x: 0,
@@ -280,6 +306,7 @@ impl CefTexture {
         pixel_width: i32,
         pixel_height: i32,
     ) -> Result<cef::Browser, CefError> {
+        godot::global::godot_print!("[CefTexture] Creating browser in accelerated rendering mode");
         let importer = match GodotTextureImporter::new() {
             Some(imp) => imp,
             None => {

@@ -236,3 +236,59 @@ pub struct App {
     /// Shutdown flag for audio handler to suppress errors during cleanup.
     pub audio_shutdown_flag: Option<AudioShutdownFlag>,
 }
+
+impl App {
+    /// Clears per-instance runtime state. This is used during `CefTexture` cleanup
+    /// and can be reused by tests as a deterministic reset point.
+    pub fn clear_runtime_state(&mut self) {
+        self.browser = None;
+        self.render_mode = None;
+        self.render_size = None;
+        self.device_scale_factor = None;
+        self.cursor_type = None;
+        self.popup_state = None;
+        self.event_queues = None;
+        self.drag_state = Default::default();
+        self.audio_packet_queue = None;
+        self.audio_params = None;
+        self.audio_sample_rate = None;
+        self.audio_shutdown_flag = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_runtime_state_reset_is_deterministic() {
+        let mut app = App::default();
+        for _ in 0..1000 {
+            app.drag_state.is_drag_over = true;
+            app.drag_state.is_dragging_from_browser = true;
+            app.drag_state.allowed_ops = u32::MAX;
+            app.event_queues = Some(Arc::new(Mutex::new(EventQueues::new())));
+            app.audio_packet_queue = Some(Arc::new(Mutex::new(VecDeque::new())));
+            app.audio_params = Some(Arc::new(Mutex::new(None)));
+            app.audio_sample_rate = Some(Arc::new(Mutex::new(48000)));
+            app.audio_shutdown_flag = Some(Arc::new(AtomicBool::new(true)));
+
+            app.clear_runtime_state();
+
+            assert!(app.browser.is_none());
+            assert!(app.render_mode.is_none());
+            assert!(app.render_size.is_none());
+            assert!(app.device_scale_factor.is_none());
+            assert!(app.cursor_type.is_none());
+            assert!(app.popup_state.is_none());
+            assert!(app.event_queues.is_none());
+            assert!(!app.drag_state.is_drag_over);
+            assert!(!app.drag_state.is_dragging_from_browser);
+            assert_eq!(app.drag_state.allowed_ops, 0);
+            assert!(app.audio_packet_queue.is_none());
+            assert!(app.audio_params.is_none());
+            assert!(app.audio_sample_rate.is_none());
+            assert!(app.audio_shutdown_flag.is_none());
+        }
+    }
+}

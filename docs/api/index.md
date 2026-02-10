@@ -100,6 +100,8 @@ When remote debugging is enabled, CEF listens on the configured port (default: *
 - [**IME Support**](./ime-support.md) - Input Method Editor integration
 - [**Drag and Drop**](./drag-and-drop.md) - Bidirectional drag-and-drop support
 - [**Downloads**](./downloads.md) - Handle file downloads from web pages
+- [**Compatibility Matrix**](./compatibility-matrix.md) - Platform/backend acceleration and fallback behavior
+- [**Production Security Baseline**](./security-baseline.md) - Recommended safe defaults for release builds
 
 ## Basic Usage Example
 

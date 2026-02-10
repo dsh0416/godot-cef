@@ -100,6 +100,8 @@ func _ready():
 - [**输入法（IME）支持**](./ime-support.md) - 输入法（IME）集成
 - [**拖放**](./drag-and-drop.md) - 双向拖放支持
 - [**下载**](./downloads.md) - 处理网页文件下载
+- [**兼容性矩阵**](./compatibility-matrix.md) - 平台/后端的加速渲染与回退行为
+- [**生产环境安全基线**](./security-baseline.md) - 发布版本的推荐安全默认配置
 
 ## 基本使用示例
 

@@ -5,6 +5,7 @@
 //!   cargo xtask bundle-app [--release]       # Bundle helper app (macOS only)
 //!   cargo xtask bundle-framework [--release] # Bundle framework (macOS only)
 //!   cargo xtask pack <artifacts> <output>    # Pack CI artifacts into distributable addon
+//!   cargo xtask validate --addon <path>      # Validate addon artifact completeness
 
 #[cfg(target_os = "macos")]
 mod bundle_app;
@@ -16,6 +17,7 @@ mod bundle_linux;
 #[cfg(target_os = "windows")]
 mod bundle_windows;
 mod pack;
+mod validate;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -77,6 +79,13 @@ enum Commands {
         #[arg(long)]
         addon_src: Option<PathBuf>,
     },
+
+    /// Validate addon artifact completeness
+    Validate {
+        /// Path to addon directory containing bin/<platform> outputs
+        #[arg(long)]
+        addon: PathBuf,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -135,6 +144,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             addon_src,
         } => {
             pack::run(&artifacts, &output, addon_src.as_deref())?;
+        }
+        Commands::Validate { addon } => {
+            validate::run(&addon)?;
         }
     }
 

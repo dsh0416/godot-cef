@@ -355,22 +355,50 @@ pub fn warn_if_insecure_settings() {
 
     if config.allow_insecure_content {
         godot::global::godot_warn!(
-            "[GodotCef] Security Warning: 'allow_insecure_content' is enabled. \
-             This allows loading HTTP content in HTTPS pages."
+            "[GodotCef] Security Warning: '{}' is enabled. This allows HTTP content on HTTPS pages. \
+             Disable it for production builds unless strictly required.",
+            SETTING_ALLOW_INSECURE_CONTENT
         );
     }
 
     if config.ignore_certificate_errors {
         godot::global::godot_warn!(
-            "[GodotCef] Security Warning: 'ignore_certificate_errors' is enabled. \
-             SSL/TLS certificate validation is disabled."
+            "[GodotCef] Security Warning: '{}' is enabled. SSL/TLS certificate validation is disabled. \
+             Disable it for production builds.",
+            SETTING_IGNORE_CERTIFICATE_ERRORS
         );
     }
 
     if config.disable_web_security {
         godot::global::godot_warn!(
-            "[GodotCef] Security Warning: 'disable_web_security' is enabled. \
-             CORS and same-origin policy are disabled."
+            "[GodotCef] Security Warning: '{}' is enabled. CORS and same-origin policy are disabled. \
+             Disable it for production builds.",
+            SETTING_DISABLE_WEB_SECURITY
         );
     }
+
+    for switch in get_custom_switches() {
+        let normalized = switch.trim().trim_start_matches('-');
+        if normalized.starts_with("disable-web-security")
+            || normalized.starts_with("ignore-certificate-errors")
+            || normalized.starts_with("allow-running-insecure-content")
+        {
+            godot::global::godot_warn!(
+                "[GodotCef] Security Warning: '{}' contains custom switch '{}', which weakens browser security.",
+                SETTING_CUSTOM_SWITCHES,
+                switch
+            );
+        }
+    }
+}
+
+pub fn log_production_security_baseline() {
+    godot::global::godot_print!(
+        "[GodotCef] Production security baseline: \
+         {}=false, {}=false, {}=false, {} should not include insecure switches.",
+        SETTING_ALLOW_INSECURE_CONTENT,
+        SETTING_IGNORE_CERTIFICATE_ERRORS,
+        SETTING_DISABLE_WEB_SECURITY,
+        SETTING_CUSTOM_SWITCHES
+    );
 }

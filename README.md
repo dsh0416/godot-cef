@@ -185,6 +185,14 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 
 See the `addons/godot_cef/godot_cef.gdextension` file for the complete list of required files per platform.
 
+### Validate Packaged Addon
+
+You can validate bundled addon artifacts with:
+
+```bash
+cargo xtask validate --addon addons/godot_cef
+```
+
 ## Comparison with Similar Projects
 
 | Feature | **Godot CEF** (this project) | [godot_wry](https://github.com/doceazedo/godot_wry) | [gdcef](https://github.com/Lecrapouille/gdcef) |

@@ -577,10 +577,8 @@ impl CefTexture {
     fn get_pixel_scale_factor(&self) -> f32 {
         self.base()
             .get_viewport()
-            .unwrap()
-            .get_stretch_transform()
-            .a
-            .x
+            .map(|viewport| viewport.get_stretch_transform().a.x)
+            .unwrap_or(1.0)
     }
 
     fn get_device_scale_factor(&self) -> f32 {

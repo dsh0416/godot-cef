@@ -1,6 +1,6 @@
 //! Pack command - assembles all platform artifacts into a single Godot addon
 
-use crate::bundle_common::copy_directory;
+use crate::bundle_common::{copy_directory, validate_required_paths};
 use std::fs;
 use std::path::Path;
 
@@ -10,6 +10,20 @@ const PLATFORMS: &[(&str, &str)] = &[
     ("x86_64-pc-windows-msvc", "gdcef-x86_64-pc-windows-msvc"),
     ("x86_64-unknown-linux-gnu", "gdcef-x86_64-unknown-linux-gnu"),
 ];
+
+fn required_paths_for_platform(
+    platform_target: &str,
+) -> (&'static [&'static str], &'static [&'static str]) {
+    match platform_target {
+        "universal-apple-darwin" => (&["Godot CEF.framework", "Godot CEF.app"], &[]),
+        "x86_64-pc-windows-msvc" => (
+            &["gdcef.dll", "gdcef_helper.exe", "libcef.dll"],
+            &["locales"],
+        ),
+        "x86_64-unknown-linux-gnu" => (&["libgdcef.so", "gdcef_helper", "libcef.so"], &["locales"]),
+        _ => (&[], &[]),
+    }
+}
 
 fn copy_platform_artifacts(
     artifacts_dir: &Path,
@@ -30,6 +44,8 @@ fn copy_platform_artifacts(
     }
 
     copy_directory(&src_dir, &dst_dir)?;
+    let (required_files, required_dirs) = required_paths_for_platform(platform_target);
+    validate_required_paths(&dst_dir, required_files, required_dirs)?;
 
     println!("  Copied: {} -> bin/{}/", artifact_name, platform_target);
     Ok(true)

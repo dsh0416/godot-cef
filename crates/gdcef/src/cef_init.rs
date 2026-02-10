@@ -1,7 +1,7 @@
 use cef::Settings;
 use godot::classes::{Engine, Os};
 use godot::prelude::*;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 #[cfg(target_os = "macos")]
 use crate::utils::get_framework_path;
@@ -21,8 +21,20 @@ static CEF_STATE: Mutex<CefState> = Mutex::new(CefState {
     initialized: false,
 });
 
+fn lock_cef_state() -> MutexGuard<'static, CefState> {
+    match CEF_STATE.lock() {
+        Ok(state) => state,
+        Err(poisoned) => {
+            godot::global::godot_warn!(
+                "[CefInit] CEF state mutex was poisoned; continuing with recovered state"
+            );
+            poisoned.into_inner()
+        }
+    }
+}
+
 pub fn cef_retain() -> CefResult<()> {
-    let mut state = CEF_STATE.lock().unwrap();
+    let mut state = lock_cef_state();
 
     if state.ref_count == 0 {
         load_cef_framework()?;
@@ -31,6 +43,7 @@ pub fn cef_retain() -> CefResult<()> {
         state.initialized = true;
 
         settings::warn_if_insecure_settings();
+        settings::log_production_security_baseline();
     }
 
     state.ref_count += 1;
@@ -38,7 +51,7 @@ pub fn cef_retain() -> CefResult<()> {
 }
 
 pub fn cef_release() {
-    let mut state = CEF_STATE.lock().unwrap();
+    let mut state = lock_cef_state();
 
     if state.ref_count == 0 {
         return;
@@ -109,6 +122,8 @@ fn should_enable_remote_debugging() -> bool {
 fn initialize_cef() -> CefResult<()> {
     let args = cef::args::Args::new();
     let godot_backend = detect_godot_render_backend();
+    let (accel_supported, accel_reason) =
+        crate::accelerated_osr::accelerated_osr_support_diagnostic();
     let enable_remote_debugging = should_enable_remote_debugging();
     let remote_debugging_port = settings::get_remote_devtools_port();
 
@@ -118,6 +133,16 @@ fn initialize_cef() -> CefResult<()> {
     let proxy_bypass_list = settings::get_proxy_bypass_list();
     let cache_size_mb = settings::get_cache_size_mb();
     let custom_switches = settings::get_custom_switches();
+
+    godot::global::godot_print!(
+        "[CefInit] Startup summary: backend={:?}, accelerated_osr_supported={}, reason={}, remote_debugging={}, remote_port={}, cache_size_mb={}",
+        godot_backend,
+        accel_supported,
+        accel_reason,
+        enable_remote_debugging,
+        remote_debugging_port,
+        cache_size_mb
+    );
 
     #[allow(unused_mut)]
     let mut app_builder = cef_app::OsrApp::builder()

@@ -181,6 +181,9 @@ impl CefTexture {
         // Drain all events with a single lock
         let events = {
             let Ok(mut queues) = event_queues.lock() else {
+                godot::global::godot_warn!(
+                    "[CefTexture] Failed to lock event queues while draining signals"
+                );
                 return;
             };
             DrainedEvents::drain_from(&mut queues)

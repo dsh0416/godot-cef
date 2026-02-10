@@ -75,6 +75,65 @@ impl RenderBackend {
     }
 }
 
+pub fn accelerated_osr_support_diagnostic() -> (bool, String) {
+    let backend = RenderBackend::detect();
+    if backend.supports_accelerated_osr() {
+        return (
+            true,
+            format!("backend {:?} supports accelerated OSR", backend),
+        );
+    }
+
+    let reason = match backend {
+        RenderBackend::OpenGL => "OpenGL backend is not supported for accelerated OSR".to_string(),
+        RenderBackend::Unknown => "Unknown rendering backend reported by Godot".to_string(),
+        RenderBackend::Metal => {
+            #[cfg(target_os = "macos")]
+            {
+                "Metal backend should be supported, but platform importer is unavailable"
+                    .to_string()
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                "Metal backend is only supported on macOS".to_string()
+            }
+        }
+        RenderBackend::D3D12 => {
+            #[cfg(target_os = "windows")]
+            {
+                "D3D12 backend should be supported, but platform importer is unavailable"
+                    .to_string()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                "D3D12 backend is only supported on Windows".to_string()
+            }
+        }
+        RenderBackend::Vulkan => {
+            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+            {
+                "Vulkan accelerated OSR is supported on this platform; importer creation likely failed"
+                    .to_string()
+            }
+            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+            {
+                "Vulkan accelerated OSR is supported on this platform; importer creation likely failed"
+                    .to_string()
+            }
+            #[cfg(not(any(
+                all(target_os = "windows", target_arch = "x86_64"),
+                all(target_os = "linux", target_arch = "x86_64")
+            )))]
+            {
+                "Vulkan accelerated OSR currently requires x86_64 Windows/Linux extension injection"
+                    .to_string()
+            }
+        }
+    };
+
+    (false, reason)
+}
+
 pub struct AcceleratedRenderState {
     pub importer: GodotTextureImporter,
     pub dst_rd_rid: Rid,

@@ -242,6 +242,18 @@ For visual/rendering changes:
 3. Test with different rendering backends
 4. Verify on multiple platforms if possible
 
+### Lifecycle Cleanup Checklist
+
+When changing browser lifecycle code, preserve these cleanup invariants for `CefTexture`:
+
+- Browser is explicitly closed (`host.close_browser(true)`) before instance teardown finishes.
+- Accelerated rendering RIDs are detached from `Texture2DRD` before freeing RIDs.
+- Popup overlay node and popup texture state are released.
+- Shared runtime handles (`render_size`, `cursor_type`, event/audio queues, sample-rate state) are cleared.
+- CEF global retain/release count remains balanced per created texture instance.
+
+If a change touches cleanup ordering, test repeated create/destroy cycles to confirm no leaked state and no stale texture references.
+
 ## Documentation
 
 ### Code Documentation

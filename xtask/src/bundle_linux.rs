@@ -2,6 +2,7 @@
 
 use crate::bundle_common::{
     copy_directory, deploy_to_addon, get_cef_dir, get_target_dir, run_cargo,
+    validate_required_paths,
 };
 use std::fs;
 use std::path::Path;
@@ -37,6 +38,8 @@ fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
     let cef_dir = get_cef_dir()
         .ok_or("CEF directory not found. Please set CEF_PATH environment variable.")?;
 
+    validate_required_paths(&cef_dir, CEF_FILES, CEF_DIRS)?;
+
     println!("Copying CEF assets from: {}", cef_dir.display());
 
     for file in CEF_FILES {
@@ -46,8 +49,6 @@ fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
         if src.exists() {
             fs::copy(&src, &dst)?;
             println!("  Copied: {}", file);
-        } else {
-            println!("  Warning: {} not found in CEF directory", file);
         }
     }
 
@@ -61,8 +62,6 @@ fn copy_cef_assets(target_dir: &Path) -> Result<(), Box<dyn std::error::Error>> 
             }
             copy_directory(&src, &dst)?;
             println!("  Copied directory: {}", dir);
-        } else {
-            println!("  Warning: {} directory not found in CEF directory", dir);
         }
     }
 

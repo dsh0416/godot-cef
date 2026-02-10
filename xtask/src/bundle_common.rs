@@ -161,6 +161,38 @@ pub fn copy_directory(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
+pub fn validate_required_paths(
+    base_dir: &Path,
+    files: &[&str],
+    dirs: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut missing: Vec<String> = Vec::new();
+
+    for file in files {
+        if !base_dir.join(file).exists() {
+            missing.push(format!("missing file: {}", file));
+        }
+    }
+
+    for dir in dirs {
+        if !base_dir.join(dir).exists() {
+            missing.push(format!("missing directory: {}", dir));
+        }
+    }
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let details = missing.join(", ");
+    Err(format!(
+        "Artifact validation failed in {}: {}",
+        base_dir.display(),
+        details
+    )
+    .into())
+}
+
 pub fn run_cargo(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running: cargo {}", args.join(" "));
     let status = Command::new("cargo")
@@ -285,6 +317,8 @@ pub fn deploy_to_addon(
     files: &[&str],
     dirs: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    validate_required_paths(source_dir, files, dirs)?;
+
     let addon_bin_dir = get_addon_bin_dir(platform_target);
 
     println!("Deploying to addon: {}", addon_bin_dir.display());
@@ -298,20 +332,16 @@ pub fn deploy_to_addon(
         let src = source_dir.join(file);
         let dst = addon_bin_dir.join(file);
 
-        if src.exists() {
-            fs::copy(&src, &dst)?;
-            println!("  Deployed: {}", file);
-        }
+        fs::copy(&src, &dst)?;
+        println!("  Deployed: {}", file);
     }
 
     for dir in dirs {
         let src = source_dir.join(dir);
         let dst = addon_bin_dir.join(dir);
 
-        if src.exists() {
-            copy_directory(&src, &dst)?;
-            println!("  Deployed directory: {}", dir);
-        }
+        copy_directory(&src, &dst)?;
+        println!("  Deployed directory: {}", dir);
     }
 
     Ok(())
