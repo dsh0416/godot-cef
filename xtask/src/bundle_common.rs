@@ -9,6 +9,11 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 #[cfg(target_os = "macos")]
+pub const TARGET_ARM64: &str = "aarch64-apple-darwin";
+#[cfg(target_os = "macos")]
+pub const TARGET_X64: &str = "x86_64-apple-darwin";
+
+#[cfg(target_os = "macos")]
 #[derive(Serialize)]
 pub struct AppInfoPlist {
     #[serde(rename = "CFBundleDevelopmentRegion")]
@@ -167,6 +172,26 @@ pub fn run_cargo(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
     if !status.success() {
         return Err(format!("cargo {} failed with status: {}", args.join(" "), status).into());
     }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn run_cargo_for_macos_targets(
+    base_args: &[&str],
+    release: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for target in [TARGET_ARM64, TARGET_X64] {
+        let mut cargo_args = base_args.to_vec();
+        cargo_args.push("--target");
+        cargo_args.push(target);
+
+        if release {
+            cargo_args.push("--release");
+        }
+
+        run_cargo(&cargo_args)?;
+    }
+
     Ok(())
 }
 
