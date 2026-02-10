@@ -1,6 +1,6 @@
 use crate::bundle_common::{
-    FrameworkInfoPlist, deploy_bundle_to_addon, get_target_dir, get_target_dir_for_target,
-    run_cargo_for_macos_targets, run_lipo, TARGET_ARM64, TARGET_X64,
+    FrameworkInfoPlist, TARGET_ARM64, TARGET_X64, deploy_bundle_to_addon, get_target_dir,
+    get_target_dir_for_target, run_cargo_for_macos_targets, run_lipo,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
