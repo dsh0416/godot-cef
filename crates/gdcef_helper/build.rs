@@ -8,8 +8,9 @@ fn main() {
     // Without these exports, the NVIDIA Optimus driver won't route gdcef_helper.exe
     // to the discrete GPU, causing cross-GPU shared texture handle failures on
     // laptops with hybrid graphics.
-    #[cfg(target_os = "windows")]
-    {
+    // Build scripts are compiled for the host, so use Cargo's target cfg env var
+    // instead of #[cfg(target_os = "...")] to detect the compilation target.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rustc-link-arg=/EXPORT:NvOptimusEnablement,DATA");
         println!("cargo:rustc-link-arg=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA");
     }
