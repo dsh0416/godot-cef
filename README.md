@@ -34,6 +34,9 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 
 Download the latest pre-built binaries from the [Releases](https://github.com/dsh0416/godot-cef/releases) page, extract the addon to your Godot project's `addons/` folder, and you're ready to go!
 
+> [!NOTE]
+> During export/package builds, Godot may convert some imported assets into other formats. If your frontend is built with Vite and needs specific source files to remain as-is, you can use [`vite-plugin-godot-keep-import`](https://github.com/LemonNekoGH/vite-plugin-keep-import-for-godot) to keep imports for selected file types.
+
 ### Basic Usage
 
 ```gdscript
