@@ -9,12 +9,14 @@ use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print};
 use godot::prelude::*;
+use std::collections::HashMap;
 use std::os::fd::RawFd;
 
 /// DRM format modifier indicating invalid/linear modifier
 const DRM_FORMAT_MOD_INVALID: u64 = 0x00ffffffffffffff;
 
 pub struct PendingLinuxCopy {
+    inode: u64,
     fds: Vec<RawFd>,
     strides: Vec<u32>,
     offsets: Vec<u64>,
@@ -61,7 +63,8 @@ pub struct VulkanTextureImporter {
     uses_separate_queue: bool,
     get_memory_fd_properties: PfnVkGetMemoryFdPropertiesKHR,
     cached_memory_type_index: Option<u32>,
-    imported_image: Option<ImportedVulkanImage>,
+    cache: HashMap<u64, ImportedVulkanImage>,
+    frame_count: u64,
     pending_copy: Option<PendingLinuxCopy>,
     copy_in_flight: bool,
 }
@@ -69,6 +72,9 @@ pub struct VulkanTextureImporter {
 struct ImportedVulkanImage {
     image: vk::Image,
     memory: vk::DeviceMemory,
+    width: u32,
+    height: u32,
+    last_used: u64,
 }
 
 struct VulkanFunctions {
@@ -240,7 +246,8 @@ impl VulkanTextureImporter {
             fence,
             get_memory_fd_properties: fns.get_memory_fd_properties,
             cached_memory_type_index: None,
-            imported_image: None,
+            cache: HashMap::new(),
+            frame_count: 0,
             pending_copy: None,
             copy_in_flight: false,
         })
@@ -396,6 +403,15 @@ impl VulkanTextureImporter {
         default
     }
 
+    fn get_dmabuf_inode(fd: RawFd) -> Option<u64> {
+        let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
+        if unsafe { libc::fstat(fd, &mut stat) } == 0 {
+            Some(stat.st_ino as u64)
+        } else {
+            None
+        }
+    }
+
     pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
         // Extract DMA-BUF parameters from all planes
         let plane_count = info.plane_count as usize;
@@ -403,41 +419,64 @@ impl VulkanTextureImporter {
             return Err("No planes in AcceleratedPaintInfo".into());
         }
 
-        let mut fds = Vec::with_capacity(plane_count);
-        let mut strides = Vec::with_capacity(plane_count);
-        let mut offsets = Vec::with_capacity(plane_count);
-
-        for i in 0..plane_count {
-            let plane = info
-                .planes
-                .get(i)
-                .ok_or_else(|| format!("Missing plane {} (plane_count={})", i, plane_count))?;
-            if plane.fd < 0 {
-                return Err(format!("Invalid fd for plane {}: {}", i, plane.fd));
-            }
-            // Duplicate the fd to extend its lifetime beyond the callback
-            let dup_fd = unsafe { libc::dup(plane.fd) };
-            if dup_fd < 0 {
-                // Close any fds we already duplicated
-                for fd in &fds {
-                    unsafe { libc::close(*fd) };
-                }
-                return Err(format!("Failed to duplicate fd for plane {}", i));
-            }
-            fds.push(dup_fd);
-            strides.push(plane.stride);
-            offsets.push(plane.offset);
-        }
-
         let width = info.extra.coded_size.width as u32;
         let height = info.extra.coded_size.height as u32;
 
         if width == 0 || height == 0 {
-            // Close duplicated fds on error
-            for fd in &fds {
-                unsafe { libc::close(*fd) };
-            }
             return Err(format!("Invalid source dimensions: {}x{}", width, height));
+        }
+
+        // Get inode from first plane
+        let first_fd = info.planes.get(0).ok_or("Missing first plane")?.fd;
+        let inode = Self::get_dmabuf_inode(first_fd).ok_or("Failed to get inode for DMA-BUF")?;
+
+        let mut fds = Vec::new();
+        let mut strides = Vec::new();
+        let mut offsets = Vec::new();
+
+        // Check cache
+        let needs_import = if let Some(cached) = self.cache.get(&inode) {
+            cached.width != width || cached.height != height
+        } else {
+            true
+        };
+
+        if needs_import {
+            fds.reserve(plane_count);
+            strides.reserve(plane_count);
+            offsets.reserve(plane_count);
+
+            for i in 0..plane_count {
+                let plane = info
+                    .planes
+                    .get(i)
+                    .ok_or_else(|| format!("Missing plane {} (plane_count={})", i, plane_count))?;
+                if plane.fd < 0 {
+                    return Err(format!("Invalid fd for plane {}: {}", i, plane.fd));
+                }
+                // Duplicate the fd to extend its lifetime beyond the callback
+                let dup_fd = unsafe { libc::dup(plane.fd) };
+                if dup_fd < 0 {
+                    // Close any fds we already duplicated
+                    for fd in &fds {
+                        unsafe { libc::close(*fd) };
+                    }
+                    return Err(format!("Failed to duplicate fd for plane {}", i));
+                }
+                fds.push(dup_fd);
+                strides.push(plane.stride);
+                offsets.push(plane.offset);
+            }
+        } else {
+            // If cached, we don't need to duplicate fds, but we capture metadata
+            strides.reserve(plane_count);
+            offsets.reserve(plane_count);
+            for i in 0..plane_count {
+                if let Some(plane) = info.planes.get(i) {
+                    strides.push(plane.stride);
+                    offsets.push(plane.offset);
+                }
+            }
         }
 
         // Convert CEF color format to Vulkan format
@@ -445,6 +484,7 @@ impl VulkanTextureImporter {
 
         // Replace any existing pending copy (drop the old one, which closes its fds)
         self.pending_copy = Some(PendingLinuxCopy {
+            inode,
             fds,
             strides,
             offsets,
@@ -473,26 +513,51 @@ impl VulkanTextureImporter {
             self.copy_in_flight = false;
         }
 
-        let mut params = DmaBufImportParams {
-            fds: std::mem::take(&mut pending.fds),
-            strides: pending.strides.clone(),
-            offsets: pending.offsets.clone(),
-            modifier: pending.modifier,
-            format: pending.format,
-            width: pending.width,
-            height: pending.height,
-        };
-
-        // Import the DMA-BUF as a Vulkan image
-        let result = self.import_dmabuf_to_image(&mut params);
-
-        for fd in &params.fds {
-            if *fd >= 0 {
-                unsafe { libc::close(*fd) };
+        // Check cache invalidation
+        if let Some(cached) = self.cache.get(&pending.inode) {
+            if cached.width != pending.width || cached.height != pending.height {
+                if let Some(removed) = self.cache.remove(&pending.inode) {
+                    self.destroy_imported_image(removed);
+                }
             }
         }
 
-        let src_image = result?;
+        // Import if needed
+        if !self.cache.contains_key(&pending.inode) {
+            if pending.fds.is_empty() {
+                return Err("Missing fds for new import".into());
+            }
+
+            let mut params = DmaBufImportParams {
+                fds: std::mem::take(&mut pending.fds),
+                strides: pending.strides.clone(),
+                offsets: pending.offsets.clone(),
+                modifier: pending.modifier,
+                format: pending.format,
+                width: pending.width,
+                height: pending.height,
+            };
+
+            // Import the DMA-BUF as a Vulkan image
+            let imported = self.import_dmabuf_to_image(&mut params)?;
+
+            // Close fds
+            for fd in &params.fds {
+                if *fd >= 0 {
+                    unsafe { libc::close(*fd) };
+                }
+            }
+
+            self.cache.insert(pending.inode, imported);
+        }
+
+        // Get from cache
+        let cached = self
+            .cache
+            .get_mut(&pending.inode)
+            .ok_or("Failed to get cached image")?;
+        cached.last_used = self.frame_count;
+        let src_image = cached.image;
 
         // Get destination Vulkan image from Godot's RenderingDevice
         let dst_image: vk::Image = {
@@ -510,6 +575,25 @@ impl VulkanTextureImporter {
 
         self.submit_copy_async(src_image, dst_image, pending.width, pending.height)?;
         self.copy_in_flight = true;
+
+        self.frame_count += 1;
+
+        // Eviction
+        if self.cache.len() > 10 {
+            let mut oldest_key = None;
+            let mut oldest_time = u64::MAX;
+            for (k, v) in &self.cache {
+                if v.last_used < oldest_time {
+                    oldest_time = v.last_used;
+                    oldest_key = Some(*k);
+                }
+            }
+            if let Some(k) = oldest_key {
+                if let Some(removed) = self.cache.remove(&k) {
+                    self.destroy_imported_image(removed);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -532,11 +616,8 @@ impl VulkanTextureImporter {
     fn import_dmabuf_to_image(
         &mut self,
         params: &mut DmaBufImportParams,
-    ) -> Result<vk::Image, String> {
+    ) -> Result<ImportedVulkanImage, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-
-        // Always free previous image - we get new fds every frame
-        self.free_imported_image();
 
         // Create new image with external memory flag for DMA-BUF
         let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
@@ -602,10 +683,23 @@ impl VulkanTextureImporter {
         }
 
         // Import memory for this DMA-BUF
-        let memory = self.import_memory_for_dmabuf(params, image)?;
+        let memory = match self.import_memory_for_dmabuf(params, image) {
+            Ok(mem) => mem,
+            Err(e) => {
+                unsafe {
+                    (fns.destroy_image)(self.device, image, std::ptr::null());
+                }
+                return Err(e);
+            }
+        };
 
-        self.imported_image = Some(ImportedVulkanImage { image, memory });
-        Ok(image)
+        Ok(ImportedVulkanImage {
+            image,
+            memory,
+            width: params.width,
+            height: params.height,
+            last_used: self.frame_count,
+        })
     }
 
     fn import_memory_for_dmabuf(
@@ -840,10 +934,8 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    fn free_imported_image(&mut self) {
-        if let Some(img) = self.imported_image.take()
-            && let Some(fns) = VULKAN_FNS.get()
-        {
+    fn destroy_imported_image(&mut self, img: ImportedVulkanImage) {
+        if let Some(fns) = VULKAN_FNS.get() {
             unsafe {
                 (fns.destroy_image)(self.device, img.image, std::ptr::null());
                 (fns.free_memory)(self.device, img.memory, std::ptr::null());
@@ -862,7 +954,13 @@ impl Drop for VulkanTextureImporter {
         // Drop pending copy (will close its fds)
         self.pending_copy = None;
 
-        self.free_imported_image();
+        // Clear cache
+        let keys: Vec<u64> = self.cache.keys().cloned().collect();
+        for key in keys {
+            if let Some(img) = self.cache.remove(&key) {
+                self.destroy_imported_image(img);
+            }
+        }
 
         if let Some(fns) = VULKAN_FNS.get() {
             unsafe {

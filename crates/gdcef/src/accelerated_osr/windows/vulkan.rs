@@ -3,6 +3,7 @@ use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print};
 use godot::prelude::*;
+use std::collections::HashMap;
 use windows::Win32::Foundation::{CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
@@ -14,15 +15,18 @@ type PfnVkGetMemoryWin32HandlePropertiesKHR = unsafe extern "system" fn(
 ) -> vk::Result;
 
 pub struct PendingVulkanCopy {
-    duplicated_handle: HANDLE,
+    source_handle: isize,
+    duplicated_handle: Option<HANDLE>,
     width: u32,
     height: u32,
 }
 
 impl Drop for PendingVulkanCopy {
     fn drop(&mut self) {
-        if !self.duplicated_handle.is_invalid() {
-            let _ = unsafe { CloseHandle(self.duplicated_handle) };
+        if let Some(handle) = self.duplicated_handle {
+            if !handle.is_invalid() {
+                let _ = unsafe { CloseHandle(handle) };
+            }
         }
     }
 }
@@ -37,7 +41,8 @@ pub struct VulkanTextureImporter {
     uses_separate_queue: bool,
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
     cached_memory_type_index: Option<u32>,
-    imported_image: Option<ImportedVulkanImage>,
+    cache: HashMap<isize, ImportedVulkanImage>,
+    frame_count: u64,
     pending_copy: Option<PendingVulkanCopy>,
     copy_in_flight: bool,
 }
@@ -46,6 +51,9 @@ struct ImportedVulkanImage {
     duplicated_handle: HANDLE,
     image: vk::Image,
     memory: vk::DeviceMemory,
+    width: u32,
+    height: u32,
+    last_used: u64,
 }
 
 struct VulkanFunctions {
@@ -232,7 +240,8 @@ impl VulkanTextureImporter {
             fence,
             get_memory_win32_handle_properties: fns.get_memory_win32_handle_properties,
             cached_memory_type_index: None,
-            imported_image: None,
+            cache: HashMap::new(),
+            frame_count: 0,
             pending_copy: None,
             copy_in_flight: false,
         })
@@ -402,11 +411,24 @@ impl VulkanTextureImporter {
             return Err(format!("Invalid source dimensions: {}x{}", width, height));
         }
 
-        // Duplicate the handle so we own it - this is fast and non-blocking
-        let duplicated_handle = duplicate_win32_handle(handle)?;
+        let handle_val = info.shared_texture_handle as isize;
+        let mut duplicated_handle = None;
 
-        // Replace any existing pending copy (drop the old one, which closes its handle)
+        // Check if we already have this handle cached with correct dimensions
+        let needs_import = if let Some(cached) = self.cache.get(&handle_val) {
+            cached.width != width || cached.height != height
+        } else {
+            true
+        };
+
+        if needs_import {
+            // Duplicate the handle so we own it - this is fast and non-blocking
+            duplicated_handle = Some(duplicate_win32_handle(handle)?);
+        }
+
+        // Replace any existing pending copy (drop the old one, which closes its handle if it has one)
         self.pending_copy = Some(PendingVulkanCopy {
+            source_handle: handle_val,
             duplicated_handle,
             width,
             height,
@@ -416,7 +438,7 @@ impl VulkanTextureImporter {
     }
 
     pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
-        let pending = match self.pending_copy.take() {
+        let mut pending = match self.pending_copy.take() {
             Some(p) => p,
             None => return Ok(()), // Nothing to do
         };
@@ -431,12 +453,38 @@ impl VulkanTextureImporter {
             self.copy_in_flight = false;
         }
 
-        // Import the D3D12 handle as a Vulkan image
-        let src_image = self.import_handle_to_image_from_duplicated(
-            pending.duplicated_handle,
-            pending.width,
-            pending.height,
-        )?;
+        // Check if we need to invalidate cache due to resize
+        if let Some(cached) = self.cache.get(&pending.source_handle) {
+            if cached.width != pending.width || cached.height != pending.height {
+                if let Some(removed) = self.cache.remove(&pending.source_handle) {
+                    self.destroy_imported_image(removed);
+                }
+            }
+        }
+
+        // If not in cache, import it
+        if !self.cache.contains_key(&pending.source_handle) {
+            let handle = pending
+                .duplicated_handle
+                .take()
+                .ok_or("Missing duplicated handle for new import")?;
+
+            let imported = self.import_handle_to_image_from_duplicated(
+                handle,
+                pending.width,
+                pending.height,
+            )?;
+
+            self.cache.insert(pending.source_handle, imported);
+        }
+
+        // Get from cache
+        let cached = self
+            .cache
+            .get_mut(&pending.source_handle)
+            .ok_or("Failed to get cached image")?;
+        cached.last_used = self.frame_count;
+        let src_image = cached.image;
 
         // Get destination Vulkan image from Godot's RenderingDevice
         let dst_image: vk::Image = {
@@ -456,10 +504,24 @@ impl VulkanTextureImporter {
         self.submit_copy_async(src_image, dst_image, pending.width, pending.height)?;
         self.copy_in_flight = true;
 
-        // Note: We don't close pending.duplicated_handle here because it's now
-        // stored in self.imported_image and will be closed when that's freed.
-        // We need to prevent the Drop impl from closing it.
-        std::mem::forget(pending);
+        self.frame_count += 1;
+
+        // Simple eviction: if cache size > 10, remove oldest
+        if self.cache.len() > 10 {
+            let mut oldest_key = None;
+            let mut oldest_time = u64::MAX;
+            for (k, v) in &self.cache {
+                if v.last_used < oldest_time {
+                    oldest_time = v.last_used;
+                    oldest_key = Some(*k);
+                }
+            }
+            if let Some(k) = oldest_key {
+                if let Some(removed) = self.cache.remove(&k) {
+                    self.destroy_imported_image(removed);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -484,11 +546,8 @@ impl VulkanTextureImporter {
         duplicated_handle: HANDLE,
         width: u32,
         height: u32,
-    ) -> Result<vk::Image, String> {
+    ) -> Result<ImportedVulkanImage, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-
-        // Always free previous image - we get a new handle every frame
-        self.free_imported_image();
 
         // Create new image with external memory flag
         let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
@@ -529,12 +588,14 @@ impl VulkanTextureImporter {
             }
         };
 
-        self.imported_image = Some(ImportedVulkanImage {
+        Ok(ImportedVulkanImage {
             duplicated_handle,
             image,
             memory,
-        });
-        Ok(image)
+            width,
+            height,
+            last_used: self.frame_count,
+        })
     }
 
     fn import_memory_for_image(
@@ -768,10 +829,8 @@ impl VulkanTextureImporter {
         Ok(())
     }
 
-    fn free_imported_image(&mut self) {
-        if let Some(img) = self.imported_image.take()
-            && let Some(fns) = VULKAN_FNS.get()
-        {
+    fn destroy_imported_image(&mut self, img: ImportedVulkanImage) {
+        if let Some(fns) = VULKAN_FNS.get() {
             unsafe {
                 (fns.destroy_image)(self.device, img.image, std::ptr::null());
                 (fns.free_memory)(self.device, img.memory, std::ptr::null());
@@ -789,7 +848,13 @@ impl Drop for VulkanTextureImporter {
 
         self.pending_copy = None;
 
-        self.free_imported_image();
+        // Clear cache
+        let keys: Vec<isize> = self.cache.keys().cloned().collect();
+        for key in keys {
+            if let Some(img) = self.cache.remove(&key) {
+                self.destroy_imported_image(img);
+            }
+        }
 
         if let Some(fns) = VULKAN_FNS.get() {
             unsafe {
