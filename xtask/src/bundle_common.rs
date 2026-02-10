@@ -193,6 +193,20 @@ pub fn validate_required_paths(
     .into())
 }
 
+pub fn required_paths_for_platform(
+    platform_target: &str,
+) -> (&'static [&'static str], &'static [&'static str]) {
+    match platform_target {
+        "universal-apple-darwin" => (&["Godot CEF.framework", "Godot CEF.app"], &[]),
+        "x86_64-pc-windows-msvc" => (
+            &["gdcef.dll", "gdcef_helper.exe", "libcef.dll"],
+            &["locales"],
+        ),
+        "x86_64-unknown-linux-gnu" => (&["libgdcef.so", "gdcef_helper", "libcef.so"], &["locales"]),
+        _ => (&[], &[]),
+    }
+}
+
 pub fn run_cargo(args: &[&str]) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running: cargo {}", args.join(" "));
     let status = Command::new("cargo")

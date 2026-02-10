@@ -202,8 +202,7 @@ impl CefTexture {
             return false;
         }
 
-        let supported = accelerated_osr::is_accelerated_osr_supported();
-        let (_, reason) = accelerated_osr::accelerated_osr_support_diagnostic();
+        let (supported, reason) = accelerated_osr::accelerated_osr_support_diagnostic();
         if !supported {
             godot::global::godot_warn!(
                 "[CefTexture] Accelerated OSR unavailable: {}. Falling back to software rendering.",

@@ -1,6 +1,6 @@
 //! Validation command - checks packaged addon layout and required artifacts
 
-use crate::bundle_common::validate_required_paths;
+use crate::bundle_common::{required_paths_for_platform, validate_required_paths};
 use std::path::Path;
 
 const PLATFORM_TARGETS: &[&str] = &[
@@ -8,20 +8,6 @@ const PLATFORM_TARGETS: &[&str] = &[
     "x86_64-pc-windows-msvc",
     "x86_64-unknown-linux-gnu",
 ];
-
-fn required_paths_for_platform(
-    platform_target: &str,
-) -> (&'static [&'static str], &'static [&'static str]) {
-    match platform_target {
-        "universal-apple-darwin" => (&["Godot CEF.framework", "Godot CEF.app"], &[]),
-        "x86_64-pc-windows-msvc" => (
-            &["gdcef.dll", "gdcef_helper.exe", "libcef.dll"],
-            &["locales"],
-        ),
-        "x86_64-unknown-linux-gnu" => (&["libgdcef.so", "gdcef_helper", "libcef.so"], &["locales"]),
-        _ => (&[], &[]),
-    }
-}
 
 pub fn run(addon_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let bin_dir = addon_dir.join("bin");
