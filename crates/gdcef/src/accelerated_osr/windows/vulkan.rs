@@ -454,12 +454,11 @@ impl VulkanTextureImporter {
         }
 
         // Check if we need to invalidate cache due to resize
-        if let Some(cached) = self.cache.get(&pending.source_handle) {
-            if (cached.width != pending.width || cached.height != pending.height)
-                && let Some(removed) = self.cache.remove(&pending.source_handle)
-            {
-                self.destroy_imported_image(removed);
-            }
+        if let Some(cached) = self.cache.get(&pending.source_handle)
+            && (cached.width != pending.width || cached.height != pending.height)
+            && let Some(removed) = self.cache.remove(&pending.source_handle)
+        {
+            self.destroy_imported_image(removed);
         }
 
         // If not in cache, import it
