@@ -34,8 +34,11 @@ impl Drop for PendingVulkanCopy {
 pub struct VulkanTextureImporter {
     device: vk::Device,
     command_pool: vk::CommandPool,
-    command_buffer: vk::CommandBuffer,
-    fence: vk::Fence,
+    // Double buffered resources
+    command_buffers: [vk::CommandBuffer; 2],
+    fences: [vk::Fence; 2],
+    current_frame: usize,
+
     queue: vk::Queue,
     queue_family_index: u32,
     uses_separate_queue: bool,
@@ -44,7 +47,8 @@ pub struct VulkanTextureImporter {
     cache: HashMap<isize, ImportedVulkanImage>,
     frame_count: u64,
     pending_copy: Option<PendingVulkanCopy>,
-    copy_in_flight: bool,
+    // Track if a specific frame slot is in flight
+    frames_in_flight: [bool; 2],
 }
 
 struct ImportedVulkanImage {
@@ -179,18 +183,18 @@ impl VulkanTextureImporter {
             return None;
         }
 
-        // Allocate command buffer
+        // Allocate command buffers (2 for double buffering)
         let alloc_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
+            .command_buffer_count(2);
 
-        let mut command_buffer: vk::CommandBuffer = unsafe { std::mem::zeroed() };
+        let mut command_buffers = vec![vk::CommandBuffer::default(); 2];
         let result =
-            unsafe { (fns.allocate_command_buffers)(device, &alloc_info, &mut command_buffer) };
+            unsafe { (fns.allocate_command_buffers)(device, &alloc_info, command_buffers.as_mut_ptr()) };
         if result != vk::Result::SUCCESS {
             godot_error!(
-                "[AcceleratedOSR/Vulkan] Failed to allocate command buffer: {:?}",
+                "[AcceleratedOSR/Vulkan] Failed to allocate command buffers: {:?}",
                 result
             );
             unsafe {
@@ -199,20 +203,27 @@ impl VulkanTextureImporter {
             return None;
         }
 
-        // Create fence (start signaled so first reset doesn't fail)
+        // Create fences (start signaled so first reset doesn't fail)
         let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-        let mut fence: vk::Fence = unsafe { std::mem::zeroed() };
-        let result =
-            unsafe { (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fence) };
-        if result != vk::Result::SUCCESS {
-            godot_error!(
-                "[AcceleratedOSR/Vulkan] Failed to create fence: {:?}",
-                result
-            );
-            unsafe {
-                (fns.destroy_command_pool)(device, command_pool, std::ptr::null());
+        let mut fences = [vk::Fence::default(); 2];
+        
+        for i in 0..2 {
+            let result =
+                unsafe { (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fences[i]) };
+            if result != vk::Result::SUCCESS {
+                godot_error!(
+                    "[AcceleratedOSR/Vulkan] Failed to create fence {}: {:?}",
+                    i, result
+                );
+                // Cleanup previously created resources
+                unsafe {
+                    for j in 0..i {
+                        (fns.destroy_fence)(device, fences[j], std::ptr::null());
+                    }
+                    (fns.destroy_command_pool)(device, command_pool, std::ptr::null());
+                }
+                return None;
             }
-            return None;
         }
 
         // Keep library loaded for the lifetime of the importer
@@ -233,17 +244,18 @@ impl VulkanTextureImporter {
         Some(Self {
             device,
             command_pool,
-            command_buffer,
+            command_buffers: [command_buffers[0], command_buffers[1]],
+            fences,
+            current_frame: 0,
             queue,
             queue_family_index,
             uses_separate_queue,
-            fence,
             get_memory_win32_handle_properties: fns.get_memory_win32_handle_properties,
             cached_memory_type_index: None,
             cache: HashMap::new(),
             frame_count: 0,
             pending_copy: None,
-            copy_in_flight: false,
+            frames_in_flight: [false; 2],
         })
     }
 
@@ -447,10 +459,27 @@ impl VulkanTextureImporter {
             return Err("Destination RID is invalid".into());
         }
 
-        // Wait for any previous in-flight copy to complete before reusing resources
-        if self.copy_in_flight {
-            self.wait_for_copy()?;
-            self.copy_in_flight = false;
+        // Wait for the current frame's fence to ensure we can reuse its resources
+        // This is where double buffering helps: if we are at frame N, we are waiting for frame N-1 (or N-2 depending on how you count)
+        // In a 2-frame cycle: 0 -> 1 -> 0 -> 1. When we want to write to 0, we ensure the previous 0 work is done.
+        // Since we only have 2 frames, this effectively waits for the GPU to catch up if it's more than 1 frame behind.
+        if self.frames_in_flight[self.current_frame] {
+             // Use a timeout of 0 to check if the fence is signaled without blocking
+            let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+            let result = unsafe {
+                (fns.wait_for_fences)(self.device, 1, &self.fences[self.current_frame], vk::TRUE, 0)
+            };
+            
+            if result == vk::Result::TIMEOUT {
+                // Previous frame still in flight, skip this update to avoid blocking main thread
+                // Put the pending copy back so we can try again next frame
+                self.pending_copy = Some(pending);
+                return Ok(());
+            } else if result != vk::Result::SUCCESS {
+                 return Err(format!("Failed to wait for fence: {:?}", result));
+            }
+            
+            self.frames_in_flight[self.current_frame] = false;
         }
 
         // Check if we need to invalidate cache due to resize
@@ -498,8 +527,10 @@ impl VulkanTextureImporter {
 
         // Submit copy command (non-blocking GPU submission)
         self.submit_copy_async(src_image, dst_image, pending.width, pending.height)?;
-        self.copy_in_flight = true;
+        self.frames_in_flight[self.current_frame] = true;
 
+        // Advance to next frame slot
+        self.current_frame = (self.current_frame + 1) % 2;
         self.frame_count += 1;
 
         // Simple eviction: if cache size > 10, remove oldest
@@ -523,17 +554,19 @@ impl VulkanTextureImporter {
     }
 
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
-        if !self.copy_in_flight {
-            return Ok(());
-        }
-
+        // Wait for all frames in flight
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-        let result =
-            unsafe { (fns.wait_for_fences)(self.device, 1, &self.fence, vk::TRUE, u64::MAX) };
-        if result != vk::Result::SUCCESS {
-            return Err(format!("Failed to wait for fence: {:?}", result));
+        
+        for i in 0..2 {
+            if self.frames_in_flight[i] {
+                let result =
+                    unsafe { (fns.wait_for_fences)(self.device, 1, &self.fences[i], vk::TRUE, u64::MAX) };
+                if result != vk::Result::SUCCESS {
+                    return Err(format!("Failed to wait for fence {}: {:?}", i, result));
+                }
+                self.frames_in_flight[i] = false;
+            }
         }
-        self.copy_in_flight = false;
         Ok(())
     }
 
@@ -681,8 +714,8 @@ impl VulkanTextureImporter {
     ) -> Result<(), String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
 
-        let fence = self.fence;
-        let cmd_buffer = self.command_buffer;
+        let fence = self.fences[self.current_frame];
+        let cmd_buffer = self.command_buffers[self.current_frame];
 
         // Reset fence and command buffer
         let _ = unsafe { (fns.reset_fences)(self.device, 1, &fence) };
@@ -838,9 +871,7 @@ impl VulkanTextureImporter {
 
 impl Drop for VulkanTextureImporter {
     fn drop(&mut self) {
-        if self.copy_in_flight {
-            let _ = self.wait_for_copy();
-        }
+        let _ = self.wait_for_copy();
 
         self.pending_copy = None;
 
@@ -854,7 +885,9 @@ impl Drop for VulkanTextureImporter {
 
         if let Some(fns) = VULKAN_FNS.get() {
             unsafe {
-                (fns.destroy_fence)(self.device, self.fence, std::ptr::null());
+                for fence in self.fences {
+                    (fns.destroy_fence)(self.device, fence, std::ptr::null());
+                }
                 (fns.destroy_command_pool)(self.device, self.command_pool, std::ptr::null());
             }
         }
