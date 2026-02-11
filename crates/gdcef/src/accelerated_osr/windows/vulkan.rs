@@ -190,8 +190,9 @@ impl VulkanTextureImporter {
             .command_buffer_count(2);
 
         let mut command_buffers = vec![vk::CommandBuffer::default(); 2];
-        let result =
-            unsafe { (fns.allocate_command_buffers)(device, &alloc_info, command_buffers.as_mut_ptr()) };
+        let result = unsafe {
+            (fns.allocate_command_buffers)(device, &alloc_info, command_buffers.as_mut_ptr())
+        };
         if result != vk::Result::SUCCESS {
             godot_error!(
                 "[AcceleratedOSR/Vulkan] Failed to allocate command buffers: {:?}",
@@ -206,19 +207,21 @@ impl VulkanTextureImporter {
         // Create fences (start signaled so first reset doesn't fail)
         let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
         let mut fences = [vk::Fence::default(); 2];
-        
+
         for i in 0..2 {
-            let result =
-                unsafe { (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fences[i]) };
+            let result = unsafe {
+                (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fences[i])
+            };
             if result != vk::Result::SUCCESS {
                 godot_error!(
                     "[AcceleratedOSR/Vulkan] Failed to create fence {}: {:?}",
-                    i, result
+                    i,
+                    result
                 );
                 // Cleanup previously created resources
                 unsafe {
-                    for j in 0..i {
-                        (fns.destroy_fence)(device, fences[j], std::ptr::null());
+                    for fence in fences.iter().take(i) {
+                        (fns.destroy_fence)(device, *fence, std::ptr::null());
                     }
                     (fns.destroy_command_pool)(device, command_pool, std::ptr::null());
                 }
@@ -464,21 +467,27 @@ impl VulkanTextureImporter {
         // In a 2-frame cycle: 0 -> 1 -> 0 -> 1. When we want to write to 0, we ensure the previous 0 work is done.
         // Since we only have 2 frames, this effectively waits for the GPU to catch up if it's more than 1 frame behind.
         if self.frames_in_flight[self.current_frame] {
-             // Use a timeout of 0 to check if the fence is signaled without blocking
+            // Use a timeout of 0 to check if the fence is signaled without blocking
             let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
             let result = unsafe {
-                (fns.wait_for_fences)(self.device, 1, &self.fences[self.current_frame], vk::TRUE, 0)
+                (fns.wait_for_fences)(
+                    self.device,
+                    1,
+                    &self.fences[self.current_frame],
+                    vk::TRUE,
+                    0,
+                )
             };
-            
+
             if result == vk::Result::TIMEOUT {
                 // Previous frame still in flight, skip this update to avoid blocking main thread
                 // Put the pending copy back so we can try again next frame
                 self.pending_copy = Some(pending);
                 return Ok(());
             } else if result != vk::Result::SUCCESS {
-                 return Err(format!("Failed to wait for fence: {:?}", result));
+                return Err(format!("Failed to wait for fence: {:?}", result));
             }
-            
+
             self.frames_in_flight[self.current_frame] = false;
         }
 
@@ -556,11 +565,12 @@ impl VulkanTextureImporter {
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         // Wait for all frames in flight
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-        
+
         for i in 0..2 {
             if self.frames_in_flight[i] {
-                let result =
-                    unsafe { (fns.wait_for_fences)(self.device, 1, &self.fences[i], vk::TRUE, u64::MAX) };
+                let result = unsafe {
+                    (fns.wait_for_fences)(self.device, 1, &self.fences[i], vk::TRUE, u64::MAX)
+                };
                 if result != vk::Result::SUCCESS {
                     return Err(format!("Failed to wait for fence {}: {:?}", i, result));
                 }
