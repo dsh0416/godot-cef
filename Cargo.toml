@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "xtask", "benches"]
 
 [workspace.package]
-version = "1.7.5"
+version = "1.8.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/dsh0416/godot-cef"
