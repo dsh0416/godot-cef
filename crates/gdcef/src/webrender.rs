@@ -29,7 +29,7 @@ pub(crate) struct ClientQueues {
 }
 
 impl ClientQueues {
-    pub fn new(sample_rate: i32, enable_audio_capture: bool) -> Self {
+    pub fn new(sample_rate: f32, enable_audio_capture: bool) -> Self {
         use std::sync::atomic::AtomicBool;
         Self {
             event_queues: Arc::new(Mutex::new(EventQueues::new())),
@@ -814,10 +814,10 @@ wrap_audio_handler! {
                 let sample_rate = self.audio_sample_rate
                     .lock()
                     .map(|sr| *sr)
-                    .unwrap_or(48000);
+                    .unwrap_or(48000.0);
 
                 params.channel_layout = ChannelLayout::LAYOUT_STEREO;
-                params.sample_rate = sample_rate;
+                params.sample_rate = sample_rate as i32;
                 params.frames_per_buffer = 256;
             }
             true as _

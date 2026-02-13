@@ -168,7 +168,7 @@ pub type AudioPacketQueue = Arc<Mutex<VecDeque<AudioPacket>>>;
 pub type AudioParamsState = Arc<Mutex<Option<AudioParameters>>>;
 
 /// Shared sample rate for audio capture.
-pub type AudioSampleRateState = Arc<Mutex<i32>>;
+pub type AudioSampleRateState = Arc<Mutex<f32>>;
 
 /// Shutdown flag for audio handler to suppress errors during cleanup.
 pub type AudioShutdownFlag = Arc<AtomicBool>;
@@ -272,7 +272,7 @@ mod tests {
             app.event_queues = Some(Arc::new(Mutex::new(EventQueues::new())));
             app.audio_packet_queue = Some(Arc::new(Mutex::new(VecDeque::new())));
             app.audio_params = Some(Arc::new(Mutex::new(None)));
-            app.audio_sample_rate = Some(Arc::new(Mutex::new(48000)));
+            app.audio_sample_rate = Some(Arc::new(Mutex::new(48000.0)));
             app.audio_shutdown_flag = Some(Arc::new(AtomicBool::new(true)));
 
             app.clear_runtime_state();

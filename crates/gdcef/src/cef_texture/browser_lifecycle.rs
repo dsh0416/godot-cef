@@ -12,10 +12,6 @@ use crate::browser::{PopupStateQueue, RenderMode};
 use crate::error::CefError;
 use crate::{godot_protocol, render, webrender};
 
-fn get_godot_audio_sample_rate() -> i32 {
-    AudioServer::singleton().get_mix_rate() as i32
-}
-
 fn color_to_cef_color(color: Color) -> u32 {
     let f = |c: f32| (c.clamp(0.0, 1.0) * 255.0) as u8;
     u32::from_be_bytes([f(color.a), f(color.r), f(color.g), f(color.b)])
@@ -242,7 +238,7 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
         let popup_state: PopupStateQueue = render_handler.get_popup_state();
-        let sample_rate = get_godot_audio_sample_rate();
+        let sample_rate = AudioServer::singleton().get_mix_rate();
         let enable_audio_capture = crate::settings::is_audio_capture_enabled();
         let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture);
 
@@ -342,7 +338,7 @@ impl CefTexture {
         let device_scale_factor = render_handler.get_device_scale_factor();
         let cursor_type = render_handler.get_cursor_type();
         let popup_state: PopupStateQueue = render_handler.get_popup_state();
-        let sample_rate = get_godot_audio_sample_rate();
+        let sample_rate = AudioServer::singleton().get_mix_rate();
         let enable_audio_capture = crate::settings::is_audio_capture_enabled();
         let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture);
 
