@@ -20,7 +20,7 @@ pub struct CookieData {
     pub path: String,
     pub secure: bool,
     pub httponly: bool,
-    pub same_site: i32,
+    pub same_site: CookieSameSite,
     pub has_expires: bool,
 }
 
@@ -34,7 +34,7 @@ impl CookieData {
             path: cookie.path.to_string(),
             secure: cookie.secure != 0,
             httponly: cookie.httponly != 0,
-            same_site: cookie.same_site.get_raw() as i32,
+            same_site: cookie.same_site,
             has_expires: cookie.has_expires != 0,
         }
     }
@@ -209,7 +209,7 @@ mod tests {
             path: "/".into(),
             secure: true,
             httponly: false,
-            same_site: 0,
+            same_site: CookieSameSite::NO_RESTRICTION,
             has_expires: false,
         }]);
         assert!(matches!(received, CookieEvent::Received(ref v) if v.len() == 1));
@@ -239,7 +239,7 @@ mod tests {
             path: String::new(),
             secure: false,
             httponly: false,
-            same_site: 0,
+            same_site: CookieSameSite::NO_RESTRICTION,
             has_expires: false,
         };
         assert!(!cookie.secure);

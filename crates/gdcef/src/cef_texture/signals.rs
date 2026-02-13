@@ -190,7 +190,8 @@ impl IRefCounted for CookieInfo {
 
 impl CookieInfo {
     fn from_data(data: &crate::cookie::CookieData) -> Gd<Self> {
-        Gd::from_init_fn(|base| Self {
+        #[cfg(target_os = "windows")]
+        return Gd::from_init_fn(|base| Self {
             base,
             name: GString::from(&data.name),
             value: GString::from(&data.value),
@@ -198,9 +199,21 @@ impl CookieInfo {
             path: GString::from(&data.path),
             secure: data.secure,
             httponly: data.httponly,
-            same_site: data.same_site,
+            same_site: data.same_site.get_raw(),
             has_expires: data.has_expires,
-        })
+        });
+        #[cfg(not(target_os = "windows"))]
+        return Gd::from_init_fn(|base| Self {
+            base,
+            name: GString::from(&data.name),
+            value: GString::from(&data.value),
+            domain: GString::from(&data.domain),
+            path: GString::from(&data.path),
+            secure: data.secure,
+            httponly: data.httponly,
+            same_site: data.same_site.get_raw() as i32,
+            has_expires: data.has_expires,
+        });
     }
 }
 
