@@ -12,7 +12,12 @@ mod keycode;
 const WHEEL_DELTA: f32 = 120.0;
 
 /// Pre-defined shortcuts for editor commands.
-/// Initialized once per thread using thread_local to avoid repeated allocation.
+///
+/// Created on each use rather than cached in `thread_local!` because `Gd<T>`
+/// objects require the Godot engine to be alive during `Drop`. Thread-local
+/// destructors run after Godot has shut down, causing either a panic or leaked
+/// instances. Since keyboard shortcuts are matched at human typing speed (not
+/// per-frame), the allocation cost is negligible.
 struct EditorShortcuts {
     select_all: Gd<InputEvent>,            // Ctrl/Cmd+A
     copy: Gd<InputEvent>,                  // Ctrl/Cmd+C
@@ -31,15 +36,12 @@ impl EditorShortcuts {
     }
 }
 
-thread_local! {
-    static EDITOR_SHORTCUTS: EditorShortcuts = EditorShortcuts::new();
-}
-
 fn with_shortcuts<F, R>(f: F) -> R
 where
     F: FnOnce(&EditorShortcuts) -> R,
 {
-    EDITOR_SHORTCUTS.with(f)
+    let shortcuts = EditorShortcuts::new();
+    f(&shortcuts)
 }
 fn create_shortcut(key: Key, with_command_or_ctrl: bool, with_shift: bool) -> Gd<InputEvent> {
     let mut key_event = InputEventKey::new_gd();
