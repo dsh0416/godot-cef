@@ -215,134 +215,78 @@ pub fn get_data_path() -> PathBuf {
 }
 
 pub fn get_security_config() -> SecurityConfig {
-    let settings = ProjectSettings::singleton();
-
     SecurityConfig {
-        allow_insecure_content: get_bool_setting(&settings, SETTING_ALLOW_INSECURE_CONTENT),
-        ignore_certificate_errors: get_bool_setting(&settings, SETTING_IGNORE_CERTIFICATE_ERRORS),
-        disable_web_security: get_bool_setting(&settings, SETTING_DISABLE_WEB_SECURITY),
+        allow_insecure_content: get_setting_or(
+            SETTING_ALLOW_INSECURE_CONTENT,
+            DEFAULT_ALLOW_INSECURE_CONTENT,
+        ),
+        ignore_certificate_errors: get_setting_or(
+            SETTING_IGNORE_CERTIFICATE_ERRORS,
+            DEFAULT_IGNORE_CERTIFICATE_ERRORS,
+        ),
+        disable_web_security: get_setting_or(
+            SETTING_DISABLE_WEB_SECURITY,
+            DEFAULT_DISABLE_WEB_SECURITY,
+        ),
     }
 }
 
-fn get_bool_setting(settings: &Gd<ProjectSettings>, name: &str) -> bool {
+/// Reads a project setting, returning `default` when the setting is absent (nil).
+fn get_setting_or<T: FromGodot>(name: &str, default: T) -> T {
+    let settings = ProjectSettings::singleton();
     let name_gstring: GString = name.into();
     let variant = settings.get_setting(&name_gstring);
-
     if variant.is_nil() {
-        match name {
-            SETTING_ALLOW_INSECURE_CONTENT => DEFAULT_ALLOW_INSECURE_CONTENT,
-            SETTING_IGNORE_CERTIFICATE_ERRORS => DEFAULT_IGNORE_CERTIFICATE_ERRORS,
-            SETTING_DISABLE_WEB_SECURITY => DEFAULT_DISABLE_WEB_SECURITY,
-            SETTING_ENABLE_AUDIO_CAPTURE => DEFAULT_ENABLE_AUDIO_CAPTURE,
-            _ => false,
-        }
+        default
     } else {
-        variant.to::<bool>()
+        variant.to::<T>()
     }
+}
+
+/// Convenience wrapper: reads a string setting and converts to `String`.
+fn get_string_setting(name: &str, default: &str) -> String {
+    get_setting_or::<GString>(name, default.into()).to_string()
 }
 
 pub fn is_audio_capture_enabled() -> bool {
-    let settings = ProjectSettings::singleton();
-    get_bool_setting(&settings, SETTING_ENABLE_AUDIO_CAPTURE)
+    get_setting_or(SETTING_ENABLE_AUDIO_CAPTURE, DEFAULT_ENABLE_AUDIO_CAPTURE)
 }
 
 pub fn get_remote_devtools_port() -> u16 {
-    let settings = ProjectSettings::singleton();
-    let name_gstring: GString = SETTING_REMOTE_DEVTOOLS_PORT.into();
-    let variant = settings.get_setting(&name_gstring);
-
-    let port = if variant.is_nil() {
-        DEFAULT_REMOTE_DEVTOOLS_PORT
-    } else {
-        variant.to::<i64>()
-    };
-
+    let port = get_setting_or(SETTING_REMOTE_DEVTOOLS_PORT, DEFAULT_REMOTE_DEVTOOLS_PORT);
     // Clamp to valid port range
     port.clamp(1, 65535) as u16
 }
 
 /// Returns the max frame rate setting. Returns 0 if using Godot engine's FPS.
 pub fn get_max_frame_rate() -> i32 {
-    let settings = ProjectSettings::singleton();
-    let name_gstring: GString = SETTING_MAX_FRAME_RATE.into();
-    let variant = settings.get_setting(&name_gstring);
-
-    let fps = if variant.is_nil() {
-        DEFAULT_MAX_FRAME_RATE
-    } else {
-        variant.to::<i64>()
-    };
-
-    fps.max(0) as i32
+    get_setting_or(SETTING_MAX_FRAME_RATE, DEFAULT_MAX_FRAME_RATE).max(0) as i32
 }
 
 /// Returns the cache size limit in megabytes. Returns 0 for CEF default.
 pub fn get_cache_size_mb() -> i32 {
-    let settings = ProjectSettings::singleton();
-    let name_gstring: GString = SETTING_CACHE_SIZE_MB.into();
-    let variant = settings.get_setting(&name_gstring);
-
-    let size = if variant.is_nil() {
-        DEFAULT_CACHE_SIZE_MB
-    } else {
-        variant.to::<i64>()
-    };
-
-    size.max(0) as i32
+    get_setting_or(SETTING_CACHE_SIZE_MB, DEFAULT_CACHE_SIZE_MB).max(0) as i32
 }
 
 /// Returns the custom user agent string. Empty string means use CEF default.
 pub fn get_user_agent() -> String {
-    let settings = ProjectSettings::singleton();
-    let name_gstring: GString = SETTING_USER_AGENT.into();
-    let variant = settings.get_setting(&name_gstring);
-
-    if variant.is_nil() {
-        DEFAULT_USER_AGENT.to_string()
-    } else {
-        variant.to::<GString>().to_string()
-    }
+    get_string_setting(SETTING_USER_AGENT, DEFAULT_USER_AGENT)
 }
 
 /// Returns the proxy server URL. Empty string means direct connection.
 pub fn get_proxy_server() -> String {
-    let settings = ProjectSettings::singleton();
-    let name_gstring: GString = SETTING_PROXY_SERVER.into();
-    let variant = settings.get_setting(&name_gstring);
-
-    if variant.is_nil() {
-        DEFAULT_PROXY_SERVER.to_string()
-    } else {
-        variant.to::<GString>().to_string()
-    }
+    get_string_setting(SETTING_PROXY_SERVER, DEFAULT_PROXY_SERVER)
 }
 
 /// Returns the proxy bypass list. Empty string means no bypass.
 pub fn get_proxy_bypass_list() -> String {
-    let settings = ProjectSettings::singleton();
-    let name_gstring: GString = SETTING_PROXY_BYPASS_LIST.into();
-    let variant = settings.get_setting(&name_gstring);
-
-    if variant.is_nil() {
-        DEFAULT_PROXY_BYPASS_LIST.to_string()
-    } else {
-        variant.to::<GString>().to_string()
-    }
+    get_string_setting(SETTING_PROXY_BYPASS_LIST, DEFAULT_PROXY_BYPASS_LIST)
 }
 
 /// Returns custom command-line switches as a list of strings.
 /// Each line in the multiline string is treated as a separate switch.
 pub fn get_custom_switches() -> Vec<String> {
-    let settings = ProjectSettings::singleton();
-    let name_gstring: GString = SETTING_CUSTOM_SWITCHES.into();
-    let variant = settings.get_setting(&name_gstring);
-
-    let raw = if variant.is_nil() {
-        DEFAULT_CUSTOM_SWITCHES.to_string()
-    } else {
-        variant.to::<GString>().to_string()
-    };
-
+    let raw = get_string_setting(SETTING_CUSTOM_SWITCHES, DEFAULT_CUSTOM_SWITCHES);
     raw.lines()
         .map(|line| line.trim())
         .filter(|line| !line.is_empty() && !line.starts_with('#'))

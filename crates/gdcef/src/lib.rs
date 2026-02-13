@@ -2,6 +2,7 @@ mod accelerated_osr;
 mod browser;
 mod cef_init;
 mod cef_texture;
+mod compat;
 mod cursor;
 mod drag;
 mod error;

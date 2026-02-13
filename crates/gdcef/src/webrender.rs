@@ -7,12 +7,13 @@ use wide::{i8x16, u8x16};
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
-    ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo, DragEvent,
-    EventQueues, EventQueuesHandle, ImeCompositionRange, LoadingStateEvent,
+    AudioState, ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo,
+    DragEvent, EventQueues, EventQueuesHandle, ImeCompositionRange, LoadingStateEvent,
 };
 use crate::utils::get_display_scale_factor;
 
 /// Bundles all the event queues and audio state used for browser-to-Godot communication.
+#[derive(Clone)]
 pub(crate) struct ClientQueues {
     /// Consolidated event queues (UI-thread callbacks).
     pub event_queues: EventQueuesHandle,
@@ -40,6 +41,20 @@ impl ClientQueues {
             enable_audio_capture,
         }
     }
+
+    /// Consumes the queues and returns an `AudioState` if audio capture is enabled,
+    /// or `None` otherwise. Call this after passing a clone to the client builder.
+    pub fn into_audio_state(self) -> Option<AudioState> {
+        if self.enable_audio_capture {
+            Some(AudioState {
+                packet_queue: self.audio_packet_queue,
+                sample_rate: self.audio_sample_rate,
+                shutdown_flag: self.audio_shutdown_flag,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 /// Swizzle indices for BGRA -> RGBA conversion.
@@ -62,8 +77,7 @@ fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
         // Swizzle BGRA -> RGBA using precomputed indices
         let shuffled = v.swizzle(BGRA_TO_RGBA_INDICES);
         let result: [i8; 16] = shuffled.into();
-        // Safe transmute: i8 and u8 have identical bit representation
-        let result_u8: [u8; 16] = unsafe { std::mem::transmute(result) };
+        let result_u8: [u8; 16] = result.map(|b| b as u8);
         rgba[offset..offset + 16].copy_from_slice(&result_u8);
     }
 
@@ -1147,7 +1161,7 @@ fn build_ipc_queues(queues: &ClientQueues) -> ClientIpcQueues {
 }
 
 wrap_client! {
-    pub(crate) struct SoftwareClientImpl {
+    pub(crate) struct CefClientImpl {
         handlers: ClientHandlers,
         ipc: ClientIpcQueues,
     }
@@ -1230,89 +1244,18 @@ fn build_client_handlers(
     }
 }
 
-impl SoftwareClientImpl {
+impl CefClientImpl {
+    /// Builds a CEF client from a pre-built render handler and shared queues.
+    ///
+    /// Both software and accelerated rendering paths use this single entry point;
+    /// only the `render_handler` differs.
     pub(crate) fn build(
-        render_handler: cef_app::OsrRenderHandler,
-        queues: ClientQueues,
-    ) -> cef::Client {
-        let cursor_type = render_handler.get_cursor_type();
-        let ipc = build_ipc_queues(&queues);
-        let handlers = build_client_handlers(
-            SoftwareOsrHandler::build(render_handler, queues.event_queues.clone()),
-            cursor_type,
-            &queues,
-        );
-        Self::new(handlers, ipc)
-    }
-}
-
-wrap_client! {
-    pub(crate) struct AcceleratedClientImpl {
-        handlers: ClientHandlers,
-        ipc: ClientIpcQueues,
-    }
-
-    impl Client {
-        fn render_handler(&self) -> Option<cef::RenderHandler> {
-            Some(self.handlers.render_handler.clone())
-        }
-
-        fn display_handler(&self) -> Option<cef::DisplayHandler> {
-            Some(self.handlers.display_handler.clone())
-        }
-
-        fn context_menu_handler(&self) -> Option<cef::ContextMenuHandler> {
-            Some(self.handlers.context_menu_handler.clone())
-        }
-
-        fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
-            Some(self.handlers.life_span_handler.clone())
-        }
-
-        fn load_handler(&self) -> Option<cef::LoadHandler> {
-            Some(self.handlers.load_handler.clone())
-        }
-
-        fn drag_handler(&self) -> Option<cef::DragHandler> {
-            Some(self.handlers.drag_handler.clone())
-        }
-
-        fn audio_handler(&self) -> Option<cef::AudioHandler> {
-            self.handlers.audio_handler.clone()
-        }
-
-        fn download_handler(&self) -> Option<cef::DownloadHandler> {
-            Some(self.handlers.download_handler.clone())
-        }
-
-        fn request_handler(&self) -> Option<cef::RequestHandler> {
-            Some(self.handlers.request_handler.clone())
-        }
-
-        fn on_process_message_received(
-            &self,
-            _browser: Option<&mut cef::Browser>,
-            _frame: Option<&mut cef::Frame>,
-            _source_process: ProcessId,
-            message: Option<&mut ProcessMessage>,
-        ) -> i32 {
-            on_process_message_received(message, &self.ipc)
-        }
-    }
-}
-
-impl AcceleratedClientImpl {
-    pub(crate) fn build(
-        render_handler: PlatformAcceleratedRenderHandler,
+        render_handler: cef::RenderHandler,
         cursor_type: Arc<Mutex<CursorType>>,
         queues: ClientQueues,
     ) -> cef::Client {
         let ipc = build_ipc_queues(&queues);
-        let handlers = build_client_handlers(
-            AcceleratedOsrHandler::build(render_handler, queues.event_queues.clone()),
-            cursor_type,
-            &queues,
-        );
+        let handlers = build_client_handlers(render_handler, cursor_type, &queues);
         Self::new(handlers, ipc)
     }
 }
@@ -1331,5 +1274,69 @@ wrap_request_context_handler! {
 impl RequestContextHandlerImpl {
     pub(crate) fn build(handler: OsrRequestContextHandler) -> cef::RequestContextHandler {
         Self::new(handler)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bgra_to_rgba_single_pixel() {
+        // BGRA: B=10, G=20, R=30, A=255 → RGBA: R=30, G=20, B=10, A=255
+        let bgra = vec![10, 20, 30, 255];
+        let rgba = bgra_to_rgba(&bgra);
+        assert_eq!(rgba, vec![30, 20, 10, 255]);
+    }
+
+    #[test]
+    fn test_bgra_to_rgba_four_pixels_simd_path() {
+        // Exactly 16 bytes (4 pixels) → triggers the SIMD path
+        let bgra = vec![
+            10, 20, 30, 255, // pixel 0: B=10, G=20, R=30
+            0, 128, 255, 200, // pixel 1: B=0, G=128, R=255
+            50, 50, 50, 128, // pixel 2: B=50, G=50, R=50
+            255, 0, 0, 0, // pixel 3: B=255, G=0, R=0
+        ];
+        let rgba = bgra_to_rgba(&bgra);
+        assert_eq!(
+            rgba,
+            vec![
+                30, 20, 10, 255, // pixel 0: R=30, G=20, B=10
+                255, 128, 0, 200, // pixel 1: R=255, G=128, B=0
+                50, 50, 50, 128, // pixel 2: R=50, G=50, B=50
+                0, 0, 255, 0, // pixel 3: R=0, G=0, B=255
+            ]
+        );
+    }
+
+    #[test]
+    fn test_bgra_to_rgba_mixed_simd_and_remainder() {
+        // 20 bytes = 4 pixels (SIMD) + 1 pixel (remainder)
+        let bgra = vec![
+            10, 20, 30, 255, 0, 128, 255, 200, 50, 50, 50, 128, 255, 0, 0, 0,
+            // remainder pixel:
+            100, 150, 200, 250,
+        ];
+        let rgba = bgra_to_rgba(&bgra);
+        assert_eq!(rgba.len(), 20);
+        // Check remainder pixel: BGRA(100,150,200,250) → RGBA(200,150,100,250)
+        assert_eq!(&rgba[16..20], &[200, 150, 100, 250]);
+    }
+
+    #[test]
+    fn test_bgra_to_rgba_empty() {
+        let rgba = bgra_to_rgba(&[]);
+        assert!(rgba.is_empty());
+    }
+
+    #[test]
+    fn test_bgra_to_rgba_roundtrip() {
+        // Converting BGRA→RGBA and then treating the result as BGRA and converting again
+        // should yield the original data (since swapping R↔B is its own inverse).
+        let original = vec![10, 20, 30, 255, 40, 50, 60, 128];
+        let converted = bgra_to_rgba(&original);
+        let roundtrip = bgra_to_rgba(&converted);
+        assert_eq!(roundtrip, original);
     }
 }

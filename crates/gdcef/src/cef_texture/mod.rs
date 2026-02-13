@@ -188,7 +188,7 @@ impl CefTexture {
     fn on_process(&mut self) {
         // Lazy browser creation: if browser doesn't exist yet (e.g., size was 0 in on_ready
         // because we're inside a Container), try to create it now that layout may be complete.
-        if self.app.browser.is_none() {
+        if self.app.state.is_none() {
             let size = self.base().get_size();
             if size.x > 0.0 && size.y > 0.0 {
                 self.create_browser();
@@ -209,10 +209,10 @@ impl CefTexture {
     }
 
     fn handle_input_event(&mut self, event: Gd<InputEvent>) {
-        let Some(browser) = self.app.browser.as_mut() else {
+        let Some(state) = self.app.state.as_mut() else {
             return;
         };
-        let Some(host) = browser.host() else {
+        let Some(host) = state.browser.host() else {
             return;
         };
 
@@ -240,7 +240,7 @@ impl CefTexture {
         } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
             input::handle_key_event(
                 &host,
-                browser.main_frame().as_ref(),
+                state.browser.main_frame().as_ref(),
                 &key_event,
                 self.ime_active,
             );
@@ -251,11 +251,11 @@ impl CefTexture {
     /// Executes JavaScript code in the browser's main frame.
     /// This is a fire-and-forget operation.
     pub fn eval(&mut self, code: GString) {
-        let Some(browser) = self.app.browser.as_ref() else {
+        let Some(state) = self.app.state.as_ref() else {
             godot::global::godot_warn!("[CefTexture] Cannot execute JS: no browser");
             return;
         };
-        let Some(frame) = browser.main_frame() else {
+        let Some(frame) = state.browser.main_frame() else {
             godot::global::godot_warn!("[CefTexture] Cannot execute JS: no main frame");
             return;
         };
@@ -268,8 +268,8 @@ impl CefTexture {
     fn set_url_property(&mut self, url: GString) {
         self.url = url.clone();
 
-        if let Some(browser) = self.app.browser.as_ref()
-            && let Some(frame) = browser.main_frame()
+        if let Some(state) = self.app.state.as_ref()
+            && let Some(frame) = state.browser.main_frame()
         {
             let url_str: cef::CefStringUtf16 = url.to_string().as_str().into();
             frame.load_url(Some(&url_str));
@@ -289,11 +289,11 @@ impl CefTexture {
     /// Use this when you want structured IPC into the page, and `eval` when
     /// you truly need arbitrary JavaScript execution.
     pub fn send_ipc_message(&mut self, message: GString) {
-        let Some(browser) = self.app.browser.as_ref() else {
+        let Some(state) = self.app.state.as_ref() else {
             godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no browser");
             return;
         };
-        let Some(frame) = browser.main_frame() else {
+        let Some(frame) = state.browser.main_frame() else {
             godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no main frame");
             return;
         };
@@ -318,11 +318,11 @@ impl CefTexture {
     /// Uses native CEF process messaging with BinaryValue for zero-copy
     /// binary transfer without encoding overhead.
     pub fn send_ipc_binary_message(&mut self, data: PackedByteArray) {
-        let Some(browser) = self.app.browser.as_ref() else {
+        let Some(state) = self.app.state.as_ref() else {
             godot::global::godot_warn!("[CefTexture] Cannot send binary IPC message: no browser");
             return;
         };
-        let Some(frame) = browser.main_frame() else {
+        let Some(frame) = state.browser.main_frame() else {
             godot::global::godot_warn!(
                 "[CefTexture] Cannot send binary IPC message: no main frame"
             );
@@ -360,7 +360,7 @@ impl CefTexture {
     #[func]
     /// Navigates back in the browser history.
     pub fn go_back(&mut self) {
-        if let Some(browser) = self.app.browser.as_mut() {
+        if let Some(browser) = self.app.browser_mut() {
             browser.go_back();
         }
     }
@@ -368,7 +368,7 @@ impl CefTexture {
     #[func]
     /// Navigates forward in the browser history.
     pub fn go_forward(&mut self) {
-        if let Some(browser) = self.app.browser.as_mut() {
+        if let Some(browser) = self.app.browser_mut() {
             browser.go_forward();
         }
     }
@@ -376,8 +376,7 @@ impl CefTexture {
     #[func]
     pub fn can_go_back(&self) -> bool {
         self.app
-            .browser
-            .as_ref()
+            .browser()
             .map(|b| b.can_go_back() != 0)
             .unwrap_or(false)
     }
@@ -385,8 +384,7 @@ impl CefTexture {
     #[func]
     pub fn can_go_forward(&self) -> bool {
         self.app
-            .browser
-            .as_ref()
+            .browser()
             .map(|b| b.can_go_forward() != 0)
             .unwrap_or(false)
     }
@@ -394,7 +392,7 @@ impl CefTexture {
     #[func]
     /// Reloads the current page.
     pub fn reload(&mut self) {
-        if let Some(browser) = self.app.browser.as_mut() {
+        if let Some(browser) = self.app.browser_mut() {
             browser.reload();
         }
     }
@@ -402,7 +400,7 @@ impl CefTexture {
     #[func]
     /// Reloads the current page, ignoring cached content.
     pub fn reload_ignore_cache(&mut self) {
-        if let Some(browser) = self.app.browser.as_mut() {
+        if let Some(browser) = self.app.browser_mut() {
             browser.reload_ignore_cache();
         }
     }
@@ -410,7 +408,7 @@ impl CefTexture {
     #[func]
     /// Stops the current page load.
     pub fn stop_loading(&mut self) {
-        if let Some(browser) = self.app.browser.as_mut() {
+        if let Some(browser) = self.app.browser_mut() {
             browser.stop_load();
         }
     }
@@ -419,16 +417,15 @@ impl CefTexture {
     /// Returns true if the browser is currently loading a page.
     pub fn is_loading(&self) -> bool {
         self.app
-            .browser
-            .as_ref()
+            .browser()
             .map(|b| b.is_loading() != 0)
             .unwrap_or(false)
     }
 
     #[func]
     fn get_url_property(&self) -> GString {
-        if let Some(browser) = self.app.browser.as_ref()
-            && let Some(frame) = browser.main_frame()
+        if let Some(state) = self.app.state.as_ref()
+            && let Some(frame) = state.browser.main_frame()
         {
             let frame_url = frame.url();
             let url_string = cef::CefStringUtf16::from(&frame_url).to_string();
@@ -441,9 +438,7 @@ impl CefTexture {
     /// Sets the zoom level. 0.0 is 100%.
     /// Positive values zoom in, negative values zoom out.
     pub fn set_zoom_level(&mut self, level: f64) {
-        if let Some(browser) = self.app.browser.as_mut()
-            && let Some(host) = browser.host()
-        {
+        if let Some(host) = self.app.host() {
             host.set_zoom_level(level);
         }
     }
@@ -451,20 +446,13 @@ impl CefTexture {
     #[func]
     /// Returns the current zoom level.
     pub fn get_zoom_level(&self) -> f64 {
-        self.app
-            .browser
-            .as_ref()
-            .and_then(|b| b.host())
-            .map(|h| h.zoom_level())
-            .unwrap_or(0.0)
+        self.app.host().map(|h| h.zoom_level()).unwrap_or(0.0)
     }
 
     #[func]
     /// Mutes or unmutes audio from this browser instance.
     pub fn set_audio_muted(&mut self, muted: bool) {
-        if let Some(browser) = self.app.browser.as_mut()
-            && let Some(host) = browser.host()
-        {
+        if let Some(host) = self.app.host() {
             host.set_audio_muted(muted as i32);
         }
     }
@@ -473,9 +461,7 @@ impl CefTexture {
     /// Returns true if audio is currently muted.
     pub fn is_audio_muted(&self) -> bool {
         self.app
-            .browser
-            .as_ref()
-            .and_then(|b| b.host())
+            .host()
             .map(|h| h.is_audio_muted() != 0)
             .unwrap_or(false)
     }
@@ -490,9 +476,10 @@ impl CefTexture {
 
         let sample_rate = self
             .app
-            .audio_sample_rate
+            .state
             .as_ref()
-            .and_then(|sr| sr.lock().ok().map(|sr| *sr))
+            .and_then(|s| s.audio.as_ref())
+            .and_then(|a| a.sample_rate.lock().ok().map(|sr| *sr))
             .unwrap_or(48000.0);
 
         stream.set_mix_rate(sample_rate);
@@ -508,7 +495,13 @@ impl CefTexture {
         &mut self,
         mut playback: Gd<godot::classes::AudioStreamGeneratorPlayback>,
     ) -> i32 {
-        let Some(ref queue) = self.app.audio_packet_queue else {
+        let Some(queue) = self
+            .app
+            .state
+            .as_ref()
+            .and_then(|s| s.audio.as_ref())
+            .map(|a| &a.packet_queue)
+        else {
             return 0;
         };
 
@@ -547,9 +540,10 @@ impl CefTexture {
     #[func]
     pub fn has_audio_data(&self) -> bool {
         self.app
-            .audio_packet_queue
+            .state
             .as_ref()
-            .and_then(|q| q.lock().ok())
+            .and_then(|s| s.audio.as_ref())
+            .and_then(|a| a.packet_queue.lock().ok())
             .is_some_and(|q| !q.is_empty())
     }
 
@@ -557,9 +551,10 @@ impl CefTexture {
     #[func]
     pub fn get_audio_buffer_size(&self) -> i32 {
         self.app
-            .audio_packet_queue
+            .state
             .as_ref()
-            .and_then(|q| q.lock().ok())
+            .and_then(|s| s.audio.as_ref())
+            .and_then(|a| a.packet_queue.lock().ok())
             .map(|q| q.len() as i32)
             .unwrap_or(0)
     }
@@ -587,14 +582,9 @@ impl CefTexture {
     }
 
     fn on_focus_enter(&mut self) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-
-        host.set_focus(true as _);
+        if let Some(host) = self.app.host() {
+            host.set_focus(true as _);
+        }
     }
 
     fn get_pixel_scale_factor(&self) -> f32 {
@@ -610,10 +600,7 @@ impl CefTexture {
 
     #[func]
     pub fn drag_enter(&mut self, file_paths: Array<GString>, position: Vector2, allowed_ops: i32) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
+        let Some(host) = self.app.host() else {
             return;
         };
 
@@ -647,10 +634,7 @@ impl CefTexture {
 
     #[func]
     pub fn drag_over(&mut self, position: Vector2, allowed_ops: i32) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
+        let Some(host) = self.app.host() else {
             return;
         };
 
@@ -672,10 +656,7 @@ impl CefTexture {
 
     #[func]
     pub fn drag_leave(&mut self) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
+        let Some(host) = self.app.host() else {
             return;
         };
 
@@ -686,10 +667,7 @@ impl CefTexture {
 
     #[func]
     pub fn drag_drop(&mut self, position: Vector2) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
+        let Some(host) = self.app.host() else {
             return;
         };
 
@@ -707,10 +685,7 @@ impl CefTexture {
 
     #[func]
     pub fn drag_source_ended(&mut self, position: Vector2, operation: i32) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
+        let Some(host) = self.app.host() else {
             return;
         };
 
@@ -727,14 +702,9 @@ impl CefTexture {
 
     #[func]
     pub fn drag_source_system_ended(&mut self) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-        let Some(host) = browser.host() else {
-            return;
-        };
-
-        host.drag_source_system_drag_ended();
+        if let Some(host) = self.app.host() {
+            host.drag_source_system_drag_ended();
+        }
     }
 
     #[func]

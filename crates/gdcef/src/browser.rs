@@ -3,6 +3,7 @@
 //! This module contains the core state types used by CefTexture for managing
 //! the browser instance and rendering mode.
 
+use cef::ImplBrowser;
 use cef_app::{CursorType, FrameBuffer, PhysicalSize, PopupState};
 use godot::classes::{ImageTexture, Texture2Drd};
 use godot::prelude::*;
@@ -206,55 +207,76 @@ pub enum RenderMode {
 /// Shared popup state for <select> dropdowns and other browser popups.
 pub type PopupStateQueue = Arc<Mutex<PopupState>>;
 
+/// Audio capture state for a browser instance.
+///
+/// Groups the audio-related shared resources that are always created and
+/// destroyed together when audio capture is enabled.
+pub struct AudioState {
+    /// Queue for audio packets from the browser.
+    pub packet_queue: AudioPacketQueue,
+    /// Shared sample rate configuration (from Godot's AudioServer).
+    pub sample_rate: AudioSampleRateState,
+    /// Shutdown flag for audio handler to suppress errors during cleanup.
+    pub shutdown_flag: AudioShutdownFlag,
+}
+
+/// Active browser state containing the browser handle and shared resources.
+///
+/// All fields are non-optional because they are always created together
+/// when a browser is initialized and destroyed together on cleanup.
+pub struct BrowserState {
+    /// The CEF browser instance.
+    pub browser: cef::Browser,
+    /// Current rendering mode (software or accelerated).
+    pub render_mode: RenderMode,
+    /// Shared render size in physical pixels.
+    pub render_size: Arc<Mutex<PhysicalSize<f32>>>,
+    /// Shared device scale factor for DPI awareness.
+    pub device_scale_factor: Arc<Mutex<f32>>,
+    /// Shared cursor type from CEF.
+    pub cursor_type: Arc<Mutex<CursorType>>,
+    /// Shared popup state for <select> dropdowns.
+    pub popup_state: PopupStateQueue,
+    /// Consolidated event queues for browser-to-Godot communication.
+    pub event_queues: EventQueuesHandle,
+    /// Audio capture state (present when audio capture is enabled).
+    pub audio: Option<AudioState>,
+}
+
 /// CEF browser state and shared resources.
 ///
-/// Contains the browser handle and resources shared with CEF handlers via Arc<Mutex>.
+/// Contains an optional browser state (present when browser is active)
+/// and drag state that persists across browser lifecycle.
 /// Local Godot state (change detection, IME widgets) lives on CefTexture directly.
 #[derive(Default)]
 pub struct App {
-    /// The CEF browser instance.
-    pub browser: Option<cef::Browser>,
-    /// Current rendering mode (software or accelerated).
-    pub render_mode: Option<RenderMode>,
-    /// Shared render size in physical pixels.
-    pub render_size: Option<Arc<Mutex<PhysicalSize<f32>>>>,
-    /// Shared device scale factor for DPI awareness.
-    pub device_scale_factor: Option<Arc<Mutex<f32>>>,
-    /// Shared cursor type from CEF.
-    pub cursor_type: Option<Arc<Mutex<CursorType>>>,
-    /// Shared popup state for <select> dropdowns.
-    pub popup_state: Option<PopupStateQueue>,
-    /// Consolidated event queues for browser-to-Godot communication.
-    pub event_queues: Option<EventQueuesHandle>,
+    /// Active browser state, present when a browser instance is running.
+    pub state: Option<BrowserState>,
     /// Current drag state for this browser.
     pub drag_state: DragState,
-    /// Queue for audio packets from the browser.
-    /// Kept separate because audio callbacks may run on different threads.
-    pub audio_packet_queue: Option<AudioPacketQueue>,
-    /// Shared audio parameters from CEF.
-    pub audio_params: Option<AudioParamsState>,
-    /// Shared sample rate configuration (from Godot's AudioServer).
-    pub audio_sample_rate: Option<AudioSampleRateState>,
-    /// Shutdown flag for audio handler to suppress errors during cleanup.
-    pub audio_shutdown_flag: Option<AudioShutdownFlag>,
 }
 
 impl App {
+    /// Returns a reference to the active browser, if any.
+    pub fn browser(&self) -> Option<&cef::Browser> {
+        self.state.as_ref().map(|s| &s.browser)
+    }
+
+    /// Returns a mutable reference to the active browser, if any.
+    pub fn browser_mut(&mut self) -> Option<&mut cef::Browser> {
+        self.state.as_mut().map(|s| &mut s.browser)
+    }
+
+    /// Returns the browser host, if a browser is active.
+    pub fn host(&self) -> Option<cef::BrowserHost> {
+        self.state.as_ref().and_then(|s| s.browser.host())
+    }
+
     /// Clears per-instance runtime state. This is used during `CefTexture` cleanup
     /// and can be reused by tests as a deterministic reset point.
     pub fn clear_runtime_state(&mut self) {
-        self.browser = None;
-        self.render_mode = None;
-        self.render_size = None;
-        self.device_scale_factor = None;
-        self.cursor_type = None;
-        self.popup_state = None;
-        self.event_queues = None;
+        self.state = None;
         self.drag_state = Default::default();
-        self.audio_packet_queue = None;
-        self.audio_params = None;
-        self.audio_sample_rate = None;
-        self.audio_shutdown_flag = None;
     }
 }
 
@@ -269,28 +291,13 @@ mod tests {
             app.drag_state.is_drag_over = true;
             app.drag_state.is_dragging_from_browser = true;
             app.drag_state.allowed_ops = u32::MAX;
-            app.event_queues = Some(Arc::new(Mutex::new(EventQueues::new())));
-            app.audio_packet_queue = Some(Arc::new(Mutex::new(VecDeque::new())));
-            app.audio_params = Some(Arc::new(Mutex::new(None)));
-            app.audio_sample_rate = Some(Arc::new(Mutex::new(48000.0)));
-            app.audio_shutdown_flag = Some(Arc::new(AtomicBool::new(true)));
 
             app.clear_runtime_state();
 
-            assert!(app.browser.is_none());
-            assert!(app.render_mode.is_none());
-            assert!(app.render_size.is_none());
-            assert!(app.device_scale_factor.is_none());
-            assert!(app.cursor_type.is_none());
-            assert!(app.popup_state.is_none());
-            assert!(app.event_queues.is_none());
+            assert!(app.state.is_none());
             assert!(!app.drag_state.is_drag_over);
             assert!(!app.drag_state.is_dragging_from_browser);
             assert_eq!(app.drag_state.allowed_ops, 0);
-            assert!(app.audio_packet_queue.is_none());
-            assert!(app.audio_params.is_none());
-            assert!(app.audio_sample_rate.is_none());
-            assert!(app.audio_shutdown_flag.is_none());
         }
     }
 }

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use crate::accelerated_osr::{
     self, AcceleratedRenderState, GodotTextureImporter, PlatformAcceleratedRenderHandler,
 };
-use crate::browser::{PopupStateQueue, RenderMode};
+use crate::browser::{BrowserState, PopupStateQueue, RenderMode};
 use crate::error::CefError;
 use crate::{godot_protocol, render, webrender};
 
@@ -19,18 +19,7 @@ fn color_to_cef_color(color: Color) -> u32 {
 
 impl CefTexture {
     fn log_cleanup_state_violations(&self) {
-        if self.app.browser.is_some()
-            || self.app.render_mode.is_some()
-            || self.app.render_size.is_some()
-            || self.app.device_scale_factor.is_some()
-            || self.app.cursor_type.is_some()
-            || self.app.popup_state.is_some()
-            || self.app.event_queues.is_some()
-            || self.app.audio_packet_queue.is_some()
-            || self.app.audio_params.is_some()
-            || self.app.audio_sample_rate.is_some()
-            || self.app.audio_shutdown_flag.is_some()
-        {
+        if self.app.state.is_some() {
             godot::global::godot_warn!(
                 "[CefTexture] Cleanup invariant violation: runtime state not fully cleared"
             );
@@ -38,15 +27,17 @@ impl CefTexture {
     }
 
     pub(super) fn cleanup_instance(&mut self) {
-        if self.app.browser.is_none() {
+        if self.app.state.is_none() {
             crate::cef_init::cef_release();
             return;
         }
 
         // Signal audio handler that we're shutting down to suppress "socket closed" errors
-        if let Some(ref shutdown_flag) = self.app.audio_shutdown_flag {
+        if let Some(state) = &self.app.state
+            && let Some(audio) = &state.audio
+        {
             use std::sync::atomic::Ordering;
-            shutdown_flag.store(true, Ordering::Relaxed);
+            audio.shutdown_flag.store(true, Ordering::Relaxed);
         }
 
         // Hide the TextureRect and clear its texture BEFORE freeing resources.
@@ -54,10 +45,11 @@ impl CefTexture {
         self.base_mut().set_visible(false);
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        if let Some(RenderMode::Accelerated {
-            render_state,
-            texture_2d_rd,
-        }) = &mut self.app.render_mode
+        if let Some(state) = &mut self.app.state
+            && let RenderMode::Accelerated {
+                render_state,
+                texture_2d_rd,
+            } = &mut state.render_mode
         {
             // Clear the RD texture RID from the Texture2Drd to break the reference
             // before we free the underlying RD texture.
@@ -65,17 +57,17 @@ impl CefTexture {
             if let Some(popup_texture_2d_rd) = &mut self.popup_texture_2d_rd {
                 popup_texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
             }
-            if let Ok(mut state) = render_state.lock() {
-                render::free_rd_texture(state.dst_rd_rid);
+            if let Ok(mut rs) = render_state.lock() {
+                render::free_rd_texture(rs.dst_rd_rid);
                 // Also free popup texture RID if it exists
-                if let Some(popup_rid) = state.popup_rd_rid.take() {
+                if let Some(popup_rid) = rs.popup_rd_rid.take() {
                     render::free_rd_texture(popup_rid);
                 }
             }
         }
 
-        if let Some(browser) = self.app.browser.take()
-            && let Some(host) = browser.host()
+        if let Some(state) = self.app.state.take()
+            && let Some(host) = state.browser.host()
         {
             host.close_browser(true as _);
         }
@@ -108,7 +100,7 @@ impl CefTexture {
     pub(super) fn try_create_browser(&mut self) -> Result<(), CefError> {
         // Prevent double-initialization: if browser already exists, do nothing.
         // This avoids resource leaks (unclosed browser handles, leaked textures, etc.).
-        if self.app.browser.is_some() {
+        if self.app.state.is_some() {
             return Ok(());
         }
 
@@ -161,7 +153,7 @@ impl CefTexture {
             godot_protocol::register_user_scheme_handler_on_context(ctx);
         }
 
-        let browser = if use_accelerated {
+        if use_accelerated {
             self.create_accelerated_browser(
                 &window_info,
                 &browser_settings,
@@ -169,7 +161,7 @@ impl CefTexture {
                 dpi,
                 pixel_width,
                 pixel_height,
-            )?
+            )?;
         } else {
             self.create_software_browser(
                 &window_info,
@@ -178,10 +170,9 @@ impl CefTexture {
                 dpi,
                 pixel_width,
                 pixel_height,
-            )?
-        };
+            )?;
+        }
 
-        self.app.browser = Some(browser);
         self.last_size = logical_size;
         self.last_dpi = dpi;
         Ok(())
@@ -213,7 +204,7 @@ impl CefTexture {
         dpi: f32,
         pixel_width: i32,
         pixel_height: i32,
-    ) -> Result<cef::Browser, CefError> {
+    ) -> Result<(), CefError> {
         godot::global::godot_print!("[CefTexture] Creating browser in software rendering mode");
         let window_info = WindowInfo {
             bounds: cef::Rect {
@@ -244,16 +235,12 @@ impl CefTexture {
 
         let texture = ImageTexture::new_gd();
 
-        let mut client = webrender::SoftwareClientImpl::build(
-            render_handler,
-            webrender::ClientQueues {
-                event_queues: queues.event_queues.clone(),
-                audio_packet_queue: queues.audio_packet_queue.clone(),
-                audio_params: queues.audio_params.clone(),
-                audio_sample_rate: queues.audio_sample_rate.clone(),
-                audio_shutdown_flag: queues.audio_shutdown_flag.clone(),
-                enable_audio_capture,
-            },
+        let cef_render_handler =
+            webrender::SoftwareOsrHandler::build(render_handler, queues.event_queues.clone());
+        let mut client = webrender::CefClientImpl::build(
+            cef_render_handler,
+            cursor_type.clone(),
+            queues.clone(),
         );
 
         // Attempt browser creation first, before updating any app state
@@ -271,21 +258,22 @@ impl CefTexture {
 
         // Browser created successfully - now update app state
         self.base_mut().set_texture(&texture);
-        self.app.render_mode = Some(RenderMode::Software {
-            frame_buffer,
-            texture,
+        let event_queues = queues.event_queues.clone();
+        self.app.state = Some(BrowserState {
+            browser,
+            render_mode: RenderMode::Software {
+                frame_buffer,
+                texture,
+            },
+            render_size,
+            device_scale_factor,
+            cursor_type,
+            popup_state,
+            event_queues,
+            audio: queues.into_audio_state(),
         });
-        self.app.render_size = Some(render_size);
-        self.app.device_scale_factor = Some(device_scale_factor);
-        self.app.cursor_type = Some(cursor_type);
-        self.app.popup_state = Some(popup_state);
-        self.app.event_queues = Some(queues.event_queues);
-        self.app.audio_packet_queue = Some(queues.audio_packet_queue);
-        self.app.audio_params = Some(queues.audio_params);
-        self.app.audio_sample_rate = Some(queues.audio_sample_rate);
-        self.app.audio_shutdown_flag = Some(queues.audio_shutdown_flag);
 
-        Ok(browser)
+        Ok(())
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -297,7 +285,7 @@ impl CefTexture {
         dpi: f32,
         pixel_width: i32,
         pixel_height: i32,
-    ) -> Result<cef::Browser, CefError> {
+    ) -> Result<(), CefError> {
         godot::global::godot_print!("[CefTexture] Creating browser in accelerated rendering mode");
         let importer = match GodotTextureImporter::new() {
             Some(imp) => imp,
@@ -342,17 +330,12 @@ impl CefTexture {
         let enable_audio_capture = crate::settings::is_audio_capture_enabled();
         let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture);
 
-        let mut client = webrender::AcceleratedClientImpl::build(
-            render_handler,
+        let cef_render_handler =
+            webrender::AcceleratedOsrHandler::build(render_handler, queues.event_queues.clone());
+        let mut client = webrender::CefClientImpl::build(
+            cef_render_handler,
             cursor_type.clone(),
-            webrender::ClientQueues {
-                event_queues: queues.event_queues.clone(),
-                audio_packet_queue: queues.audio_packet_queue.clone(),
-                audio_params: queues.audio_params.clone(),
-                audio_sample_rate: queues.audio_sample_rate.clone(),
-                audio_shutdown_flag: queues.audio_shutdown_flag.clone(),
-                enable_audio_capture,
-            },
+            queues.clone(),
         );
 
         // Attempt browser creation first, before updating any app state
@@ -376,21 +359,22 @@ impl CefTexture {
 
         // Browser created successfully - now update app state
         self.base_mut().set_texture(&texture_2d_rd);
-        self.app.render_mode = Some(RenderMode::Accelerated {
-            render_state,
-            texture_2d_rd,
+        let event_queues = queues.event_queues.clone();
+        self.app.state = Some(BrowserState {
+            browser,
+            render_mode: RenderMode::Accelerated {
+                render_state,
+                texture_2d_rd,
+            },
+            render_size,
+            device_scale_factor,
+            cursor_type,
+            popup_state,
+            event_queues,
+            audio: queues.into_audio_state(),
         });
-        self.app.render_size = Some(render_size);
-        self.app.device_scale_factor = Some(device_scale_factor);
-        self.app.cursor_type = Some(cursor_type);
-        self.app.popup_state = Some(popup_state);
-        self.app.event_queues = Some(queues.event_queues);
-        self.app.audio_packet_queue = Some(queues.audio_packet_queue);
-        self.app.audio_params = Some(queues.audio_params);
-        self.app.audio_sample_rate = Some(queues.audio_sample_rate);
-        self.app.audio_shutdown_flag = Some(queues.audio_shutdown_flag);
 
-        Ok(browser)
+        Ok(())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -402,7 +386,7 @@ impl CefTexture {
         dpi: f32,
         pixel_width: i32,
         pixel_height: i32,
-    ) -> Result<cef::Browser, CefError> {
+    ) -> Result<(), CefError> {
         self.create_software_browser(
             window_info,
             browser_settings,
@@ -411,5 +395,53 @@ impl CefTexture {
             pixel_width,
             pixel_height,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_color_to_cef_color_opaque_red() {
+        // Opaque red: (r=1, g=0, b=0, a=1) → ARGB bytes [255, 255, 0, 0]
+        let color = Color::from_rgba(1.0, 0.0, 0.0, 1.0);
+        assert_eq!(color_to_cef_color(color), 0xFF_FF_00_00);
+    }
+
+    #[test]
+    fn test_color_to_cef_color_opaque_green() {
+        let color = Color::from_rgba(0.0, 1.0, 0.0, 1.0);
+        assert_eq!(color_to_cef_color(color), 0xFF_00_FF_00);
+    }
+
+    #[test]
+    fn test_color_to_cef_color_opaque_blue() {
+        let color = Color::from_rgba(0.0, 0.0, 1.0, 1.0);
+        assert_eq!(color_to_cef_color(color), 0xFF_00_00_FF);
+    }
+
+    #[test]
+    fn test_color_to_cef_color_transparent_white() {
+        let color = Color::from_rgba(1.0, 1.0, 1.0, 0.0);
+        assert_eq!(color_to_cef_color(color), 0x00_FF_FF_FF);
+    }
+
+    #[test]
+    fn test_color_to_cef_color_half_alpha() {
+        // ~50% alpha, black
+        let color = Color::from_rgba(0.0, 0.0, 0.0, 0.5);
+        let result = color_to_cef_color(color);
+        // Alpha byte should be ~127
+        let alpha = (result >> 24) & 0xFF;
+        assert!((126..=128).contains(&alpha), "alpha was {}", alpha);
+    }
+
+    #[test]
+    fn test_color_to_cef_color_clamps_out_of_range() {
+        // Values >1 or <0 should be clamped
+        let color = Color::from_rgba(2.0, -1.0, 0.5, 1.5);
+        let result = color_to_cef_color(color);
+        assert_eq!(result, 0xFF_FF_00_7F);
     }
 }

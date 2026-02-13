@@ -4,7 +4,7 @@
 //! and cursor positioning.
 
 use super::CefTexture;
-use cef::{ImplBrowser, ImplBrowserHost};
+use cef::ImplBrowserHost;
 use godot::classes::control::{FocusMode, MouseFilter};
 use godot::classes::{Control, DisplayServer, LineEdit};
 use godot::prelude::*;
@@ -66,11 +66,7 @@ impl CefTexture {
 
     /// Called when the IME proxy LineEdit text changes during composition.
     pub(super) fn on_ime_proxy_text_changed_impl(&mut self, new_text: GString) {
-        let Some(browser) = self.app.browser.as_mut() else {
-            return;
-        };
-
-        let Some(host) = browser.host() else {
+        let Some(host) = self.app.host() else {
             return;
         };
 
@@ -128,9 +124,7 @@ impl CefTexture {
             proxy.grab_focus();
         }
 
-        if let Some(browser) = self.app.browser.as_mut()
-            && let Some(host) = browser.host()
-        {
+        if let Some(host) = self.app.host() {
             host.set_focus(true as _);
         }
 
@@ -165,9 +159,7 @@ impl CefTexture {
         let end = ime_selection.y.max(0) as u32;
 
         // Update the IME composition text
-        if let Some(browser) = self.app.browser.as_mut()
-            && let Some(host) = browser.host()
-        {
+        if let Some(host) = self.app.host() {
             input::ime_set_composition(&host, &ime_text, start, end);
         }
     }

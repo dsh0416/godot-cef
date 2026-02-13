@@ -12,7 +12,7 @@ mod keycode;
 const WHEEL_DELTA: f32 = 120.0;
 
 /// Pre-defined shortcuts for editor commands.
-/// Initialized once per thread using thread_local.
+/// Initialized once per thread using thread_local to avoid repeated allocation.
 struct EditorShortcuts {
     select_all: Gd<InputEvent>,            // Ctrl/Cmd+A
     copy: Gd<InputEvent>,                  // Ctrl/Cmd+C
@@ -31,12 +31,15 @@ impl EditorShortcuts {
     }
 }
 
+thread_local! {
+    static EDITOR_SHORTCUTS: EditorShortcuts = EditorShortcuts::new();
+}
+
 fn with_shortcuts<F, R>(f: F) -> R
 where
     F: FnOnce(&EditorShortcuts) -> R,
 {
-    let shortcuts = EditorShortcuts::new();
-    f(&shortcuts)
+    EDITOR_SHORTCUTS.with(f)
 }
 fn create_shortcut(key: Key, with_command_or_ctrl: bool, with_shift: bool) -> Gd<InputEvent> {
     let mut key_event = InputEventKey::new_gd();
@@ -70,13 +73,7 @@ macro_rules! keyboard_modifiers {
             modifiers |= cef_event_flags_t::EVENTFLAG_COMMAND_DOWN;
         }
 
-        // cef_event_flags_t returns u32 on linux and macOS, but i32 on Windows,
-        // so we need to cast to u32 to avoid type mismatch.
-        #[cfg(target_os = "windows")]
-        let ret = modifiers.0 as u32;
-        #[cfg(not(target_os = "windows"))]
-        let ret = modifiers.0;
-        ret
+        crate::compat::event_flags_to_u32(modifiers)
     }};
 }
 
@@ -94,12 +91,7 @@ fn mouse_button_modifiers(button_mask: MouseButtonMask) -> u32 {
         modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON;
     }
 
-    // cef_event_flags_t returns u32 on linux and macOS, but i32 on Windows,
-    // so we need to cast to u32 to avoid type mismatch.
-    #[cfg(target_os = "windows")]
-    return modifiers.0 as u32;
-    #[cfg(not(target_os = "windows"))]
-    return modifiers.0;
+    crate::compat::event_flags_to_u32(modifiers)
 }
 
 /// Creates a CEF mouse event from Godot position and DPI scale
@@ -210,14 +202,10 @@ pub fn handle_key_event(
     focus_on_editable_field: bool,
 ) {
     let mut modifiers = keyboard_modifiers!(event);
-    #[cfg(target_os = "windows")]
-    let keypad_key_modifier = cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0 as u32;
-    #[cfg(not(target_os = "windows"))]
-    let keypad_key_modifier = cef_event_flags_t::EVENTFLAG_IS_KEY_PAD.0;
 
     // Check if it's from the keypad
     if is_keypad_key(event.get_physical_keycode()) {
-        modifiers |= keypad_key_modifier;
+        modifiers |= crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_IS_KEY_PAD);
     }
 
     let is_pressed = event.is_pressed();
@@ -466,4 +454,82 @@ pub fn ime_set_composition(
         Some(&invalid_range),
         Some(&selection_range),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_control_char_code() {
+        assert_eq!(get_control_char_code(Key::BACKSPACE), 0x08);
+        assert_eq!(get_control_char_code(Key::TAB), 0x09);
+        assert_eq!(get_control_char_code(Key::ENTER), 0x0D);
+        assert_eq!(get_control_char_code(Key::KP_ENTER), 0x0D);
+        assert_eq!(get_control_char_code(Key::ESCAPE), 0x1B);
+        assert_eq!(get_control_char_code(Key::DELETE), 0x7F);
+        // Non-control keys return 0
+        assert_eq!(get_control_char_code(Key::A), 0);
+        assert_eq!(get_control_char_code(Key::SPACE), 0);
+    }
+
+    #[test]
+    fn test_is_navigation_key() {
+        assert!(is_navigation_key(Key::UP));
+        assert!(is_navigation_key(Key::DOWN));
+        assert!(is_navigation_key(Key::LEFT));
+        assert!(is_navigation_key(Key::RIGHT));
+        assert!(is_navigation_key(Key::HOME));
+        assert!(is_navigation_key(Key::END));
+        assert!(is_navigation_key(Key::PAGEUP));
+        assert!(is_navigation_key(Key::PAGEDOWN));
+        // Non-navigation keys
+        assert!(!is_navigation_key(Key::A));
+        assert!(!is_navigation_key(Key::ENTER));
+        assert!(!is_navigation_key(Key::SPACE));
+    }
+
+    #[test]
+    fn test_is_modifier_key() {
+        assert!(is_modifier_key(Key::SHIFT));
+        assert!(is_modifier_key(Key::CTRL));
+        assert!(is_modifier_key(Key::ALT));
+        assert!(is_modifier_key(Key::META));
+        assert!(is_modifier_key(Key::CAPSLOCK));
+        assert!(is_modifier_key(Key::NUMLOCK));
+        assert!(is_modifier_key(Key::SCROLLLOCK));
+        // Non-modifier keys
+        assert!(!is_modifier_key(Key::A));
+        assert!(!is_modifier_key(Key::ENTER));
+    }
+
+    #[test]
+    fn test_is_keypad_key() {
+        assert!(is_keypad_key(Key::KP_0));
+        assert!(is_keypad_key(Key::KP_9));
+        assert!(is_keypad_key(Key::KP_MULTIPLY));
+        assert!(is_keypad_key(Key::KP_ADD));
+        assert!(is_keypad_key(Key::KP_SUBTRACT));
+        assert!(is_keypad_key(Key::KP_PERIOD));
+        assert!(is_keypad_key(Key::KP_DIVIDE));
+        assert!(is_keypad_key(Key::KP_ENTER));
+        // Non-keypad keys
+        assert!(!is_keypad_key(Key::KEY_0));
+        assert!(!is_keypad_key(Key::ENTER));
+    }
+
+    #[test]
+    fn test_should_send_char_event() {
+        // Printable characters with unicode > 0 should send CHAR
+        assert!(should_send_char_event(Key::A, 'a' as u32));
+        assert!(should_send_char_event(Key::SPACE, ' ' as u32));
+        // Modifier keys should never send CHAR
+        assert!(!should_send_char_event(Key::SHIFT, 0));
+        assert!(!should_send_char_event(Key::CTRL, 0));
+        // Navigation keys should never send CHAR
+        assert!(!should_send_char_event(Key::UP, 0));
+        assert!(!should_send_char_event(Key::LEFT, 0));
+        // Non-printable, non-modifier, non-navigation keys with unicode=0 should not send CHAR
+        assert!(!should_send_char_event(Key::F1, 0));
+    }
 }

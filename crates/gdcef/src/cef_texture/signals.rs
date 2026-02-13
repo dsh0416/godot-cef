@@ -5,7 +5,9 @@
 use super::CefTexture;
 use godot::prelude::*;
 
-use crate::browser::{DragEvent, EventQueues, LoadingStateEvent};
+use std::collections::VecDeque;
+
+use crate::browser::{DragEvent, LoadingStateEvent};
 use crate::drag::DragDataInfo;
 
 #[derive(GodotClass)]
@@ -134,53 +136,17 @@ impl DownloadUpdateInfo {
     }
 }
 
-/// Drained events from the consolidated event queue.
-/// This allows us to release the lock before emitting signals.
-#[derive(Default)]
-pub(super) struct DrainedEvents {
-    pub messages: Vec<String>,
-    pub binary_messages: Vec<Vec<u8>>,
-    pub url_changes: Vec<String>,
-    pub title_changes: Vec<String>,
-    pub loading_states: Vec<LoadingStateEvent>,
-    pub ime_enables: Vec<bool>,
-    pub ime_composition_range: Option<crate::browser::ImeCompositionRange>,
-    pub console_messages: Vec<crate::browser::ConsoleMessageEvent>,
-    pub drag_events: Vec<DragEvent>,
-    pub download_requests: Vec<crate::browser::DownloadRequestEvent>,
-    pub download_updates: Vec<crate::browser::DownloadUpdateEvent>,
-    pub render_process_terminated: Vec<(String, cef::TerminationStatus)>,
-}
-
-impl DrainedEvents {
-    /// Drains all events from the consolidated event queue in a single lock.
-    pub fn drain_from(queues: &mut EventQueues) -> Self {
-        Self {
-            messages: queues.messages.drain(..).collect(),
-            binary_messages: queues.binary_messages.drain(..).collect(),
-            url_changes: queues.url_changes.drain(..).collect(),
-            title_changes: queues.title_changes.drain(..).collect(),
-            loading_states: queues.loading_states.drain(..).collect(),
-            ime_enables: queues.ime_enables.drain(..).collect(),
-            ime_composition_range: queues.ime_composition_range.take(),
-            console_messages: queues.console_messages.drain(..).collect(),
-            drag_events: queues.drag_events.drain(..).collect(),
-            download_requests: queues.download_requests.drain(..).collect(),
-            download_updates: queues.download_updates.drain(..).collect(),
-            render_process_terminated: queues.render_process_terminated.drain(..).collect(),
-        }
-    }
-}
-
 impl CefTexture {
-    /// Drains all event queues with a single lock and processes them.
-    /// This is more efficient than locking each queue separately.
+    /// Takes all queued events with a single lock and processes them.
+    ///
+    /// Uses `mem::take` to swap the entire `EventQueues` with an empty default,
+    /// releasing the lock before any signal emission.
     pub(super) fn process_all_event_queues(&mut self) {
-        let Some(event_queues) = &self.app.event_queues else {
+        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
             return;
         };
 
-        // Drain all events with a single lock
+        // Take all events with a single lock, replacing with empty queues
         let events = {
             let Ok(mut queues) = event_queues.lock() else {
                 godot::global::godot_warn!(
@@ -188,7 +154,7 @@ impl CefTexture {
                 );
                 return;
             };
-            DrainedEvents::drain_from(&mut queues)
+            std::mem::take(&mut *queues)
         };
 
         // Now process events without holding the lock
@@ -210,14 +176,14 @@ impl CefTexture {
         }
     }
 
-    fn emit_message_signals(&mut self, messages: &[String]) {
+    fn emit_message_signals(&mut self, messages: &VecDeque<String>) {
         for message in messages {
             self.base_mut()
                 .emit_signal("ipc_message", &[GString::from(message).to_variant()]);
         }
     }
 
-    fn emit_binary_message_signals(&mut self, messages: &[Vec<u8>]) {
+    fn emit_binary_message_signals(&mut self, messages: &VecDeque<Vec<u8>>) {
         for data in messages {
             let byte_array = PackedByteArray::from(data.as_slice());
             self.base_mut()
@@ -225,21 +191,21 @@ impl CefTexture {
         }
     }
 
-    fn emit_url_change_signals(&mut self, urls: &[String]) {
+    fn emit_url_change_signals(&mut self, urls: &VecDeque<String>) {
         for url in urls {
             self.base_mut()
                 .emit_signal("url_changed", &[GString::from(url).to_variant()]);
         }
     }
 
-    fn emit_title_change_signals(&mut self, titles: &[String]) {
+    fn emit_title_change_signals(&mut self, titles: &VecDeque<String>) {
         for title in titles {
             self.base_mut()
                 .emit_signal("title_changed", &[GString::from(title).to_variant()]);
         }
     }
 
-    fn emit_loading_state_signals(&mut self, events: &[LoadingStateEvent]) {
+    fn emit_loading_state_signals(&mut self, events: &VecDeque<LoadingStateEvent>) {
         for event in events {
             match event {
                 LoadingStateEvent::Started { url } => {
@@ -276,7 +242,10 @@ impl CefTexture {
         }
     }
 
-    fn emit_console_message_signals(&mut self, events: &[crate::browser::ConsoleMessageEvent]) {
+    fn emit_console_message_signals(
+        &mut self,
+        events: &VecDeque<crate::browser::ConsoleMessageEvent>,
+    ) {
         for event in events {
             self.base_mut().emit_signal(
                 "console_message",
@@ -290,7 +259,7 @@ impl CefTexture {
         }
     }
 
-    fn emit_drag_event_signals(&mut self, events: &[DragEvent]) {
+    fn emit_drag_event_signals(&mut self, events: &VecDeque<DragEvent>) {
         for event in events {
             match event {
                 DragEvent::Started {
@@ -328,7 +297,10 @@ impl CefTexture {
         }
     }
 
-    fn emit_download_request_signals(&mut self, events: &[crate::browser::DownloadRequestEvent]) {
+    fn emit_download_request_signals(
+        &mut self,
+        events: &VecDeque<crate::browser::DownloadRequestEvent>,
+    ) {
         for event in events {
             let download_info = DownloadRequestInfo::from_event(event);
             self.base_mut()
@@ -336,7 +308,10 @@ impl CefTexture {
         }
     }
 
-    fn emit_download_update_signals(&mut self, events: &[crate::browser::DownloadUpdateEvent]) {
+    fn emit_download_update_signals(
+        &mut self,
+        events: &VecDeque<crate::browser::DownloadUpdateEvent>,
+    ) {
         for event in events {
             let download_info = DownloadUpdateInfo::from_event(event);
             self.base_mut()
@@ -346,7 +321,7 @@ impl CefTexture {
 
     fn emit_render_process_terminated_signals(
         &mut self,
-        events: &[(String, cef::TerminationStatus)],
+        events: &VecDeque<(String, cef::TerminationStatus)>,
     ) {
         for (reason, status) in events {
             self.base_mut().emit_signal(
@@ -359,9 +334,9 @@ impl CefTexture {
         }
     }
 
-    fn process_ime_enable_events(&mut self, events: &[bool]) {
+    fn process_ime_enable_events(&mut self, events: &VecDeque<bool>) {
         // Take the last event (latest wins)
-        if let Some(&enable) = events.last() {
+        if let Some(&enable) = events.back() {
             if enable && !self.ime_active {
                 self.activate_ime();
             } else if !enable && self.ime_active {
