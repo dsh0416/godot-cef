@@ -41,6 +41,14 @@ pub struct CefTexture {
     /// Useful for transparent pages.
     background_color: Color,
 
+    #[export(enum = (Block = 0, Redirect = 1, SignalOnly = 2))]
+    #[var(get = get_popup_policy, set = set_popup_policy)]
+    /// Controls how popup windows (window.open, target="_blank") are handled.
+    /// Block: suppress all popups silently (default).
+    /// Redirect: navigate the current browser to the popup URL.
+    /// SignalOnly: emit `popup_requested` signal and let GDScript decide.
+    popup_policy: i32,
+
     #[var]
     /// Stores the IME cursor position in local coordinates (relative to this `CefTexture` node),
     /// automatically updated from the browser's caret position.
@@ -73,6 +81,7 @@ impl ITextureRect for CefTexture {
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
+            popup_policy: crate::browser::popup_policy::BLOCK,
             ime_position: Vector2i::new(0, 0),
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
@@ -157,6 +166,9 @@ impl CefTexture {
 
     #[signal]
     fn render_process_terminated(status: i32, error_message: GString);
+
+    #[signal]
+    fn popup_requested(url: GString, disposition: i32, user_gesture: bool);
 
     #[func]
     fn on_ready(&mut self) {
@@ -715,5 +727,20 @@ impl CefTexture {
     #[func]
     pub fn is_drag_over(&self) -> bool {
         self.app.drag_state.is_drag_over
+    }
+
+    #[func]
+    fn get_popup_policy(&self) -> i32 {
+        self.popup_policy
+    }
+
+    #[func]
+    fn set_popup_policy(&mut self, policy: i32) {
+        use std::sync::atomic::Ordering;
+        self.popup_policy = policy;
+        // Update the shared atomic flag so the CEF IO thread sees the change immediately
+        if let Some(state) = self.app.state.as_ref() {
+            state.popup_policy.store(policy, Ordering::Relaxed);
+        }
     }
 }

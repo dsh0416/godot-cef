@@ -9,6 +9,7 @@ The `CefTexture` node provides several properties for configuration and state ma
 | `url` | `String` | `"https://google.com"` | The URL to display. Setting this property navigates the browser to the new URL. Reading it returns the current URL from the browser. |
 | `enable_accelerated_osr` | `bool` | `true` | Enable GPU-accelerated rendering |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | Background color for the browser. Set alpha to 0 for transparent background, or use a solid color to disable transparency. |
+| `popup_policy` | `int` | `0` | Controls how popup windows are handled. `0` = BLOCK (suppress silently), `1` = REDIRECT (navigate current browser to popup URL), `2` = SIGNAL_ONLY (emit `popup_requested` signal). Can be changed at runtime. |
 
 ## Project Settings
 
@@ -136,3 +137,32 @@ cef_texture.background_color = Color(0, 0, 0, 0)
 # Solid background
 cef_texture.background_color = Color(0.2, 0.3, 0.4, 1)
 ```
+
+## Popup Policy
+
+The `popup_policy` property controls how popup windows (`window.open()`, `target="_blank"` links) are handled. It can be changed at runtime and takes effect immediately for subsequent popup requests.
+
+| Value | Name | Behavior |
+|-------|------|----------|
+| `0` | BLOCK | Suppress all popups silently (default, backward-compatible) |
+| `1` | REDIRECT | Navigate the current browser to the popup URL instead of opening a new window |
+| `2` | SIGNAL_ONLY | Emit the `popup_requested` signal and let GDScript decide |
+
+```gdscript
+# Block all popups (default)
+cef_texture.popup_policy = 0
+
+# Automatically follow popup links in the same browser
+cef_texture.popup_policy = 1
+
+# Handle popups in GDScript
+cef_texture.popup_policy = 2
+cef_texture.popup_requested.connect(func(url, disposition, user_gesture):
+    if user_gesture:
+        cef_texture.url = url  # Follow user-initiated popups
+)
+```
+
+::: tip
+The REDIRECT policy is the simplest option for single-browser setups — it turns `target="_blank"` links into regular navigation. Use SIGNAL_ONLY when you need fine-grained control (e.g., blocking ads while allowing user-initiated popups).
+:::

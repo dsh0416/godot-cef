@@ -165,6 +165,7 @@ impl CefTexture {
         self.emit_loading_state_signals(&events.loading_states);
         self.emit_console_message_signals(&events.console_messages);
         self.emit_drag_event_signals(&events.drag_events);
+        self.emit_popup_request_signals(&events.popup_requests);
         self.emit_download_request_signals(&events.download_requests);
         self.emit_download_update_signals(&events.download_updates);
         self.emit_render_process_terminated_signals(&events.render_process_terminated);
@@ -294,6 +295,19 @@ impl CefTexture {
                     self.app.drag_state.is_drag_over = true;
                 }
             }
+        }
+    }
+
+    fn emit_popup_request_signals(&mut self, events: &VecDeque<crate::browser::PopupRequestEvent>) {
+        for event in events {
+            self.base_mut().emit_signal(
+                "popup_requested",
+                &[
+                    GString::from(&event.target_url).to_variant(),
+                    event.disposition.to_variant(),
+                    event.user_gesture.to_variant(),
+                ],
+            );
         }
     }
 

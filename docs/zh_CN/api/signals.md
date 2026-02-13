@@ -266,6 +266,64 @@ func _on_download_updated(download_info: DownloadUpdateInfo):
         print("Downloading: %d%% (%.1f KB/s)" % [percent, speed_kb])
 ```
 
+## `popup_requested(url: String, disposition: int, user_gesture: bool)`
+
+当浏览器尝试打开弹出窗口时触发（例如 `window.open()`、`target="_blank"` 链接）。此信号仅在 `popup_policy` 设为 `2`（SIGNAL_ONLY）时才会触发。
+
+**参数：**
+- `url`：弹出窗口要导航到的 URL
+- `disposition`：CEF 请求打开窗口的方式。值对应 CEF 的 `cef_window_open_disposition_t`：
+  - `0` = 当前标签页
+  - `1` = 单例标签页
+  - `2` = 新前台标签页
+  - `3` = 新后台标签页
+  - `4` = 新弹出窗口
+  - `5` = 新窗口
+  - `6` = 保存到磁盘
+  - `7` = 无痕模式
+  - `8` = 忽略操作
+- `user_gesture`：弹出是否由用户手势触发（点击、键盘快捷键等）
+
+```gdscript
+func _ready():
+    cef_texture.popup_policy = 2  # SIGNAL_ONLY
+    cef_texture.popup_requested.connect(_on_popup_requested)
+
+func _on_popup_requested(url: String, disposition: int, user_gesture: bool):
+    print("弹出请求: ", url, " (手势: ", user_gesture, ")")
+    if user_gesture:
+        # 在当前浏览器中导航到该 URL
+        cef_texture.url = url
+    else:
+        # 阻止非用户触发的弹出（可能是广告）
+        print("已阻止弹出: ", url)
+```
+
+::: tip 弹出策略
+使用 `popup_policy` 属性控制弹出行为：
+- `0`（BLOCK）：静默阻止所有弹出（默认，最安全）
+- `1`（REDIRECT）：自动将当前浏览器导航到弹出 URL
+- `2`（SIGNAL_ONLY）：触发此信号，由 GDScript 决定如何处理
+:::
+
+## `render_process_terminated(status: int, error_message: String)`
+
+当浏览器的渲染进程意外终止时触发（崩溃、被操作系统终止等）。
+
+**参数：**
+- `status`：来自 CEF 的终止状态码
+- `error_message`：终止原因描述
+
+```gdscript
+func _ready():
+    cef_texture.render_process_terminated.connect(_on_render_process_terminated)
+
+func _on_render_process_terminated(status: int, error_message: String):
+    print("渲染进程终止: ", error_message, " (状态: ", status, ")")
+    # 可选择重新加载页面
+    cef_texture.reload()
+```
+
 ## 信号使用模式
 
 ### 加载状态管理

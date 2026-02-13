@@ -266,6 +266,64 @@ func _on_download_updated(download_info: DownloadUpdateInfo):
         print("Downloading: %d%% (%.1f KB/s)" % [percent, speed_kb])
 ```
 
+## `popup_requested(url: String, disposition: int, user_gesture: bool)`
+
+Emitted when the browser tries to open a popup window (e.g., `window.open()`, links with `target="_blank"`). This signal is only emitted when `popup_policy` is set to `2` (SIGNAL_ONLY).
+
+**Parameters:**
+- `url`: The URL the popup wants to navigate to
+- `disposition`: How CEF requested the window to be opened. Values match CEF's `cef_window_open_disposition_t`:
+  - `0` = Current tab
+  - `1` = Singleton tab
+  - `2` = New foreground tab
+  - `3` = New background tab
+  - `4` = New popup
+  - `5` = New window
+  - `6` = Save to disk
+  - `7` = Off the record
+  - `8` = Ignore action
+- `user_gesture`: Whether the popup was triggered by a user gesture (click, keyboard shortcut, etc.)
+
+```gdscript
+func _ready():
+    cef_texture.popup_policy = 2  # SIGNAL_ONLY
+    cef_texture.popup_requested.connect(_on_popup_requested)
+
+func _on_popup_requested(url: String, disposition: int, user_gesture: bool):
+    print("Popup requested: ", url, " (gesture: ", user_gesture, ")")
+    if user_gesture:
+        # Navigate the current browser to the URL
+        cef_texture.url = url
+    else:
+        # Block non-user-initiated popups (likely ads)
+        print("Blocked popup: ", url)
+```
+
+::: tip Popup Policy
+Use the `popup_policy` property to control popup behavior:
+- `0` (BLOCK): Suppress all popups silently (default, safest)
+- `1` (REDIRECT): Automatically navigate the current browser to the popup URL
+- `2` (SIGNAL_ONLY): Emit this signal and let your GDScript decide what to do
+:::
+
+## `render_process_terminated(status: int, error_message: String)`
+
+Emitted when the browser's render process terminates unexpectedly (crash, killed by OS, etc.).
+
+**Parameters:**
+- `status`: Termination status code from CEF
+- `error_message`: Description of the termination reason
+
+```gdscript
+func _ready():
+    cef_texture.render_process_terminated.connect(_on_render_process_terminated)
+
+func _on_render_process_terminated(status: int, error_message: String):
+    print("Render process terminated: ", error_message, " (status: ", status, ")")
+    # Optionally reload the page
+    cef_texture.reload()
+```
+
 ## Signal Usage Patterns
 
 ### Loading State Management

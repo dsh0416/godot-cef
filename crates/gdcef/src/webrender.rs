@@ -701,19 +701,21 @@ impl ContextMenuHandlerImpl {
 }
 
 wrap_life_span_handler! {
-    pub(crate) struct LifeSpanHandlerImpl {}
+    pub(crate) struct LifeSpanHandlerImpl {
+        event_queues: EventQueuesHandle,
+        popup_policy: crate::browser::PopupPolicyFlag,
+    }
 
     impl LifeSpanHandler {
-        // Disable popup for now
         fn on_before_popup(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             _frame: Option<&mut Frame>,
             _popup_id: ::std::os::raw::c_int,
-            _target_url: Option<&CefString>,
+            target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
-            _target_disposition: WindowOpenDisposition,
-            _user_gesture: ::std::os::raw::c_int,
+            target_disposition: WindowOpenDisposition,
+            user_gesture: ::std::os::raw::c_int,
             _popup_features: Option<&PopupFeatures>,
             _window_info: Option<&mut WindowInfo>,
             _client: Option<&mut Option<Client>>,
@@ -721,14 +723,54 @@ wrap_life_span_handler! {
             _extra_info: Option<&mut Option<DictionaryValue>>,
             _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
-            true as _
+            use crate::browser::{popup_policy, PopupRequestEvent};
+            use std::sync::atomic::Ordering;
+
+            let policy = self.popup_policy.load(Ordering::Relaxed);
+            let url = target_url
+                .map(|u| u.to_string())
+                .unwrap_or_default();
+
+            match policy {
+                popup_policy::REDIRECT => {
+                    // Navigate the current browser to the popup URL
+                    if let Some(browser) = browser
+                        && let Some(frame) = browser.main_frame()
+                        && !url.is_empty()
+                    {
+                        let url_cef = CefStringUtf16::from(url.as_str());
+                        frame.load_url(Some(&url_cef));
+                    }
+                    // Return true to cancel the popup (we handled it via navigation)
+                    true as _
+                }
+                popup_policy::SIGNAL_ONLY => {
+                    // Queue the event for GDScript to handle
+                    if let Ok(mut queues) = self.event_queues.lock() {
+                        queues.popup_requests.push_back(PopupRequestEvent {
+                            target_url: url,
+                            disposition: target_disposition.get_raw() as i32,
+                            user_gesture: user_gesture != 0,
+                        });
+                    }
+                    // Return true to cancel the popup (GDScript decides what to do)
+                    true as _
+                }
+                _ => {
+                    // BLOCK (default): suppress silently
+                    true as _
+                }
+            }
         }
     }
 }
 
 impl LifeSpanHandlerImpl {
-    pub fn build() -> cef::LifeSpanHandler {
-        Self::new()
+    pub fn build(
+        event_queues: EventQueuesHandle,
+        popup_policy: crate::browser::PopupPolicyFlag,
+    ) -> cef::LifeSpanHandler {
+        Self::new(event_queues, popup_policy)
     }
 }
 
@@ -1219,6 +1261,7 @@ fn build_client_handlers(
     render_handler: cef::RenderHandler,
     cursor_type: Arc<Mutex<CursorType>>,
     queues: &ClientQueues,
+    popup_policy: crate::browser::PopupPolicyFlag,
 ) -> ClientHandlers {
     let audio_handler = if queues.enable_audio_capture {
         Some(AudioHandlerImpl::build(
@@ -1235,7 +1278,7 @@ fn build_client_handlers(
         render_handler,
         display_handler: DisplayHandlerImpl::build(cursor_type, queues.event_queues.clone()),
         context_menu_handler: ContextMenuHandlerImpl::build(),
-        life_span_handler: LifeSpanHandlerImpl::build(),
+        life_span_handler: LifeSpanHandlerImpl::build(queues.event_queues.clone(), popup_policy),
         load_handler: LoadHandlerImpl::build(queues.event_queues.clone()),
         drag_handler: DragHandlerImpl::build(queues.event_queues.clone()),
         audio_handler,
@@ -1253,9 +1296,10 @@ impl CefClientImpl {
         render_handler: cef::RenderHandler,
         cursor_type: Arc<Mutex<CursorType>>,
         queues: ClientQueues,
+        popup_policy: crate::browser::PopupPolicyFlag,
     ) -> cef::Client {
         let ipc = build_ipc_queues(&queues);
-        let handlers = build_client_handlers(render_handler, cursor_type, &queues);
+        let handlers = build_client_handlers(render_handler, cursor_type, &queues, popup_policy);
         Self::new(handlers, ipc)
     }
 }

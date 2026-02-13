@@ -9,6 +9,7 @@
 | `url` | `String` | `"https://google.com"` | 要显示的 URL。设置该属性会让浏览器导航到新地址；读取时返回当前 URL（可能因用户操作/重定向而变化）。 |
 | `enable_accelerated_osr` | `bool` | `true` | 启用 GPU 加速渲染 |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色。将 alpha 设为 0 表示透明背景，或使用实色以禁用透明效果。 |
+| `popup_policy` | `int` | `0` | 控制弹出窗口的处理方式。`0` = BLOCK（静默阻止），`1` = REDIRECT（在当前浏览器中导航到弹出 URL），`2` = SIGNAL_ONLY（触发 `popup_requested` 信号）。可在运行时更改。 |
 
 ## 项目设置
 
@@ -137,3 +138,32 @@ cef_texture.background_color = Color(0, 0, 0, 0)
 # 实心背景
 cef_texture.background_color = Color(0.2, 0.3, 0.4, 1)
 ```
+
+## 弹出策略
+
+`popup_policy` 属性控制弹出窗口（`window.open()`、`target="_blank"` 链接）的处理方式。可在运行时更改，立即对后续弹出请求生效。
+
+| 值 | 名称 | 行为 |
+|----|------|------|
+| `0` | BLOCK | 静默阻止所有弹出（默认，向后兼容） |
+| `1` | REDIRECT | 在当前浏览器中导航到弹出 URL，而不打开新窗口 |
+| `2` | SIGNAL_ONLY | 触发 `popup_requested` 信号，由 GDScript 决定处理方式 |
+
+```gdscript
+# 阻止所有弹出（默认）
+cef_texture.popup_policy = 0
+
+# 在同一浏览器中自动跟随弹出链接
+cef_texture.popup_policy = 1
+
+# 在 GDScript 中处理弹出
+cef_texture.popup_policy = 2
+cef_texture.popup_requested.connect(func(url, disposition, user_gesture):
+    if user_gesture:
+        cef_texture.url = url  # 跟随用户触发的弹出
+)
+```
+
+::: tip
+REDIRECT 策略是单浏览器场景中最简单的选项——它将 `target="_blank"` 链接变为普通导航。当需要精细控制时（例如阻止广告但允许用户触发的弹出），请使用 SIGNAL_ONLY。
+:::

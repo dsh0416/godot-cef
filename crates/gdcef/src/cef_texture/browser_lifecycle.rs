@@ -3,18 +3,28 @@ use cef::{BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings,
 use cef_app::PhysicalSize;
 use godot::classes::{AudioServer, ImageTexture};
 use godot::prelude::*;
+use std::sync::atomic::AtomicI32;
 use std::sync::{Arc, Mutex};
 
 use crate::accelerated_osr::{
     self, AcceleratedRenderState, GodotTextureImporter, PlatformAcceleratedRenderHandler,
 };
-use crate::browser::{BrowserState, PopupStateQueue, RenderMode};
+use crate::browser::{BrowserState, PopupPolicyFlag, PopupStateQueue, RenderMode};
 use crate::error::CefError;
 use crate::{godot_protocol, render, webrender};
 
 fn color_to_cef_color(color: Color) -> u32 {
     let f = |c: f32| (c.clamp(0.0, 1.0) * 255.0) as u8;
     u32::from_be_bytes([f(color.a), f(color.r), f(color.g), f(color.b)])
+}
+
+/// Bundles the pixel-level parameters shared by both browser creation paths,
+/// keeping each function signature under clippy's argument-count limit.
+struct BrowserCreateParams {
+    dpi: f32,
+    pixel_width: i32,
+    pixel_height: i32,
+    popup_policy: PopupPolicyFlag,
 }
 
 impl CefTexture {
@@ -121,6 +131,9 @@ impl CefTexture {
 
         let use_accelerated = self.should_use_accelerated_osr();
 
+        // Create the shared popup policy flag with the current property value
+        let popup_policy: PopupPolicyFlag = Arc::new(AtomicI32::new(self.popup_policy));
+
         let window_info = WindowInfo {
             bounds: cef::Rect {
                 x: 0,
@@ -153,24 +166,17 @@ impl CefTexture {
             godot_protocol::register_user_scheme_handler_on_context(ctx);
         }
 
+        let params = BrowserCreateParams {
+            dpi,
+            pixel_width,
+            pixel_height,
+            popup_policy,
+        };
+
         if use_accelerated {
-            self.create_accelerated_browser(
-                &window_info,
-                &browser_settings,
-                context.as_mut(),
-                dpi,
-                pixel_width,
-                pixel_height,
-            )?;
+            self.create_accelerated_browser(&window_info, &browser_settings, context.as_mut(), params)?;
         } else {
-            self.create_software_browser(
-                &window_info,
-                &browser_settings,
-                context.as_mut(),
-                dpi,
-                pixel_width,
-                pixel_height,
-            )?;
+            self.create_software_browser(&window_info, &browser_settings, context.as_mut(), params)?;
         }
 
         self.last_size = logical_size;
@@ -201,10 +207,9 @@ impl CefTexture {
         _window_info: &WindowInfo,
         browser_settings: &BrowserSettings,
         context: Option<&mut cef::RequestContext>,
-        dpi: f32,
-        pixel_width: i32,
-        pixel_height: i32,
+        params: BrowserCreateParams,
     ) -> Result<(), CefError> {
+        let BrowserCreateParams { dpi, pixel_width, pixel_height, popup_policy } = params;
         godot::global::godot_print!("[CefTexture] Creating browser in software rendering mode");
         let window_info = WindowInfo {
             bounds: cef::Rect {
@@ -241,6 +246,7 @@ impl CefTexture {
             cef_render_handler,
             cursor_type.clone(),
             queues.clone(),
+            popup_policy.clone(),
         );
 
         // Attempt browser creation first, before updating any app state
@@ -271,6 +277,7 @@ impl CefTexture {
             popup_state,
             event_queues,
             audio: queues.into_audio_state(),
+            popup_policy,
         });
 
         Ok(())
@@ -282,9 +289,7 @@ impl CefTexture {
         window_info: &WindowInfo,
         browser_settings: &BrowserSettings,
         context: Option<&mut cef::RequestContext>,
-        dpi: f32,
-        pixel_width: i32,
-        pixel_height: i32,
+        params: BrowserCreateParams,
     ) -> Result<(), CefError> {
         godot::global::godot_print!("[CefTexture] Creating browser in accelerated rendering mode");
         let importer = match GodotTextureImporter::new() {
@@ -297,12 +302,11 @@ impl CefTexture {
                     window_info,
                     browser_settings,
                     context,
-                    dpi,
-                    pixel_width,
-                    pixel_height,
+                    params,
                 );
             }
         };
+        let BrowserCreateParams { dpi, pixel_width, pixel_height, popup_policy } = params;
 
         // Create the RD texture first
         let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height)?;
@@ -336,6 +340,7 @@ impl CefTexture {
             cef_render_handler,
             cursor_type.clone(),
             queues.clone(),
+            popup_policy.clone(),
         );
 
         // Attempt browser creation first, before updating any app state
@@ -372,6 +377,7 @@ impl CefTexture {
             popup_state,
             event_queues,
             audio: queues.into_audio_state(),
+            popup_policy,
         });
 
         Ok(())
@@ -383,18 +389,9 @@ impl CefTexture {
         window_info: &WindowInfo,
         browser_settings: &BrowserSettings,
         context: Option<&mut cef::RequestContext>,
-        dpi: f32,
-        pixel_width: i32,
-        pixel_height: i32,
+        params: BrowserCreateParams,
     ) -> Result<(), CefError> {
-        self.create_software_browser(
-            window_info,
-            browser_settings,
-            context,
-            dpi,
-            pixel_width,
-            pixel_height,
-        )
+        self.create_software_browser(window_info, browser_settings, context, params)
     }
 }
 
