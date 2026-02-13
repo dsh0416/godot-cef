@@ -174,9 +174,19 @@ impl CefTexture {
         };
 
         if use_accelerated {
-            self.create_accelerated_browser(&window_info, &browser_settings, context.as_mut(), params)?;
+            self.create_accelerated_browser(
+                &window_info,
+                &browser_settings,
+                context.as_mut(),
+                params,
+            )?;
         } else {
-            self.create_software_browser(&window_info, &browser_settings, context.as_mut(), params)?;
+            self.create_software_browser(
+                &window_info,
+                &browser_settings,
+                context.as_mut(),
+                params,
+            )?;
         }
 
         self.last_size = logical_size;
@@ -209,7 +219,12 @@ impl CefTexture {
         context: Option<&mut cef::RequestContext>,
         params: BrowserCreateParams,
     ) -> Result<(), CefError> {
-        let BrowserCreateParams { dpi, pixel_width, pixel_height, popup_policy } = params;
+        let BrowserCreateParams {
+            dpi,
+            pixel_width,
+            pixel_height,
+            popup_policy,
+        } = params;
         godot::global::godot_print!("[CefTexture] Creating browser in software rendering mode");
         let window_info = WindowInfo {
             bounds: cef::Rect {
@@ -306,7 +321,12 @@ impl CefTexture {
                 );
             }
         };
-        let BrowserCreateParams { dpi, pixel_width, pixel_height, popup_policy } = params;
+        let BrowserCreateParams {
+            dpi,
+            pixel_width,
+            pixel_height,
+            popup_policy,
+        } = params;
 
         // Create the RD texture first
         let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height)?;
