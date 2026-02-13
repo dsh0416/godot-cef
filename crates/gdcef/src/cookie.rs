@@ -4,7 +4,7 @@
 //! asynchronous cookie APIs back to Godot's main-thread event loop via
 //! the shared `EventQueues`.
 
-use cef::{self, rc::Rc, *};
+use cef::{self, *};
 use std::sync::{Arc, Mutex};
 
 use crate::browser::EventQueuesHandle;
