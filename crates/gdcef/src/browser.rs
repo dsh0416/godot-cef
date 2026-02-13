@@ -102,7 +102,7 @@ pub struct PopupRequestEvent {
     /// How the browser requested the window to be opened
     /// (e.g., new foreground tab, new background tab, new popup, new window).
     /// Matches CEF's `cef_window_open_disposition_t` values.
-    pub disposition: i32,
+    pub disposition: cef::WindowOpenDisposition,
     /// Whether the popup was triggered by a user gesture (click, etc.).
     pub user_gesture: bool,
 }

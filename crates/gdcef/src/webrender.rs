@@ -749,7 +749,7 @@ wrap_life_span_handler! {
                     if let Ok(mut queues) = self.event_queues.lock() {
                         queues.popup_requests.push_back(PopupRequestEvent {
                             target_url: url,
-                            disposition: target_disposition.get_raw() as i32,
+                            disposition: target_disposition,
                             user_gesture: user_gesture != 0,
                         });
                     }

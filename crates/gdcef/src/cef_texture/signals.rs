@@ -304,7 +304,7 @@ impl CefTexture {
                 "popup_requested",
                 &[
                     GString::from(&event.target_url).to_variant(),
-                    event.disposition.to_variant(),
+                    event.disposition.get_raw().to_variant(),
                     event.user_gesture.to_variant(),
                 ],
             );
