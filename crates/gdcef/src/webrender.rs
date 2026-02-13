@@ -1041,21 +1041,16 @@ wrap_request_handler! {
             _error_code: i32,
             _error_string: Option<&cef::CefStringUtf16>,
         ) {
-            let status_code = status.get_raw();
-            let reason = if status_code == cef::sys::cef_termination_status_t::TS_ABNORMAL_TERMINATION as u32 {
-                "Abnormal Termination"
-            } else if status_code == cef::sys::cef_termination_status_t::TS_PROCESS_WAS_KILLED as u32 {
-                "Process Was Killed"
-            } else if status_code == cef::sys::cef_termination_status_t::TS_PROCESS_CRASHED as u32 {
-                "Process Crashed"
-            } else if status_code == cef::sys::cef_termination_status_t::TS_PROCESS_OOM as u32 {
-                "Process OOM"
-            } else {
-                "Unknown"
+            let reason = match status {
+                cef::TerminationStatus::ABNORMAL_TERMINATION => "Abnormal Termination",
+                cef::TerminationStatus::PROCESS_WAS_KILLED => "Process Was Killed",
+                cef::TerminationStatus::PROCESS_CRASHED => "Process Crashed",
+                cef::TerminationStatus::PROCESS_OOM => "Process OOM",
+                _ => "Unknown",
             };
 
             if let Ok(mut queues) = self.event_queues.lock() {
-                queues.render_process_terminated.push_back((reason.to_string(), status_code as i32));
+                queues.render_process_terminated.push_back((reason.to_string(), status));
             }
         }
     }

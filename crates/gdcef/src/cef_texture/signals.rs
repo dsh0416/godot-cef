@@ -149,7 +149,7 @@ pub(super) struct DrainedEvents {
     pub drag_events: Vec<DragEvent>,
     pub download_requests: Vec<crate::browser::DownloadRequestEvent>,
     pub download_updates: Vec<crate::browser::DownloadUpdateEvent>,
-    pub render_process_terminated: Vec<(String, i32)>,
+    pub render_process_terminated: Vec<(String, cef::TerminationStatus)>,
 }
 
 impl DrainedEvents {
@@ -344,11 +344,17 @@ impl CefTexture {
         }
     }
 
-    fn emit_render_process_terminated_signals(&mut self, events: &[(String, i32)]) {
+    fn emit_render_process_terminated_signals(
+        &mut self,
+        events: &[(String, cef::TerminationStatus)],
+    ) {
         for (reason, status) in events {
             self.base_mut().emit_signal(
                 "render_process_terminated",
-                &[status.to_variant(), GString::from(reason).to_variant()],
+                &[
+                    status.get_raw().to_variant(),
+                    GString::from(reason).to_variant(),
+                ],
             );
         }
     }

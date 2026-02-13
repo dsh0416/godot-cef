@@ -130,7 +130,7 @@ pub struct EventQueues {
     /// Download update events.
     pub download_updates: VecDeque<DownloadUpdateEvent>,
     /// Render process terminated event.
-    pub render_process_terminated: VecDeque<(String, i32)>, // (reason, status)
+    pub render_process_terminated: VecDeque<(String, cef::TerminationStatus)>, // (reason, status)
 }
 
 impl EventQueues {
