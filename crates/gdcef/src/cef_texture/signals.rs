@@ -149,6 +149,7 @@ pub(super) struct DrainedEvents {
     pub drag_events: Vec<DragEvent>,
     pub download_requests: Vec<crate::browser::DownloadRequestEvent>,
     pub download_updates: Vec<crate::browser::DownloadUpdateEvent>,
+    pub render_process_terminated: Vec<(String, i32)>,
 }
 
 impl DrainedEvents {
@@ -166,6 +167,7 @@ impl DrainedEvents {
             drag_events: queues.drag_events.drain(..).collect(),
             download_requests: queues.download_requests.drain(..).collect(),
             download_updates: queues.download_updates.drain(..).collect(),
+            render_process_terminated: queues.render_process_terminated.drain(..).collect(),
         }
     }
 }
@@ -199,6 +201,7 @@ impl CefTexture {
         self.emit_drag_event_signals(&events.drag_events);
         self.emit_download_request_signals(&events.download_requests);
         self.emit_download_update_signals(&events.download_updates);
+        self.emit_render_process_terminated_signals(&events.render_process_terminated);
 
         // Handle IME events (these may modify self state)
         self.process_ime_enable_events(&events.ime_enables);
@@ -338,6 +341,15 @@ impl CefTexture {
             let download_info = DownloadUpdateInfo::from_event(event);
             self.base_mut()
                 .emit_signal("download_updated", &[download_info.to_variant()]);
+        }
+    }
+
+    fn emit_render_process_terminated_signals(&mut self, events: &[(String, i32)]) {
+        for (reason, status) in events {
+            self.base_mut().emit_signal(
+                "render_process_terminated",
+                &[status.to_variant(), GString::from(reason).to_variant()],
+            );
         }
     }
 

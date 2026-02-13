@@ -26,12 +26,19 @@ pub struct CefTexture {
 
     #[export]
     #[var(get = get_url_property, set = set_url_property)]
+    /// The URL to load. Changing this triggers a navigation.
+    /// Supported schemes: http://, https://, res://, user://
     url: GString,
 
     #[export]
+    /// Enable GPU-accelerated Off-Screen Rendering (OSR).
+    /// If true, uses shared textures (Vulkan/D3D12/Metal) for high performance.
+    /// If false or unsupported, falls back to software rendering.
     enable_accelerated_osr: bool,
 
     #[export]
+    /// The background color of the browser view.
+    /// Useful for transparent pages.
     background_color: Color,
 
     #[var]
@@ -148,6 +155,9 @@ impl CefTexture {
     #[signal]
     fn download_updated(download_info: Gd<crate::cef_texture::signals::DownloadUpdateInfo>);
 
+    #[signal]
+    fn render_process_terminated(status: i32, error_message: GString);
+
     #[func]
     fn on_ready(&mut self) {
         use godot::classes::control::FocusMode;
@@ -238,6 +248,8 @@ impl CefTexture {
     }
 
     #[func]
+    /// Executes JavaScript code in the browser's main frame.
+    /// This is a fire-and-forget operation.
     pub fn eval(&mut self, code: GString) {
         let Some(browser) = self.app.browser.as_ref() else {
             godot::global::godot_warn!("[CefTexture] Cannot execute JS: no browser");
@@ -346,6 +358,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Navigates back in the browser history.
     pub fn go_back(&mut self) {
         if let Some(browser) = self.app.browser.as_mut() {
             browser.go_back();
@@ -353,6 +366,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Navigates forward in the browser history.
     pub fn go_forward(&mut self) {
         if let Some(browser) = self.app.browser.as_mut() {
             browser.go_forward();
@@ -378,6 +392,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Reloads the current page.
     pub fn reload(&mut self) {
         if let Some(browser) = self.app.browser.as_mut() {
             browser.reload();
@@ -385,6 +400,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Reloads the current page, ignoring cached content.
     pub fn reload_ignore_cache(&mut self) {
         if let Some(browser) = self.app.browser.as_mut() {
             browser.reload_ignore_cache();
@@ -392,6 +408,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Stops the current page load.
     pub fn stop_loading(&mut self) {
         if let Some(browser) = self.app.browser.as_mut() {
             browser.stop_load();
@@ -399,6 +416,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Returns true if the browser is currently loading a page.
     pub fn is_loading(&self) -> bool {
         self.app
             .browser
@@ -420,6 +438,8 @@ impl CefTexture {
     }
 
     #[func]
+    /// Sets the zoom level. 0.0 is 100%.
+    /// Positive values zoom in, negative values zoom out.
     pub fn set_zoom_level(&mut self, level: f64) {
         if let Some(browser) = self.app.browser.as_mut()
             && let Some(host) = browser.host()
@@ -429,6 +449,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Returns the current zoom level.
     pub fn get_zoom_level(&self) -> f64 {
         self.app
             .browser
@@ -439,6 +460,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Mutes or unmutes audio from this browser instance.
     pub fn set_audio_muted(&mut self, muted: bool) {
         if let Some(browser) = self.app.browser.as_mut()
             && let Some(host) = browser.host()
@@ -448,6 +470,7 @@ impl CefTexture {
     }
 
     #[func]
+    /// Returns true if audio is currently muted.
     pub fn is_audio_muted(&self) -> bool {
         self.app
             .browser
