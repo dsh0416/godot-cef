@@ -107,16 +107,12 @@ pub fn create_mouse_event(
     position: Vector2,
     pixel_scale_factor: f32,
     device_scale_factor: f32,
-    modifiers: i32,
+    modifiers: u32,
 ) -> MouseEvent {
     let x = (position.x * pixel_scale_factor / device_scale_factor) as i32;
     let y = (position.y * pixel_scale_factor / device_scale_factor) as i32;
 
-    MouseEvent {
-        x,
-        y,
-        modifiers: modifiers as u32,
-    }
+    MouseEvent { x, y, modifiers }
 }
 
 /// Handles mouse button events and sends them to CEF browser host
@@ -126,8 +122,7 @@ pub fn handle_mouse_button(
     pixel_scale_factor: f32,
     device_scale_factor: f32,
 ) {
-    let modifiers =
-        (keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask())) as i32;
+    let modifiers = keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask());
     let position = event.get_position();
     let mouse_event =
         create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
@@ -178,12 +173,8 @@ pub fn handle_mouse_motion(
 ) {
     let modifiers = keyboard_modifiers!(event) | mouse_button_modifiers(event.get_button_mask());
     let position = event.get_position();
-    let mouse_event = create_mouse_event(
-        position,
-        pixel_scale_factor,
-        device_scale_factor,
-        modifiers as i32,
-    );
+    let mouse_event =
+        create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
     host.send_mouse_move_event(Some(&mouse_event), false as i32);
 }
 
@@ -196,12 +187,8 @@ pub fn handle_pan_gesture(
 ) {
     let modifiers = keyboard_modifiers!(event);
     let position = event.get_position();
-    let mouse_event = create_mouse_event(
-        position,
-        pixel_scale_factor,
-        device_scale_factor,
-        modifiers as i32,
-    );
+    let mouse_event =
+        create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
 
     let delta = event.get_delta();
     // Convert pan delta to scroll wheel delta

@@ -17,11 +17,8 @@ fn get_godot_audio_sample_rate() -> i32 {
 }
 
 fn color_to_cef_color(color: Color) -> u32 {
-    let a = (color.a.clamp(0.0, 1.0) * 255.0) as u32;
-    let r = (color.r.clamp(0.0, 1.0) * 255.0) as u32;
-    let g = (color.g.clamp(0.0, 1.0) * 255.0) as u32;
-    let b = (color.b.clamp(0.0, 1.0) * 255.0) as u32;
-    (a << 24) | (r << 16) | (g << 8) | b
+    let f = |c: f32| (c.clamp(0.0, 1.0) * 255.0) as u8;
+    u32::from_be_bytes([f(color.a), f(color.r), f(color.g), f(color.b)])
 }
 
 impl CefTexture {
