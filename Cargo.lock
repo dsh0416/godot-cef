@@ -270,9 +270,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "144.4.0+144.0.13"
+version = "145.0.0+145.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42320c2356f3fe4ed3f875b8fc93cbbabd1be3c59fcc0a8eb1e5b5c25616ac28"
+checksum = "b58bbf2e8a56823f72fe1421fe0d80c5208fc9539df9739bb92ab92958287d40"
 dependencies = [
  "anyhow",
  "ash",
@@ -298,9 +298,9 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "144.4.0+144.0.13"
+version = "145.0.0+145.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d802abd4ac0b8c12be11b6af24100c6e21543c265867ad53067268048bc7e3a"
+checksum = "07f35f0c390f36f5a11291751c766d3f09614fb334a93a6a71eb21bfc0d93573"
 dependencies = [
  "anyhow",
  "cmake",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "cef_app"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "cef",
  "libloading 0.9.0",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "ash",
  "cef",
@@ -777,7 +777,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef-benches"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "criterion",
  "software_render",
@@ -785,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef_helper"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "cef",
  "cef-dll-sys",
@@ -2036,7 +2036,7 @@ dependencies = [
 
 [[package]]
 name = "software_render"
-version = "1.8.1"
+version = "1.9.0"
 
 [[package]]
 name = "spirv"
@@ -2835,7 +2835,7 @@ checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
 
 [[package]]
 name = "xtask"
-version = "1.8.1"
+version = "1.9.0"
 dependencies = [
  "clap",
  "plist",
