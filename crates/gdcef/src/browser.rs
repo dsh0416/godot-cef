@@ -8,11 +8,25 @@ use cef_app::{CursorType, FrameBuffer, PhysicalSize, PopupState};
 use godot::classes::{ImageTexture, Texture2Drd};
 use godot::prelude::*;
 use std::collections::VecDeque;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, Mutex};
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use crate::accelerated_osr::AcceleratedRenderState;
+
+/// Popup policy constants. These control what happens when a page tries to open a popup.
+///
+/// - `BLOCK` (0): Suppress all popups silently (default, backward-compatible).
+/// - `REDIRECT` (1): Navigate the current browser to the popup URL instead of opening a new window.
+/// - `SIGNAL_ONLY` (2): Emit the `popup_requested` signal and let GDScript decide.
+pub mod popup_policy {
+    pub const BLOCK: i32 = 0;
+    pub const REDIRECT: i32 = 1;
+    pub const SIGNAL_ONLY: i32 = 2;
+}
+
+/// Shared popup policy state, readable from the CEF IO thread.
+pub type PopupPolicyFlag = Arc<AtomicI32>;
 
 /// Represents a loading state event from the browser.
 #[derive(Debug, Clone)]
@@ -77,6 +91,22 @@ pub enum DragEvent {
     },
 }
 
+/// Represents a popup window request from the browser.
+///
+/// Emitted when a page calls `window.open()` or a link has `target="_blank"`.
+/// CEF's `WindowOpenDisposition` is mapped to an i32 for GDScript compatibility.
+#[derive(Debug, Clone)]
+pub struct PopupRequestEvent {
+    /// The URL the popup wants to navigate to.
+    pub target_url: String,
+    /// How the browser requested the window to be opened
+    /// (e.g., new foreground tab, new background tab, new popup, new window).
+    /// Matches CEF's `cef_window_open_disposition_t` values.
+    pub disposition: cef::WindowOpenDisposition,
+    /// Whether the popup was triggered by a user gesture (click, etc.).
+    pub user_gesture: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct DownloadRequestEvent {
     pub id: u32,
@@ -126,6 +156,8 @@ pub struct EventQueues {
     pub console_messages: VecDeque<ConsoleMessageEvent>,
     /// Drag events.
     pub drag_events: VecDeque<DragEvent>,
+    /// Popup window request events.
+    pub popup_requests: VecDeque<PopupRequestEvent>,
     /// Download request events.
     pub download_requests: VecDeque<DownloadRequestEvent>,
     /// Download update events.
@@ -241,6 +273,8 @@ pub struct BrowserState {
     pub event_queues: EventQueuesHandle,
     /// Audio capture state (present when audio capture is enabled).
     pub audio: Option<AudioState>,
+    /// Shared popup policy flag, readable from CEF's IO thread.
+    pub popup_policy: PopupPolicyFlag,
 }
 
 /// CEF browser state and shared resources.
