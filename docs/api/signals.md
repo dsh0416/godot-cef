@@ -324,6 +324,84 @@ func _on_render_process_terminated(status: int, error_message: String):
     cef_texture.reload()
 ```
 
+## `cookies_received(cookies: Array[CookieInfo])`
+
+Emitted when `get_all_cookies()` or `get_cookies()` completes. Contains an array of `CookieInfo` objects with the retrieved cookie data.
+
+Each `CookieInfo` object has the following properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `String` | Cookie name |
+| `value` | `String` | Cookie value |
+| `domain` | `String` | Cookie domain (e.g., `.example.com`) |
+| `path` | `String` | Cookie path (e.g., `/`) |
+| `secure` | `bool` | Whether the cookie requires HTTPS |
+| `httponly` | `bool` | Whether the cookie is HTTP-only (not accessible via JavaScript) |
+| `same_site` | `int` | SameSite policy: `0` = Unspecified, `1` = None, `2` = Lax, `3` = Strict |
+| `has_expires` | `bool` | Whether the cookie has an expiration date (session cookies have `false`) |
+
+```gdscript
+func _ready():
+    cef_texture.cookies_received.connect(_on_cookies_received)
+
+func _on_cookies_received(cookies: Array[CookieInfo]):
+    for cookie in cookies:
+        print("Cookie: ", cookie.name, " = ", cookie.value,
+              " (domain: ", cookie.domain, ", secure: ", cookie.secure, ")")
+
+# Retrieve all cookies
+cef_texture.get_all_cookies()
+
+# Retrieve cookies for a specific URL
+cef_texture.get_cookies("https://example.com", true)
+```
+
+## `cookie_set(success: bool)`
+
+Emitted when a `set_cookie()` call completes.
+
+**Parameters:**
+- `success`: Whether the cookie was set successfully
+
+```gdscript
+func _ready():
+    cef_texture.cookie_set.connect(_on_cookie_set)
+
+func _on_cookie_set(success: bool):
+    if success:
+        print("Cookie set successfully")
+    else:
+        print("Failed to set cookie")
+```
+
+## `cookies_deleted(num_deleted: int)`
+
+Emitted when `delete_cookies()` or `clear_cookies()` completes.
+
+**Parameters:**
+- `num_deleted`: The number of cookies that were deleted
+
+```gdscript
+func _ready():
+    cef_texture.cookies_deleted.connect(_on_cookies_deleted)
+
+func _on_cookies_deleted(num_deleted: int):
+    print("Deleted ", num_deleted, " cookies")
+```
+
+## `cookies_flushed()`
+
+Emitted when `flush_cookies()` completes. The cookie store has been written to disk.
+
+```gdscript
+func _ready():
+    cef_texture.cookies_flushed.connect(_on_cookies_flushed)
+
+func _on_cookies_flushed():
+    print("Cookie store flushed to disk")
+```
+
 ## Signal Usage Patterns
 
 ### Loading State Management

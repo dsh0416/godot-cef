@@ -136,6 +136,74 @@ impl DownloadUpdateInfo {
     }
 }
 
+/// Cookie information exposed to GDScript as a `RefCounted` object.
+///
+/// Properties: `name`, `value`, `domain`, `path`, `secure`, `httponly`,
+/// `same_site`, `has_expires`.
+#[derive(GodotClass)]
+#[class(base=RefCounted)]
+pub struct CookieInfo {
+    base: Base<RefCounted>,
+
+    #[var]
+    pub name: GString,
+
+    #[var]
+    pub value: GString,
+
+    #[var]
+    pub domain: GString,
+
+    #[var]
+    pub path: GString,
+
+    #[var]
+    pub secure: bool,
+
+    #[var]
+    pub httponly: bool,
+
+    /// SameSite policy (0 = Unspecified, 1 = None, 2 = Lax, 3 = Strict).
+    #[var]
+    pub same_site: i32,
+
+    #[var]
+    pub has_expires: bool,
+}
+
+#[godot_api]
+impl IRefCounted for CookieInfo {
+    fn init(base: Base<RefCounted>) -> Self {
+        Self {
+            base,
+            name: GString::new(),
+            value: GString::new(),
+            domain: GString::new(),
+            path: GString::new(),
+            secure: false,
+            httponly: false,
+            same_site: 0,
+            has_expires: false,
+        }
+    }
+}
+
+impl CookieInfo {
+    fn from_data(data: &crate::cookie::CookieData) -> Gd<Self> {
+        Gd::from_init_fn(|base| Self {
+            base,
+            name: GString::from(&data.name),
+            value: GString::from(&data.value),
+            domain: GString::from(&data.domain),
+            path: GString::from(&data.path),
+            secure: data.secure,
+            httponly: data.httponly,
+            same_site: data.same_site,
+            has_expires: data.has_expires,
+        })
+    }
+}
+
 impl CefTexture {
     /// Takes all queued events with a single lock and processes them.
     ///
@@ -166,6 +234,7 @@ impl CefTexture {
         self.emit_console_message_signals(&events.console_messages);
         self.emit_drag_event_signals(&events.drag_events);
         self.emit_popup_request_signals(&events.popup_requests);
+        self.emit_cookie_event_signals(&events.cookie_events);
         self.emit_download_request_signals(&events.download_requests);
         self.emit_download_update_signals(&events.download_updates);
         self.emit_render_process_terminated_signals(&events.render_process_terminated);
@@ -308,6 +377,30 @@ impl CefTexture {
                     event.user_gesture.to_variant(),
                 ],
             );
+        }
+    }
+
+    fn emit_cookie_event_signals(&mut self, events: &VecDeque<crate::cookie::CookieEvent>) {
+        for event in events {
+            match event {
+                crate::cookie::CookieEvent::Received(cookies) => {
+                    let array: Array<Gd<CookieInfo>> =
+                        cookies.iter().map(CookieInfo::from_data).collect();
+                    self.base_mut()
+                        .emit_signal("cookies_received", &[array.to_variant()]);
+                }
+                crate::cookie::CookieEvent::Set(success) => {
+                    self.base_mut()
+                        .emit_signal("cookie_set", &[success.to_variant()]);
+                }
+                crate::cookie::CookieEvent::Deleted(count) => {
+                    self.base_mut()
+                        .emit_signal("cookies_deleted", &[count.to_variant()]);
+                }
+                crate::cookie::CookieEvent::Flushed => {
+                    self.base_mut().emit_signal("cookies_flushed", &[]);
+                }
+            }
         }
     }
 

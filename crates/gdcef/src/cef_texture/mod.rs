@@ -170,6 +170,23 @@ impl CefTexture {
     #[signal]
     fn popup_requested(url: GString, disposition: i32, user_gesture: bool);
 
+    /// Emitted when `get_cookies` or `get_all_cookies` completes.
+    /// Contains an `Array` of `CookieInfo` objects.
+    #[signal]
+    fn cookies_received(cookies: Array<Gd<crate::cef_texture::signals::CookieInfo>>);
+
+    /// Emitted when `set_cookie` completes.
+    #[signal]
+    fn cookie_set(success: bool);
+
+    /// Emitted when `delete_cookies` or `clear_cookies` completes.
+    #[signal]
+    fn cookies_deleted(num_deleted: i32);
+
+    /// Emitted when `flush_cookies` completes.
+    #[signal]
+    fn cookies_flushed();
+
     #[func]
     fn on_ready(&mut self) {
         use godot::classes::control::FocusMode;
@@ -742,5 +759,139 @@ impl CefTexture {
         if let Some(state) = self.app.state.as_ref() {
             state.popup_policy.store(policy, Ordering::Relaxed);
         }
+    }
+
+    // ── Cookie & Session Management ─────────────────────────────────────────
+
+    /// Gets the `CookieManager` for this browser's `RequestContext`.
+    fn cookie_manager(&self) -> Option<cef::CookieManager> {
+        use cef::ImplBrowserHost;
+        let host = self.app.host()?;
+        let ctx = host.request_context()?;
+        use cef::ImplRequestContext;
+        ctx.cookie_manager(None)
+    }
+
+    /// Retrieves all cookies. Results are emitted via `cookies_received` signal.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    pub fn get_all_cookies(&self) -> bool {
+        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
+            return false;
+        };
+        let Some(manager) = self.cookie_manager() else {
+            return false;
+        };
+        use cef::ImplCookieManager;
+        let mut visitor = crate::cookie::CookieVisitorImpl::build(event_queues.clone());
+        manager.visit_all_cookies(Some(&mut visitor)) != 0
+    }
+
+    /// Retrieves cookies for a specific URL. Results are emitted via `cookies_received` signal.
+    /// If `include_http_only` is true, HTTP-only cookies are included.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    pub fn get_cookies(&self, url: GString, include_http_only: bool) -> bool {
+        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
+            return false;
+        };
+        let Some(manager) = self.cookie_manager() else {
+            return false;
+        };
+        use cef::ImplCookieManager;
+        let url_cef = cef::CefStringUtf16::from(url.to_string().as_str());
+        let mut visitor = crate::cookie::CookieVisitorImpl::build(event_queues.clone());
+        manager.visit_url_cookies(Some(&url_cef), include_http_only as _, Some(&mut visitor)) != 0
+    }
+
+    /// Sets a cookie for the given URL.
+    /// The result is emitted via the `cookie_set` signal.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    #[allow(clippy::too_many_arguments)] // GDScript-facing API; each parameter is user-visible
+    pub fn set_cookie(
+        &self,
+        url: GString,
+        name: GString,
+        value: GString,
+        domain: GString,
+        path: GString,
+        secure: bool,
+        httponly: bool,
+    ) -> bool {
+        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
+            return false;
+        };
+        let Some(manager) = self.cookie_manager() else {
+            return false;
+        };
+        use cef::ImplCookieManager;
+
+        let url_cef = cef::CefStringUtf16::from(url.to_string().as_str());
+        let cookie = cef::Cookie {
+            size: std::mem::size_of::<cef::Cookie>(),
+            name: cef::CefStringUtf16::from(name.to_string().as_str()),
+            value: cef::CefStringUtf16::from(value.to_string().as_str()),
+            domain: cef::CefStringUtf16::from(domain.to_string().as_str()),
+            path: cef::CefStringUtf16::from(path.to_string().as_str()),
+            secure: secure as _,
+            httponly: httponly as _,
+            ..Default::default()
+        };
+        let mut callback = crate::cookie::SetCookieCallbackImpl::build(event_queues.clone());
+        manager.set_cookie(Some(&url_cef), Some(&cookie), Some(&mut callback)) != 0
+    }
+
+    /// Deletes cookies matching the given URL and/or name.
+    /// Pass empty strings to delete all cookies.
+    /// The result is emitted via the `cookies_deleted` signal.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    pub fn delete_cookies(&self, url: GString, cookie_name: GString) -> bool {
+        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
+            return false;
+        };
+        let Some(manager) = self.cookie_manager() else {
+            return false;
+        };
+        use cef::ImplCookieManager;
+
+        let url_str = url.to_string();
+        let name_str = cookie_name.to_string();
+        let url_opt = if url_str.is_empty() {
+            None
+        } else {
+            Some(cef::CefStringUtf16::from(url_str.as_str()))
+        };
+        let name_opt = if name_str.is_empty() {
+            None
+        } else {
+            Some(cef::CefStringUtf16::from(name_str.as_str()))
+        };
+        let mut callback = crate::cookie::DeleteCookiesCallbackImpl::build(event_queues.clone());
+        manager.delete_cookies(url_opt.as_ref(), name_opt.as_ref(), Some(&mut callback)) != 0
+    }
+
+    /// Convenience method to delete all cookies.
+    /// Equivalent to `delete_cookies("", "")`.
+    #[func]
+    pub fn clear_cookies(&self) -> bool {
+        self.delete_cookies("".into(), "".into())
+    }
+
+    /// Flushes the cookie store to disk.
+    /// The `cookies_flushed` signal is emitted when complete.
+    /// Returns `true` if the request was initiated, `false` on failure.
+    #[func]
+    pub fn flush_cookies(&self) -> bool {
+        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
+            return false;
+        };
+        let Some(manager) = self.cookie_manager() else {
+            return false;
+        };
+        use cef::ImplCookieManager;
+        let mut callback = crate::cookie::FlushCookieStoreCallbackImpl::build(event_queues.clone());
+        manager.flush_store(Some(&mut callback)) != 0
     }
 }

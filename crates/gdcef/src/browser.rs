@@ -11,6 +11,8 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, Mutex};
 
+use crate::cookie::CookieEvent;
+
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use crate::accelerated_osr::AcceleratedRenderState;
 
@@ -162,6 +164,8 @@ pub struct EventQueues {
     pub download_requests: VecDeque<DownloadRequestEvent>,
     /// Download update events.
     pub download_updates: VecDeque<DownloadUpdateEvent>,
+    /// Cookie operation results.
+    pub cookie_events: VecDeque<CookieEvent>,
     /// Render process terminated event.
     pub render_process_terminated: VecDeque<(String, cef::TerminationStatus)>, // (reason, status)
 }

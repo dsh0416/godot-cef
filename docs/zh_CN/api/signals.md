@@ -324,6 +324,84 @@ func _on_render_process_terminated(status: int, error_message: String):
     cef_texture.reload()
 ```
 
+## `cookies_received(cookies: Array[CookieInfo])`
+
+当 `get_all_cookies()` 或 `get_cookies()` 完成时触发。包含检索到的 Cookie 数据的 `CookieInfo` 对象数组。
+
+每个 `CookieInfo` 对象具有以下属性：
+
+| 属性 | 类型 | 描述 |
+|------|------|------|
+| `name` | `String` | Cookie 名称 |
+| `value` | `String` | Cookie 值 |
+| `domain` | `String` | Cookie 域（如 `.example.com`） |
+| `path` | `String` | Cookie 路径（如 `/`） |
+| `secure` | `bool` | 是否仅通过 HTTPS 发送 |
+| `httponly` | `bool` | 是否为 HTTP-only（JavaScript 无法访问） |
+| `same_site` | `int` | SameSite 策略：`0` = 未指定, `1` = None, `2` = Lax, `3` = Strict |
+| `has_expires` | `bool` | 是否有过期时间（会话 Cookie 为 `false`） |
+
+```gdscript
+func _ready():
+    cef_texture.cookies_received.connect(_on_cookies_received)
+
+func _on_cookies_received(cookies: Array[CookieInfo]):
+    for cookie in cookies:
+        print("Cookie: ", cookie.name, " = ", cookie.value,
+              " (domain: ", cookie.domain, ", secure: ", cookie.secure, ")")
+
+# 获取所有 Cookie
+cef_texture.get_all_cookies()
+
+# 获取特定 URL 的 Cookie
+cef_texture.get_cookies("https://example.com", true)
+```
+
+## `cookie_set(success: bool)`
+
+当 `set_cookie()` 调用完成时触发。
+
+**参数：**
+- `success`：Cookie 是否设置成功
+
+```gdscript
+func _ready():
+    cef_texture.cookie_set.connect(_on_cookie_set)
+
+func _on_cookie_set(success: bool):
+    if success:
+        print("Cookie 设置成功")
+    else:
+        print("Cookie 设置失败")
+```
+
+## `cookies_deleted(num_deleted: int)`
+
+当 `delete_cookies()` 或 `clear_cookies()` 完成时触发。
+
+**参数：**
+- `num_deleted`：已删除的 Cookie 数量
+
+```gdscript
+func _ready():
+    cef_texture.cookies_deleted.connect(_on_cookies_deleted)
+
+func _on_cookies_deleted(num_deleted: int):
+    print("已删除 ", num_deleted, " 个 Cookie")
+```
+
+## `cookies_flushed()`
+
+当 `flush_cookies()` 完成时触发。Cookie 存储已写入磁盘。
+
+```gdscript
+func _ready():
+    cef_texture.cookies_flushed.connect(_on_cookies_flushed)
+
+func _on_cookies_flushed():
+    print("Cookie 存储已刷新到磁盘")
+```
+
 ## 信号使用模式
 
 ### 加载状态管理

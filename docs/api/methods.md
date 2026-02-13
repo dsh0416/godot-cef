@@ -325,3 +325,117 @@ if cef_texture.is_drag_over():
     print("Drag is over browser area")
 ```
 
+## Cookie & Session Management
+
+These methods allow you to inspect, set, and delete cookies, as well as flush the cookie store to disk. All operations are asynchronous — results are delivered via signals (see [Signals](./signals.md#cookies_receivedcookies-arraycookieinfo)).
+
+### `get_all_cookies() -> bool`
+
+Initiates retrieval of all cookies. When complete, the `cookies_received` signal is emitted with an array of `CookieInfo` objects.
+
+Returns `true` if the request was initiated, `false` if the browser is not ready.
+
+```gdscript
+func _ready():
+    cef_texture.cookies_received.connect(_on_cookies_received)
+    cef_texture.get_all_cookies()
+
+func _on_cookies_received(cookies):
+    for cookie in cookies:
+        print(cookie.name, " = ", cookie.value)
+```
+
+### `get_cookies(url: String, include_http_only: bool) -> bool`
+
+Retrieves cookies matching the given URL. When complete, the `cookies_received` signal is emitted.
+
+**Parameters:**
+- `url`: The URL to match cookies against
+- `include_http_only`: Whether to include HTTP-only cookies (not accessible via JavaScript)
+
+Returns `true` if the request was initiated, `false` if the browser is not ready.
+
+```gdscript
+# Get all cookies for a domain (including HTTP-only)
+cef_texture.get_cookies("https://example.com", true)
+
+# Get only non-HTTP-only cookies
+cef_texture.get_cookies("https://example.com", false)
+```
+
+### `set_cookie(url: String, name: String, value: String, domain: String, path: String, secure: bool, httponly: bool) -> bool`
+
+Sets a cookie. When complete, the `cookie_set` signal is emitted with a `bool` indicating success.
+
+**Parameters:**
+- `url`: The URL the cookie is associated with
+- `name`: Cookie name
+- `value`: Cookie value
+- `domain`: Cookie domain (e.g., `.example.com`)
+- `path`: Cookie path (e.g., `/`)
+- `secure`: Whether the cookie should only be sent over HTTPS
+- `httponly`: Whether the cookie should be HTTP-only (not accessible via JavaScript)
+
+Returns `true` if the request was initiated, `false` if the browser is not ready.
+
+```gdscript
+# Set a session cookie
+cef_texture.set_cookie(
+    "https://example.com",
+    "session_id", "abc123",
+    ".example.com", "/",
+    true,   # secure
+    true    # httponly
+)
+
+# Set a simple preference cookie
+cef_texture.set_cookie(
+    "https://example.com",
+    "theme", "dark",
+    ".example.com", "/",
+    false, false
+)
+```
+
+### `delete_cookies(url: String, cookie_name: String) -> bool`
+
+Deletes cookies matching the given URL and/or name. When complete, the `cookies_deleted` signal is emitted with the number of cookies deleted.
+
+**Parameters:**
+- `url`: URL filter. Pass an empty string `""` to match all URLs.
+- `cookie_name`: Name filter. Pass an empty string `""` to match all cookie names for the URL.
+
+Returns `true` if the request was initiated, `false` if the browser is not ready.
+
+```gdscript
+# Delete a specific cookie
+cef_texture.delete_cookies("https://example.com", "session_id")
+
+# Delete all cookies for a domain
+cef_texture.delete_cookies("https://example.com", "")
+
+# Delete all cookies (equivalent to clear_cookies())
+cef_texture.delete_cookies("", "")
+```
+
+### `clear_cookies() -> bool`
+
+Convenience method that deletes all cookies. Equivalent to `delete_cookies("", "")`.
+
+When complete, the `cookies_deleted` signal is emitted.
+
+```gdscript
+cef_texture.clear_cookies()
+```
+
+### `flush_cookies() -> bool`
+
+Flushes the cookie store to disk. When complete, the `cookies_flushed` signal is emitted.
+
+Returns `true` if the request was initiated, `false` if the browser is not ready.
+
+```gdscript
+# Ensure cookies are persisted before closing
+cef_texture.flush_cookies()
+```
+
