@@ -169,6 +169,37 @@ pub enum PendingPermissionDecision {
 
 pub type PendingPermissionRequests = Arc<Mutex<HashMap<i64, PendingPermissionDecision>>>;
 
+#[derive(Clone)]
+pub enum PendingPermissionAggregate {
+    Media {
+        callback: cef::MediaAccessCallback,
+        granted_mask: u32,
+    },
+    Prompt {
+        callback: cef::PermissionPromptCallback,
+        all_granted: bool,
+    },
+}
+
+impl PendingPermissionAggregate {
+    pub fn new_media(callback: cef::MediaAccessCallback, granted_mask: u32) -> Self {
+        Self::Media {
+            callback,
+            granted_mask,
+        }
+    }
+
+    pub fn new_prompt(callback: cef::PermissionPromptCallback, all_granted: bool) -> Self {
+        Self::Prompt {
+            callback,
+            all_granted,
+        }
+    }
+}
+
+/// Per-callback aggregation state used to resolve multi-permission requests.
+pub type PendingPermissionAggregates = Arc<Mutex<HashMap<usize, PendingPermissionAggregate>>>;
+
 /// Consolidated event queues for browser-to-Godot communication.
 ///
 /// All UI-thread callbacks write to this single structure, which is then
@@ -319,6 +350,8 @@ pub struct BrowserState {
     pub popup_policy: PopupPolicyFlag,
     /// Shared map of pending permission callbacks keyed by request id.
     pub pending_permission_requests: PendingPermissionRequests,
+    /// Shared per-callback aggregation state for multi-permission requests.
+    pub pending_permission_aggregates: PendingPermissionAggregates,
 }
 
 /// CEF browser state and shared resources.

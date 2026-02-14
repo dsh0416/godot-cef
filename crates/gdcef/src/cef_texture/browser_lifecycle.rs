@@ -29,6 +29,7 @@ struct BrowserCreateParams {
     permission_policy: crate::browser::PermissionPolicyFlag,
     permission_request_counter: crate::browser::PermissionRequestIdCounter,
     pending_permission_requests: crate::browser::PendingPermissionRequests,
+    pending_permission_aggregates: crate::browser::PendingPermissionAggregates,
 }
 
 impl CefTexture {
@@ -48,6 +49,11 @@ impl CefTexture {
 
         if let Some(state) = &self.app.state
             && let Ok(mut pending) = state.pending_permission_requests.lock()
+        {
+            pending.clear();
+        }
+        if let Some(state) = &self.app.state
+            && let Ok(mut pending) = state.pending_permission_aggregates.lock()
         {
             pending.clear();
         }
@@ -150,6 +156,8 @@ impl CefTexture {
             Arc::new(AtomicI64::new(0));
         let pending_permission_requests: crate::browser::PendingPermissionRequests =
             Arc::new(Mutex::new(HashMap::new()));
+        let pending_permission_aggregates: crate::browser::PendingPermissionAggregates =
+            Arc::new(Mutex::new(HashMap::new()));
 
         let window_info = WindowInfo {
             bounds: cef::Rect {
@@ -191,6 +199,7 @@ impl CefTexture {
             permission_policy,
             permission_request_counter,
             pending_permission_requests,
+            pending_permission_aggregates,
         };
 
         if use_accelerated {
@@ -247,6 +256,7 @@ impl CefTexture {
             permission_policy,
             permission_request_counter,
             pending_permission_requests,
+            pending_permission_aggregates,
         } = params;
         godot::global::godot_print!("[CefTexture] Creating browser in software rendering mode");
         let window_info = WindowInfo {
@@ -323,6 +333,7 @@ impl CefTexture {
             audio: queues.into_audio_state(),
             popup_policy,
             pending_permission_requests,
+            pending_permission_aggregates,
         });
 
         Ok(())
@@ -359,6 +370,7 @@ impl CefTexture {
             permission_policy,
             permission_request_counter,
             pending_permission_requests,
+            pending_permission_aggregates,
         } = params;
 
         // Create the RD texture first
@@ -438,6 +450,7 @@ impl CefTexture {
             audio: queues.into_audio_state(),
             popup_policy,
             pending_permission_requests,
+            pending_permission_aggregates,
         });
 
         Ok(())
