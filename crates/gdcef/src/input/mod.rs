@@ -222,18 +222,14 @@ fn create_touch_event(
 }
 
 fn touch_id_for_index(
-    touch_id_map: &mut HashMap<i32, i32>,
-    next_touch_id: &mut i32,
+    _touch_id_map: &mut HashMap<i32, i32>,
+    _next_touch_id: &mut i32,
     index: i32,
 ) -> i32 {
-    if let Some(existing) = touch_id_map.get(&index) {
-        return *existing;
-    }
-
-    let id = *next_touch_id;
-    *next_touch_id += 1;
-    touch_id_map.insert(index, id);
-    id
+    // Use the Godot touch index directly as the CEF touch ID.
+    // This avoids unbounded growth and potential overflow of a separate counter,
+    // while still providing a stable ID for the duration of each touch.
+    index
 }
 
 /// Handles screen touch events and sends them to CEF browser host.
