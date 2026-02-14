@@ -1,15 +1,21 @@
 use cef::sys::cef_event_flags_t;
-use cef::{ImplBrowserHost, ImplFrame, KeyEvent, KeyEventType, MouseButtonType, MouseEvent};
+use cef::{
+    ImplBrowserHost, ImplFrame, KeyEvent, KeyEventType, MouseButtonType, MouseEvent, PointerType,
+    TouchEvent, TouchEventType,
+};
 use godot::classes::{
-    InputEvent, InputEventKey, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
+    InputEvent, InputEventKey, InputEventMagnifyGesture, InputEventMouseButton,
+    InputEventMouseMotion, InputEventPanGesture, InputEventScreenDrag, InputEventScreenTouch,
 };
 use godot::global::{Key, MouseButton, MouseButtonMask};
 use godot::prelude::*;
+use std::collections::HashMap;
 
 mod keycode;
 
 /// Standard wheel delta for one scroll "notch" (Windows convention used by CEF).
 const WHEEL_DELTA: f32 = 120.0;
+const MAGNIFY_ZOOM_SENSITIVITY: f64 = 0.5;
 
 /// Pre-defined shortcuts for editor commands.
 ///
@@ -194,6 +200,105 @@ pub fn handle_pan_gesture(
     if delta_x != 0 || delta_y != 0 {
         host.send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);
     }
+}
+
+fn create_touch_event(
+    position: Vector2,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+    type_: TouchEventType,
+    id: i32,
+    pressure: f32,
+) -> TouchEvent {
+    TouchEvent {
+        id,
+        x: position.x * pixel_scale_factor / device_scale_factor,
+        y: position.y * pixel_scale_factor / device_scale_factor,
+        pressure: pressure.clamp(0.0, 1.0),
+        type_,
+        pointer_type: PointerType::TOUCH,
+        ..Default::default()
+    }
+}
+
+fn touch_id_for_index(
+    _touch_id_map: &mut HashMap<i32, i32>,
+    _next_touch_id: &mut i32,
+    index: i32,
+) -> i32 {
+    // Use the Godot touch index directly as the CEF touch ID.
+    // This avoids unbounded growth and potential overflow of a separate counter,
+    // while still providing a stable ID for the duration of each touch.
+    index
+}
+
+/// Handles screen touch events and sends them to CEF browser host.
+pub fn handle_screen_touch(
+    host: &impl ImplBrowserHost,
+    event: &Gd<InputEventScreenTouch>,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+    touch_id_map: &mut HashMap<i32, i32>,
+    next_touch_id: &mut i32,
+) {
+    let index = event.get_index();
+    let is_canceled = event.is_canceled();
+    let is_pressed = event.is_pressed();
+    let type_ = if is_canceled {
+        TouchEventType::CANCELLED
+    } else if is_pressed {
+        TouchEventType::PRESSED
+    } else {
+        TouchEventType::RELEASED
+    };
+
+    let id = touch_id_for_index(touch_id_map, next_touch_id, index);
+    let touch_event = create_touch_event(
+        event.get_position(),
+        pixel_scale_factor,
+        device_scale_factor,
+        type_,
+        id,
+        1.0,
+    );
+    host.send_touch_event(Some(&touch_event));
+
+    if !is_pressed || is_canceled {
+        touch_id_map.remove(&index);
+    }
+}
+
+/// Handles screen drag events and sends them to CEF browser host.
+pub fn handle_screen_drag(
+    host: &impl ImplBrowserHost,
+    event: &Gd<InputEventScreenDrag>,
+    pixel_scale_factor: f32,
+    device_scale_factor: f32,
+    touch_id_map: &mut HashMap<i32, i32>,
+    next_touch_id: &mut i32,
+) {
+    let index = event.get_index();
+    let id = touch_id_for_index(touch_id_map, next_touch_id, index);
+    let touch_event = create_touch_event(
+        event.get_position(),
+        pixel_scale_factor,
+        device_scale_factor,
+        TouchEventType::MOVED,
+        id,
+        event.get_pressure(),
+    );
+    host.send_touch_event(Some(&touch_event));
+}
+
+/// Handles magnify gesture events and maps them to browser zoom level changes.
+pub fn handle_magnify_gesture(host: &impl ImplBrowserHost, event: &Gd<InputEventMagnifyGesture>) {
+    let factor = event.get_factor() as f64;
+    if factor.abs() <= f64::EPSILON {
+        return;
+    }
+
+    let current_zoom = host.zoom_level();
+    host.set_zoom_level(current_zoom + (factor * MAGNIFY_ZOOM_SENSITIVITY));
 }
 
 /// Handles keyboard events and sends them to CEF browser host
