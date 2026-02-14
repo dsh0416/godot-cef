@@ -10,10 +10,12 @@ use cef::{
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
-    ITextureRect, ImageTexture, InputEvent, InputEventKey, InputEventMouseButton,
-    InputEventMouseMotion, InputEventPanGesture, LineEdit, TextureRect,
+    ITextureRect, ImageTexture, InputEvent, InputEventKey, InputEventMagnifyGesture,
+    InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, InputEventScreenDrag,
+    InputEventScreenTouch, LineEdit, TextureRect,
 };
 use godot::prelude::*;
+use std::collections::HashMap;
 
 use crate::browser::App;
 use crate::{cef_init, input};
@@ -70,6 +72,10 @@ pub struct CefTexture {
     popup_texture: Option<Gd<ImageTexture>>,
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     popup_texture_2d_rd: Option<Gd<godot::classes::Texture2Drd>>,
+
+    // Touch state
+    touch_id_map: HashMap<i32, i32>,
+    next_touch_id: i32,
 }
 
 #[godot_api]
@@ -94,6 +100,8 @@ impl ITextureRect for CefTexture {
             popup_texture: None,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             popup_texture_2d_rd: None,
+            touch_id_map: HashMap::new(),
+            next_touch_id: 0,
         }
     }
 
@@ -266,6 +274,26 @@ impl CefTexture {
                 self.get_pixel_scale_factor(),
                 self.get_device_scale_factor(),
             );
+        } else if let Ok(screen_touch) = event.clone().try_cast::<InputEventScreenTouch>() {
+            input::handle_screen_touch(
+                &host,
+                &screen_touch,
+                self.get_pixel_scale_factor(),
+                self.get_device_scale_factor(),
+                &mut self.touch_id_map,
+                &mut self.next_touch_id,
+            );
+        } else if let Ok(screen_drag) = event.clone().try_cast::<InputEventScreenDrag>() {
+            input::handle_screen_drag(
+                &host,
+                &screen_drag,
+                self.get_pixel_scale_factor(),
+                self.get_device_scale_factor(),
+                &mut self.touch_id_map,
+                &mut self.next_touch_id,
+            );
+        } else if let Ok(magnify_gesture) = event.clone().try_cast::<InputEventMagnifyGesture>() {
+            input::handle_magnify_gesture(&host, &magnify_gesture);
         } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
             input::handle_key_event(
                 &host,
