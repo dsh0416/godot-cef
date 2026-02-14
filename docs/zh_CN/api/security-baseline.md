@@ -9,6 +9,7 @@
 | `godot_cef/security/allow_insecure_content` | `false` | 避免 HTTPS 页面加载 HTTP 混合内容 |
 | `godot_cef/security/ignore_certificate_errors` | `false` | 保持 TLS 证书校验 |
 | `godot_cef/security/disable_web_security` | `false` | 保留 CORS 与同源策略保护 |
+| `godot_cef/security/default_permission_policy` | `2`（`SIGNAL`） | 每次请求都由应用层显式决定允许或拒绝 |
 
 ## 自定义命令行开关
 

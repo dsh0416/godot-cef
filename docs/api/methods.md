@@ -325,6 +325,30 @@ if cef_texture.is_drag_over():
     print("Drag is over browser area")
 ```
 
+## Permission Handling
+
+These methods let you respond to `permission_requested` signals when `godot_cef/security/default_permission_policy` is set to `SIGNAL`.
+
+### `grant_permission(request_id: int) -> bool`
+
+Grants a pending permission request by `request_id`.
+
+Returns `true` if the request was resolved, `false` if the ID is stale/unknown or no browser is active.
+
+```gdscript
+func _on_permission_requested(permission_type: String, url: String, request_id: int):
+    if permission_type == "geolocation" and url.begins_with("https://maps.example"):
+        cef_texture.grant_permission(request_id)
+    else:
+        cef_texture.deny_permission(request_id)
+```
+
+### `deny_permission(request_id: int) -> bool`
+
+Denies a pending permission request by `request_id`.
+
+Returns `true` if the request was resolved, `false` if the ID is stale/unknown or no browser is active.
+
 ## Cookie & Session Management
 
 These methods allow you to inspect, set, and delete cookies, as well as flush the cookie store to disk. All operations are asynchronous — results are delivered via signals (see [Signals](./signals.md#cookies_receivedcookies-arraycookieinfo)).

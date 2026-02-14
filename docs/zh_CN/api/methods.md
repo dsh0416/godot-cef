@@ -325,6 +325,30 @@ if cef_texture.is_drag_over():
     print("Drag is over browser area")
 ```
 
+## 权限处理
+
+当 `godot_cef/security/default_permission_policy` 设为 `SIGNAL` 时，可通过以下方法处理 `permission_requested` 信号。
+
+### `grant_permission(request_id: int) -> bool`
+
+根据 `request_id` 允许一个待处理的权限请求。
+
+如果请求成功处理返回 `true`；若 ID 已失效/不存在或当前无活动浏览器，返回 `false`。
+
+```gdscript
+func _on_permission_requested(permission_type: String, url: String, request_id: int):
+    if permission_type == "geolocation" and url.begins_with("https://maps.example"):
+        cef_texture.grant_permission(request_id)
+    else:
+        cef_texture.deny_permission(request_id)
+```
+
+### `deny_permission(request_id: int) -> bool`
+
+根据 `request_id` 拒绝一个待处理的权限请求。
+
+如果请求成功处理返回 `true`；若 ID 已失效/不存在或当前无活动浏览器，返回 `false`。
+
 ## Cookie 与会话管理
 
 这些方法允许您查询、设置和删除 Cookie，以及将 Cookie 存储刷新到磁盘。所有操作都是异步的——结果通过信号传递（参见[信号](./signals.md#cookies_receivedcookies-arraycookieinfo)）。

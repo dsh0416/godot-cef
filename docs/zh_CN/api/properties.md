@@ -32,6 +32,7 @@
 | `godot_cef/security/allow_insecure_content` | `bool` | `false` | 允许在 HTTPS 页面中加载 HTTP 内容 |
 | `godot_cef/security/ignore_certificate_errors` | `bool` | `false` | 跳过 SSL/TLS 证书验证 |
 | `godot_cef/security/disable_web_security` | `bool` | `false` | 禁用 CORS 和同源策略 |
+| `godot_cef/security/default_permission_policy` | `int` | `0` | 默认权限策略。`0` = DENY_ALL，`1` = ALLOW_ALL，`2` = SIGNAL（触发 `permission_requested`） |
 
 ### 调试设置
 

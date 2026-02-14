@@ -9,6 +9,7 @@ Use this baseline for production builds unless your application has a specific e
 | `godot_cef/security/allow_insecure_content` | `false` | Prevent mixed HTTP/HTTPS content loading |
 | `godot_cef/security/ignore_certificate_errors` | `false` | Keep TLS certificate validation enabled |
 | `godot_cef/security/disable_web_security` | `false` | Preserve CORS and same-origin protections |
+| `godot_cef/security/default_permission_policy` | `2` (`SIGNAL`) | Require explicit app-level allow/deny decisions per request |
 
 ## Custom Command-Line Switches
 

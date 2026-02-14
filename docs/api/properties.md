@@ -32,6 +32,7 @@ These settings are dangerous and should only be enabled for specific use cases (
 | `godot_cef/security/allow_insecure_content` | `bool` | `false` | Allow loading HTTP content in HTTPS pages |
 | `godot_cef/security/ignore_certificate_errors` | `bool` | `false` | Skip SSL/TLS certificate validation |
 | `godot_cef/security/disable_web_security` | `bool` | `false` | Disable CORS and same-origin policy |
+| `godot_cef/security/default_permission_policy` | `int` | `0` | Default permission behavior. `0` = DENY_ALL, `1` = ALLOW_ALL, `2` = SIGNAL (emit `permission_requested`) |
 
 ### Debug Settings
 

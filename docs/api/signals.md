@@ -306,6 +306,30 @@ Use the `popup_policy` property to control popup behavior:
 - `2` (SIGNAL_ONLY): Emit this signal and let your GDScript decide what to do
 :::
 
+## `permission_requested(permission_type: String, url: String, request_id: int)`
+
+Emitted when a web page requests a permission (for example camera, microphone, geolocation, clipboard, or notifications), and `godot_cef/security/default_permission_policy` is set to `2` (SIGNAL).
+
+**Parameters:**
+- `permission_type`: Requested permission type (for example `camera`, `microphone`, `geolocation`, `clipboard`, `notifications`)
+- `url`: Requesting origin URL
+- `request_id`: Unique request ID used by `grant_permission()` / `deny_permission()`
+
+When a single browser prompt includes multiple permissions (for example camera + microphone), this signal is emitted once per permission type, each with a distinct `request_id`.
+
+```gdscript
+func _ready():
+    cef_texture.permission_requested.connect(_on_permission_requested)
+
+func _on_permission_requested(permission_type: String, url: String, request_id: int):
+    print("Permission requested: ", permission_type, " from ", url)
+    var allow = permission_type in ["microphone", "camera"] and url.begins_with("https://trusted.example")
+    if allow:
+        cef_texture.grant_permission(request_id)
+    else:
+        cef_texture.deny_permission(request_id)
+```
+
 ## `render_process_terminated(status: int, error_message: String)`
 
 Emitted when the browser's render process terminates unexpectedly (crash, killed by OS, etc.).
