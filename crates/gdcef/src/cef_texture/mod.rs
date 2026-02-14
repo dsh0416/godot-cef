@@ -775,6 +775,17 @@ impl CefTexture {
         self.resolve_permission_request(request_id, false)
     }
 
+    fn media_permission_none_mask() -> u32 {
+        #[cfg(target_os = "windows")]
+        {
+            cef::MediaAccessPermissionTypes::NONE.get_raw() as u32
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            cef::MediaAccessPermissionTypes::NONE.get_raw()
+        }
+    }
+
     fn resolve_permission_request(&self, request_id: i64, grant: bool) -> bool {
         use crate::browser::{PendingPermissionAggregate, PendingPermissionDecision};
 
@@ -838,9 +849,9 @@ impl CefTexture {
                 permission_bit,
                 callback_token,
             } => {
-                let entry = aggregates.entry(callback_token).or_insert_with(|| {
-                    PendingPermissionAggregate::new_media(callback.clone(), 0)
-                });
+                let entry = aggregates
+                    .entry(callback_token)
+                    .or_insert_with(|| PendingPermissionAggregate::new_media(callback.clone(), 0));
                 match entry {
                     PendingPermissionAggregate::Media { granted_mask, .. } => {
                         if grant {
@@ -865,7 +876,12 @@ impl CefTexture {
                         granted_mask,
                     }) = aggregates.remove(&callback_token)
                 {
-                    callback.cont(granted_mask);
+                    let allowed_mask = if granted_mask == 0 {
+                        Self::media_permission_none_mask()
+                    } else {
+                        granted_mask
+                    };
+                    callback.cont(allowed_mask);
                 }
             }
             PendingPermissionDecision::Prompt {
