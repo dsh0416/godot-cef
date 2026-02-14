@@ -9,6 +9,7 @@ mod drag;
 mod error;
 mod godot_protocol;
 mod input;
+mod ipc_data;
 mod render;
 mod settings;
 mod utils;

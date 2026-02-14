@@ -53,6 +53,7 @@ criterion = { version = "0.8", features = ["html_reports"] }
 url = "2"
 percent-encoding = "2"
 adblock = "0.12"
+serde_cbor = "0.11"
 
 [profile.release]
 debug = "line-tables-only"

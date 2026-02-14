@@ -55,6 +55,45 @@ const data = new Uint8Array([1, 2, 3, 4, 5]);
 window.sendIpcBinaryMessage(data.buffer);
 ```
 
+## `ipc_data_message(data: Variant)`
+
+Emitted when JavaScript sends typed data to Godot via `sendIpcData(value)`. The payload is transported through the CBOR lane and converted back into a Godot `Variant`.
+
+```gdscript
+func _ready():
+    cef_texture.ipc_data_message.connect(_on_ipc_data_message)
+
+func _on_ipc_data_message(data: Variant):
+    print("Typed IPC data type: ", typeof(data))
+    if data is Dictionary and data.has("type"):
+        print("Event type: ", data["type"])
+```
+
+In your JavaScript (running in the CEF browser):
+
+```javascript
+window.sendIpcData({
+    type: "inventory_update",
+    items: ["potion", "elixir"]
+});
+```
+
+## JavaScript Listener APIs
+
+In addition to legacy callback globals, renderer-side listener objects are available and support multiple subscribers:
+
+```javascript
+const handler = (msg) => console.log("IPC:", msg);
+window.ipcMessage.addListener(handler);
+console.log(window.ipcMessage.hasListener(handler)); // true
+window.ipcMessage.removeListener(handler);
+```
+
+Available listener objects:
+- `window.ipcMessage`
+- `window.ipcBinaryMessage`
+- `window.ipcDataMessage`
+
 ## `url_changed(url: String)`
 
 Emitted when the browser navigates to a new URL. This fires for user-initiated navigation (clicking links), JavaScript navigation, redirects, and programmatic `load_url()` calls. Useful for injecting scripts or tracking navigation.

@@ -211,6 +211,8 @@ pub struct EventQueues {
     pub messages: VecDeque<String>,
     /// Binary IPC messages from the browser.
     pub binary_messages: VecDeque<Vec<u8>>,
+    /// Typed IPC data messages from the browser encoded as CBOR bytes.
+    pub data_messages: VecDeque<Vec<u8>>,
     /// URL change notifications.
     pub url_changes: VecDeque<String>,
     /// Title change notifications.

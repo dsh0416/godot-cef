@@ -141,6 +141,9 @@ impl CefTexture {
     fn ipc_binary_message(data: PackedByteArray);
 
     #[signal]
+    fn ipc_data_message(data: Variant);
+
+    #[signal]
     fn url_changed(url: GString);
 
     #[signal]
@@ -410,6 +413,62 @@ impl CefTexture {
         let Some(argument_list) = process_message.argument_list() else {
             godot::global::godot_warn!(
                 "[CefTexture] Cannot send binary IPC message: failed to get argument list"
+            );
+            return;
+        };
+
+        argument_list.set_binary(0, Some(&mut binary_value));
+        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+    }
+
+    #[func]
+    /// Sends typed data into the page via the CBOR-based IPC lane.
+    ///
+    /// Supported inputs include primitive types, arrays, dictionaries and
+    /// packed byte arrays. Unsupported Godot-specific types are tagged as
+    /// metadata maps to keep transport failure-safe.
+    pub fn send_ipc_data(&mut self, data: Variant) {
+        let Some(state) = self.app.state.as_ref() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send IPC data: no browser");
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send IPC data: no main frame");
+            return;
+        };
+
+        let bytes = match crate::ipc_data::encode_variant_to_cbor_bytes(&data) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                godot::global::godot_warn!("[CefTexture] Cannot encode IPC data: {}", err);
+                return;
+            }
+        };
+
+        if bytes.len() > crate::ipc_data::max_ipc_data_bytes() {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send IPC data: payload too large ({} bytes)",
+                bytes.len()
+            );
+            return;
+        }
+
+        let route = cef::CefStringUtf16::from("ipcDataGodotToRenderer");
+        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send IPC data: failed to create BinaryValue"
+            );
+            return;
+        };
+        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send IPC data: failed to create process message"
+            );
+            return;
+        };
+        let Some(argument_list) = process_message.argument_list() else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send IPC data: failed to get argument list"
             );
             return;
         };

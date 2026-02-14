@@ -154,6 +154,57 @@ window.onIpcBinaryMessage = function(arrayBuffer) {
 };
 ```
 
+### `send_ipc_data(data: Variant)`
+
+Sends typed data from Godot to JavaScript through the CBOR IPC lane. This is useful when you want structured payloads without manual JSON serialization.
+
+Supported payloads include:
+- `null`, `bool`, `int`, `float`, `String`
+- `Array`, `Dictionary`
+- `PackedByteArray` (as binary data)
+
+```gdscript
+# Send structured data directly
+var payload := {
+    "type": "player_state",
+    "hp": 88,
+    "tags": ["tank", "boss"]
+}
+cef_texture.send_ipc_data(payload)
+
+# Send raw bytes through typed lane
+var bytes := PackedByteArray([0xCA, 0xFE, 0xBA, 0xBE])
+cef_texture.send_ipc_data(bytes)
+```
+
+In your JavaScript (running in the CEF browser):
+
+```javascript
+// Legacy callback style (still supported)
+window.onIpcDataMessage = function(data) {
+    console.log("Typed payload:", data);
+};
+
+// Listener API (Rust-managed, supports multiple subscribers)
+window.ipcDataMessage.addListener((data) => {
+    console.log("Listener got typed payload:", data);
+});
+```
+
+## JavaScript IPC APIs
+
+Godot CEF exposes three send functions in the renderer:
+- `window.sendIpcMessage(string)`
+- `window.sendIpcBinaryMessage(arrayBuffer)`
+- `window.sendIpcData(anySupportedValue)`
+
+For receiving messages in JavaScript, both styles are supported:
+- Legacy callbacks: `window.onIpcMessage`, `window.onIpcBinaryMessage`, `window.onIpcDataMessage`
+- Listener objects:
+  - `window.ipcMessage.{addListener,removeListener,hasListener}`
+  - `window.ipcBinaryMessage.{addListener,removeListener,hasListener}`
+  - `window.ipcDataMessage.{addListener,removeListener,hasListener}`
+
 ## Zoom Control
 
 ### `set_zoom_level(level: float)`

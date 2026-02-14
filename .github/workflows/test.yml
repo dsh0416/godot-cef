@@ -15,7 +15,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CEF_VERSION: "145.0.22"
+  CEF_VERSION: "145.0.23"
   CEF_PATH: ${{ github.workspace }}/cef
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: "sccache"

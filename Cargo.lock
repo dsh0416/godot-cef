@@ -309,9 +309,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "145.0.0+145.0.22"
+version = "145.1.0+145.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b58bbf2e8a56823f72fe1421fe0d80c5208fc9539df9739bb92ab92958287d40"
+checksum = "b1f3c9ab3c4c1c4cd324c26fc40169c9a4c2e3a79cf2fb93c69749c6e20deae6"
 dependencies = [
  "anyhow",
  "ash",
@@ -337,9 +337,9 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "145.0.0+145.0.22"
+version = "145.1.0+145.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07f35f0c390f36f5a11291751c766d3f09614fb334a93a6a71eb21bfc0d93573"
+checksum = "6973f336a09fecfa8b92d81692c58093d87183538c15eafeda0b4344e1a03492"
 dependencies = [
  "anyhow",
  "cmake",
@@ -353,6 +353,7 @@ version = "1.10.0"
 dependencies = [
  "cef",
  "libloading 0.9.0",
+ "serde_cbor",
  "windows-sys 0.61.2",
 ]
 
@@ -392,7 +393,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
 dependencies = [
  "ciborium-io",
- "half",
+ "half 2.7.1",
 ]
 
 [[package]]
@@ -818,6 +819,7 @@ dependencies = [
  "percent-encoding",
  "process_path",
  "retour",
+ "serde_cbor",
  "software_render",
  "url",
  "wide",
@@ -1023,6 +1025,12 @@ dependencies = [
 
 [[package]]
 name = "half"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
+
+[[package]]
+name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
@@ -1204,9 +1212,9 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
-version = "0.18.3"
+version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9375e112e4b463ec1b1c6c011953545c65a30164fbab5b581df32b3abf0dcb88"
+checksum = "25470f23803092da7d239834776d653104d551bc4d7eacaf31e6837854b8e9eb"
 dependencies = [
  "console",
  "portable-atomic",
@@ -1428,7 +1436,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "codespan-reporting",
- "half",
+ "half 2.7.1",
  "hashbrown 0.16.1",
  "hexf-parse",
  "indexmap",
@@ -2029,6 +2037,16 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde_cbor"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bef2ebfde456fb76bbcf9f59315333decc4fda0b2b44b420243c11e0f5ec1f5"
+dependencies = [
+ "half 1.8.3",
+ "serde",
 ]
 
 [[package]]

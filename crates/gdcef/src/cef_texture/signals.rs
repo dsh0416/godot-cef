@@ -241,6 +241,7 @@ impl CefTexture {
         // Now process events without holding the lock
         self.emit_message_signals(&events.messages);
         self.emit_binary_message_signals(&events.binary_messages);
+        self.emit_data_message_signals(&events.data_messages);
         self.emit_url_change_signals(&events.url_changes);
         self.emit_title_change_signals(&events.title_changes);
         self.emit_loading_state_signals(&events.loading_states);
@@ -272,6 +273,23 @@ impl CefTexture {
             let byte_array = PackedByteArray::from(data.as_slice());
             self.base_mut()
                 .emit_signal("ipc_binary_message", &[byte_array.to_variant()]);
+        }
+    }
+
+    fn emit_data_message_signals(&mut self, messages: &VecDeque<Vec<u8>>) {
+        for data in messages {
+            match crate::ipc_data::decode_cbor_bytes_to_variant(data) {
+                Ok(variant) => {
+                    self.base_mut()
+                        .emit_signal("ipc_data_message", &[variant]);
+                }
+                Err(err) => {
+                    godot::global::godot_warn!(
+                        "[CefTexture] Failed to decode IPC data message: {}",
+                        err
+                    );
+                }
+            }
         }
     }
 

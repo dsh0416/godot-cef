@@ -11,16 +11,25 @@ use cef::{
 };
 
 use crate::v8_handlers::{
-    OsrImeCaretHandler, OsrImeCaretHandlerBuilder, OsrIpcBinaryHandler, OsrIpcBinaryHandlerBuilder,
-    OsrIpcHandler, OsrIpcHandlerBuilder,
+    IpcListenerSet, OsrImeCaretHandler, OsrImeCaretHandlerBuilder, OsrIpcBinaryHandler,
+    OsrIpcBinaryHandlerBuilder, OsrIpcDataHandler, OsrIpcDataHandlerBuilder, OsrIpcHandler,
+    OsrIpcHandlerBuilder, cbor_bytes_to_v8_value,
 };
 
 #[derive(Clone)]
-pub(crate) struct OsrRenderProcessHandler {}
+pub(crate) struct OsrRenderProcessHandler {
+    string_listeners: IpcListenerSet,
+    binary_listeners: IpcListenerSet,
+    data_listeners: IpcListenerSet,
+}
 
 impl OsrRenderProcessHandler {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            string_listeners: IpcListenerSet::new(),
+            binary_listeners: IpcListenerSet::new(),
+            data_listeners: IpcListenerSet::new(),
+        }
     }
 }
 
@@ -46,6 +55,35 @@ wrap_render_process_handler! {
                         let mut binary_handler = OsrIpcBinaryHandlerBuilder::build(OsrIpcBinaryHandler::new(Some(frame_arc.clone())));
                         let mut binary_func = v8_value_create_function(Some(&"sendIpcBinaryMessage".into()), Some(&mut binary_handler)).unwrap();
                         global.set_value_bykey(Some(&binary_key), Some(&mut binary_func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
+
+                        let data_key: cef::CefStringUtf16 = "sendIpcData".into();
+                        let mut data_handler = OsrIpcDataHandlerBuilder::build(OsrIpcDataHandler::new(Some(frame_arc.clone())));
+                        let mut data_func = v8_value_create_function(Some(&"sendIpcData".into()), Some(&mut data_handler)).unwrap();
+                        global.set_value_bykey(Some(&data_key), Some(&mut data_func), V8Propertyattribute::from(cef_v8_propertyattribute_t(0)));
+
+                        if let Some(mut listeners_obj) = self.handler.string_listeners.build_api_object() {
+                            global.set_value_bykey(
+                                Some(&"ipcMessage".into()),
+                                Some(&mut listeners_obj),
+                                V8Propertyattribute::from(cef_v8_propertyattribute_t(0)),
+                            );
+                        }
+
+                        if let Some(mut listeners_obj) = self.handler.binary_listeners.build_api_object() {
+                            global.set_value_bykey(
+                                Some(&"ipcBinaryMessage".into()),
+                                Some(&mut listeners_obj),
+                                V8Propertyattribute::from(cef_v8_propertyattribute_t(0)),
+                            );
+                        }
+
+                        if let Some(mut listeners_obj) = self.handler.data_listeners.build_api_object() {
+                            global.set_value_bykey(
+                                Some(&"ipcDataMessage".into()),
+                                Some(&mut listeners_obj),
+                                V8Propertyattribute::from(cef_v8_propertyattribute_t(0)),
+                            );
+                        }
 
                         let caret_key: cef::CefStringUtf16 = "__sendImeCaretPosition".into();
                         let mut caret_handler = OsrImeCaretHandlerBuilder::build(OsrImeCaretHandler::new(Some(frame_arc)));
@@ -112,6 +150,9 @@ wrap_render_process_handler! {
 
                         if let Some(frame) = frame {
                             invoke_js_string_callback(frame, "onIpcMessage", &msg_str);
+                            if let Some(value) = v8_value_create_string(Some(&msg_str)) {
+                                self.handler.string_listeners.emit(&value);
+                            }
                         }
                     }
                     return 1;
@@ -128,10 +169,36 @@ wrap_render_process_handler! {
 
                                     if let Some(frame) = frame {
                                         invoke_js_binary_callback(frame, "onIpcBinaryMessage", &buffer);
+                                        if let Some(value) = v8_value_create_array_buffer_with_copy(
+                                            buffer.as_mut_ptr(),
+                                            buffer.len(),
+                                        ) {
+                                            self.handler.binary_listeners.emit(&value);
+                                        }
                                     }
                                 }
                             }
                         }
+                    return 1;
+                }
+                "ipcDataGodotToRenderer" => {
+                    if let Some(args) = message.argument_list()
+                        && let Some(binary_value) = args.binary(0)
+                    {
+                        let size = binary_value.size();
+                        if size > 0 {
+                            let mut buffer = vec![0u8; size];
+                            let copied = binary_value.data(Some(&mut buffer), 0);
+                            if copied > 0 {
+                                buffer.truncate(copied);
+                                if let Some(frame) = frame
+                                    && let Ok(value) = cbor_bytes_to_v8_value(&buffer) {
+                                        invoke_js_data_callback(frame, "onIpcDataMessage", &value);
+                                        self.handler.data_listeners.emit(&value);
+                                    }
+                            }
+                        }
+                    }
                     return 1;
                 }
                 _ => {}
@@ -177,6 +244,23 @@ fn invoke_js_binary_callback(frame: &mut Frame, callback_name: &str, buffer: &[u
                 )
             {
                 let args = [Some(array_buffer)];
+                let _ = callback.execute_function(Some(&mut global), Some(&args));
+            }
+        }
+        context.exit();
+    }
+}
+
+fn invoke_js_data_callback(frame: &mut Frame, callback_name: &str, value: &cef::V8Value) {
+    if let Some(context) = frame.v8_context()
+        && context.enter() != 0
+    {
+        if let Some(mut global) = context.global() {
+            let callback_key: CefStringUtf16 = callback_name.into();
+            if let Some(callback) = global.value_bykey(Some(&callback_key))
+                && callback.is_function() != 0
+            {
+                let args = [Some(value.clone())];
                 let _ = callback.execute_function(Some(&mut global), Some(&args));
             }
         }

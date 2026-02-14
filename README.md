@@ -18,6 +18,8 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 - **Dynamic Scaling** — Automatic handling of DPI changes and window resizing
 - **Multi-Process Architecture** — Proper CEF subprocess handling for stability and consistency
 - **Remote Debugging** — Built-in Chrome DevTools support
+- **Typed IPC (CBOR)** — Send/receive structured data (`Variant` / JS objects) without manual JSON serialization
+- **Listener-based JS Bridge** — Multi-subscriber IPC listeners via `addListener/removeListener/hasListener`
 
 ## Screenshots
 
@@ -172,7 +174,7 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 2. **Install CEF binaries**:
    ```bash
    cargo install export-cef-dir
-   export-cef-dir --version "145.0.22" --force $HOME/.local/share/cef
+   export-cef-dir --version "145.0.23" --force $HOME/.local/share/cef
    export CEF_PATH="$HOME/.local/share/cef"
    ```
 
