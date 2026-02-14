@@ -280,8 +280,7 @@ impl CefTexture {
         for data in messages {
             match crate::ipc_data::decode_cbor_bytes_to_variant(data) {
                 Ok(variant) => {
-                    self.base_mut()
-                        .emit_signal("ipc_data_message", &[variant]);
+                    self.base_mut().emit_signal("ipc_data_message", &[variant]);
                 }
                 Err(err) => {
                     godot::global::godot_warn!(

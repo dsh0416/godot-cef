@@ -165,7 +165,11 @@ mod tests {
 
         let decoded_dict = decoded_arr.at(1).to::<VarDictionary>();
         assert_eq!(
-            decoded_dict.get("name").unwrap().to::<GString>().to_string(),
+            decoded_dict
+                .get("name")
+                .unwrap()
+                .to::<GString>()
+                .to_string(),
             "godot"
         );
         assert_eq!(decoded_dict.get("answer").unwrap().to::<i64>(), 42);
@@ -176,7 +180,10 @@ mod tests {
         let bytes = PackedByteArray::from(&[1_u8, 2, 3, 4, 5][..]);
         let encoded = encode_variant_to_cbor_bytes(&bytes.to_variant()).unwrap();
         let decoded = decode_cbor_bytes_to_variant(&encoded).unwrap();
-        assert_eq!(decoded.to::<PackedByteArray>().to_vec(), vec![1, 2, 3, 4, 5]);
+        assert_eq!(
+            decoded.to::<PackedByteArray>().to_vec(),
+            vec![1, 2, 3, 4, 5]
+        );
     }
 
     #[test]
@@ -189,4 +196,3 @@ mod tests {
         assert!(dict.contains_key(VALUE_KEY));
     }
 }
-

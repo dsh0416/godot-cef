@@ -184,18 +184,28 @@ impl IpcListenerSet {
             ListenerOperation::Has,
         ));
 
-        let mut add_fn = v8_value_create_function(Some(&"addListener".into()), Some(&mut add_handler))?;
+        let mut add_fn =
+            v8_value_create_function(Some(&"addListener".into()), Some(&mut add_handler))?;
         let mut remove_fn =
             v8_value_create_function(Some(&"removeListener".into()), Some(&mut remove_handler))?;
-        let mut has_fn = v8_value_create_function(Some(&"hasListener".into()), Some(&mut has_handler))?;
+        let mut has_fn =
+            v8_value_create_function(Some(&"hasListener".into()), Some(&mut has_handler))?;
 
-        object.set_value_bykey(Some(&"addListener".into()), Some(&mut add_fn), cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)));
+        object.set_value_bykey(
+            Some(&"addListener".into()),
+            Some(&mut add_fn),
+            cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)),
+        );
         object.set_value_bykey(
             Some(&"removeListener".into()),
             Some(&mut remove_fn),
             cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)),
         );
-        object.set_value_bykey(Some(&"hasListener".into()), Some(&mut has_fn), cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)));
+        object.set_value_bykey(
+            Some(&"hasListener".into()),
+            Some(&mut has_fn),
+            cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)),
+        );
 
         Some(object)
     }
