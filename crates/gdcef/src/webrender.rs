@@ -9,8 +9,8 @@ use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
     AudioState, ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo,
     DragEvent, EventQueues, EventQueuesHandle, ImeCompositionRange, LoadingStateEvent,
-    PendingPermissionDecision, PendingPermissionRequests, PermissionPolicyFlag,
-    PermissionRequestEvent, PermissionRequestIdCounter,
+    PendingPermissionAggregates, PendingPermissionDecision, PendingPermissionRequests,
+    PermissionPolicyFlag, PermissionRequestEvent, PermissionRequestIdCounter,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -35,6 +35,8 @@ pub(crate) struct ClientQueues {
     pub permission_request_counter: PermissionRequestIdCounter,
     /// Pending permission callback map keyed by request id.
     pub pending_permission_requests: PendingPermissionRequests,
+    /// Aggregated permission decision state keyed by callback token.
+    pub pending_permission_aggregates: PendingPermissionAggregates,
 }
 
 impl ClientQueues {
@@ -44,6 +46,7 @@ impl ClientQueues {
         permission_policy: PermissionPolicyFlag,
         permission_request_counter: PermissionRequestIdCounter,
         pending_permission_requests: PendingPermissionRequests,
+        pending_permission_aggregates: PendingPermissionAggregates,
     ) -> Self {
         use std::sync::atomic::AtomicBool;
         Self {
@@ -56,6 +59,7 @@ impl ClientQueues {
             permission_policy,
             permission_request_counter,
             pending_permission_requests,
+            pending_permission_aggregates,
         }
     }
 
@@ -1291,6 +1295,7 @@ wrap_permission_handler! {
     pub(crate) struct PermissionHandlerImpl {
         event_queues: EventQueuesHandle,
         pending_permission_requests: PendingPermissionRequests,
+        pending_permission_aggregates: PendingPermissionAggregates,
         permission_request_counter: PermissionRequestIdCounter,
         permission_policy: PermissionPolicyFlag,
     }
@@ -1402,12 +1407,28 @@ wrap_permission_handler! {
             _result: PermissionRequestResult,
         ) {
             if let Ok(mut pending) = self.pending_permission_requests.lock() {
+                let mut callback_tokens = Vec::new();
                 pending.retain(
-                    |_, entry| !matches!(
-                        entry,
-                        PendingPermissionDecision::Prompt { prompt_id: id, .. } if *id == prompt_id
-                    ),
+                    |_, entry| match entry {
+                        PendingPermissionDecision::Prompt {
+                            prompt_id: id,
+                            callback_token,
+                            ..
+                        } if *id == prompt_id => {
+                            callback_tokens.push(*callback_token);
+                            false
+                        }
+                        _ => true,
+                    },
                 );
+
+                if !callback_tokens.is_empty()
+                    && let Ok(mut aggregates) = self.pending_permission_aggregates.lock()
+                {
+                    for token in callback_tokens {
+                        aggregates.remove(&token);
+                    }
+                }
             }
         }
     }
@@ -1417,12 +1438,14 @@ impl PermissionHandlerImpl {
     pub fn build(
         event_queues: EventQueuesHandle,
         pending_permission_requests: PendingPermissionRequests,
+        pending_permission_aggregates: PendingPermissionAggregates,
         permission_request_counter: PermissionRequestIdCounter,
         permission_policy: PermissionPolicyFlag,
     ) -> cef::PermissionHandler {
         Self::new(
             event_queues,
             pending_permission_requests,
+            pending_permission_aggregates,
             permission_request_counter,
             permission_policy,
         )
@@ -1603,6 +1626,7 @@ fn build_client_handlers(
         permission_handler: PermissionHandlerImpl::build(
             queues.event_queues.clone(),
             queues.pending_permission_requests.clone(),
+            queues.pending_permission_aggregates.clone(),
             queues.permission_request_counter.clone(),
             queues.permission_policy.clone(),
         ),

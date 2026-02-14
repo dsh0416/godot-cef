@@ -290,6 +290,7 @@ impl CefTexture {
             permission_policy.clone(),
             permission_request_counter.clone(),
             pending_permission_requests.clone(),
+            pending_permission_aggregates.clone(),
         );
 
         let texture = ImageTexture::new_gd();
@@ -403,6 +404,7 @@ impl CefTexture {
             permission_policy.clone(),
             permission_request_counter.clone(),
             pending_permission_requests.clone(),
+            pending_permission_aggregates.clone(),
         );
 
         let cef_render_handler =
