@@ -176,6 +176,30 @@ fn drag_ops_to_u32(ops: DragOperationsMask) -> u32 {
     }
 }
 
+/// Helper to convert MediaAccessPermissionTypes bitmask to u32 in a cross-platform way.
+fn media_permission_to_u32(permission: cef::MediaAccessPermissionTypes) -> u32 {
+    #[cfg(target_os = "windows")]
+    {
+        permission.get_raw() as u32
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        permission.get_raw()
+    }
+}
+
+/// Helper to convert PermissionRequestTypes bitmask to u32 in a cross-platform way.
+fn prompt_permission_to_u32(permission: cef::PermissionRequestTypes) -> u32 {
+    #[cfg(target_os = "windows")]
+    {
+        permission.get_raw() as u32
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        permission.get_raw()
+    }
+}
+
 /// Common helper for start_dragging implementation.
 fn handle_start_dragging(
     drag_data: Option<&mut DragData>,
@@ -1169,19 +1193,19 @@ fn push_permission_request(
 fn map_media_permission_types(requested_permissions: u32) -> Vec<(u32, &'static str)> {
     let mappings = [
         (
-            cef::MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE.get_raw(),
+            media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE),
             "microphone",
         ),
         (
-            cef::MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE.get_raw(),
+            media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE),
             "camera",
         ),
         (
-            cef::MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE.get_raw(),
+            media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE),
             "desktop_audio_capture",
         ),
         (
-            cef::MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE.get_raw(),
+            media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE),
             "desktop_video_capture",
         ),
     ];
@@ -1210,35 +1234,35 @@ fn map_media_permission_types(requested_permissions: u32) -> Vec<(u32, &'static 
 fn map_prompt_permission_types(requested_permissions: u32) -> Vec<&'static str> {
     let mappings = [
         (
-            cef::PermissionRequestTypes::CAMERA_STREAM.get_raw(),
+            prompt_permission_to_u32(cef::PermissionRequestTypes::CAMERA_STREAM),
             "camera",
         ),
         (
-            cef::PermissionRequestTypes::MIC_STREAM.get_raw(),
+            prompt_permission_to_u32(cef::PermissionRequestTypes::MIC_STREAM),
             "microphone",
         ),
         (
-            cef::PermissionRequestTypes::GEOLOCATION.get_raw(),
+            prompt_permission_to_u32(cef::PermissionRequestTypes::GEOLOCATION),
             "geolocation",
         ),
         (
-            cef::PermissionRequestTypes::CLIPBOARD.get_raw(),
+            prompt_permission_to_u32(cef::PermissionRequestTypes::CLIPBOARD),
             "clipboard",
         ),
         (
-            cef::PermissionRequestTypes::NOTIFICATIONS.get_raw(),
+            prompt_permission_to_u32(cef::PermissionRequestTypes::NOTIFICATIONS),
             "notifications",
         ),
         (
-            cef::PermissionRequestTypes::MIDI_SYSEX.get_raw(),
+            prompt_permission_to_u32(cef::PermissionRequestTypes::MIDI_SYSEX),
             "midi_sysex",
         ),
         (
-            cef::PermissionRequestTypes::POINTER_LOCK.get_raw(),
+            prompt_permission_to_u32(cef::PermissionRequestTypes::POINTER_LOCK),
             "pointer_lock",
         ),
         (
-            cef::PermissionRequestTypes::KEYBOARD_LOCK.get_raw(),
+            prompt_permission_to_u32(cef::PermissionRequestTypes::KEYBOARD_LOCK),
             "keyboard_lock",
         ),
     ];
@@ -1295,7 +1319,7 @@ wrap_permission_handler! {
             }
 
             if policy == permission_policy::DENY_ALL {
-                callback.cont(cef::MediaAccessPermissionTypes::NONE.get_raw());
+                callback.cont(media_permission_to_u32(cef::MediaAccessPermissionTypes::NONE));
                 return true as _;
             }
 
