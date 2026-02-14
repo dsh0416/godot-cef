@@ -1311,14 +1311,14 @@ mod permission_mapping_tests {
     #[test]
     fn media_permissions_empty_defaults_to_unknown() {
         let res = map_media_permission_types(0);
-        assert_eq!(res, vec!["unknown_permission"]);
+        assert_eq!(res, vec![(0, "unknown_media_permission")]);
     }
 
     #[test]
     fn media_permissions_unknown_bit_includes_unknown() {
         // Use a high bit that is very unlikely to collide with known permission bits.
         let res = map_media_permission_types(1u32 << 31);
-        assert!(res.contains(&"unknown_permission"));
+        assert!(res.iter().any(|(_, label)| *label == "unknown_media_permission"));
     }
 }
 wrap_permission_handler! {
