@@ -16,6 +16,8 @@ const SETTING_CACHE_SIZE_MB: &str = "godot_cef/storage/cache_size_mb";
 const SETTING_USER_AGENT: &str = "godot_cef/network/user_agent";
 const SETTING_PROXY_SERVER: &str = "godot_cef/network/proxy_server";
 const SETTING_PROXY_BYPASS_LIST: &str = "godot_cef/network/proxy_bypass_list";
+const SETTING_ENABLE_ADBLOCK: &str = "godot_cef/network/enable_adblock";
+const SETTING_ADBLOCK_RULES_PATH: &str = "godot_cef/network/adblock_rules_path";
 const SETTING_CUSTOM_SWITCHES: &str = "godot_cef/advanced/custom_command_line_switches";
 
 const DEFAULT_DATA_PATH: &str = "user://cef-data";
@@ -30,6 +32,8 @@ const DEFAULT_CACHE_SIZE_MB: i64 = 0; // 0 = use CEF default
 const DEFAULT_USER_AGENT: &str = ""; // Empty = use CEF default
 const DEFAULT_PROXY_SERVER: &str = ""; // Empty = direct connection
 const DEFAULT_PROXY_BYPASS_LIST: &str = ""; // Empty = no bypass
+const DEFAULT_ENABLE_ADBLOCK: bool = false;
+const DEFAULT_ADBLOCK_RULES_PATH: &str = "";
 const DEFAULT_CUSTOM_SWITCHES: &str = ""; // Empty = no custom switches
 
 pub fn register_project_settings() {
@@ -124,6 +128,20 @@ pub fn register_project_settings() {
         DEFAULT_PROXY_BYPASS_LIST,
         PropertyHint::PLACEHOLDER_TEXT,
         "Comma-separated list, e.g., localhost,127.0.0.1",
+    );
+
+    register_bool_setting(
+        &mut settings,
+        SETTING_ENABLE_ADBLOCK,
+        DEFAULT_ENABLE_ADBLOCK,
+    );
+
+    register_string_setting(
+        &mut settings,
+        SETTING_ADBLOCK_RULES_PATH,
+        DEFAULT_ADBLOCK_RULES_PATH,
+        PropertyHint::PLACEHOLDER_TEXT,
+        "Path to EasyList/ABP rules file (empty = adblock disabled)",
     );
 
     // Advanced settings
@@ -299,6 +317,23 @@ pub fn get_proxy_server() -> String {
 /// Returns the proxy bypass list. Empty string means no bypass.
 pub fn get_proxy_bypass_list() -> String {
     get_string_setting(SETTING_PROXY_BYPASS_LIST, DEFAULT_PROXY_BYPASS_LIST)
+}
+
+pub fn is_adblock_enabled() -> bool {
+    get_setting_or(SETTING_ENABLE_ADBLOCK, DEFAULT_ENABLE_ADBLOCK)
+}
+
+/// Returns the globalized adblock rules file path, or `None` if unset.
+pub fn get_adblock_rules_path() -> Option<PathBuf> {
+    let raw = get_string_setting(SETTING_ADBLOCK_RULES_PATH, DEFAULT_ADBLOCK_RULES_PATH);
+    if raw.trim().is_empty() {
+        return None;
+    }
+
+    let settings = ProjectSettings::singleton();
+    let raw_gstring: GString = raw.as_str().into();
+    let absolute = settings.globalize_path(&raw_gstring).to_string();
+    Some(PathBuf::from(absolute))
 }
 
 /// Returns custom command-line switches as a list of strings.

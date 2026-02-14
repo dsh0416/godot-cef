@@ -52,6 +52,7 @@ libc = "0.2"
 criterion = { version = "0.8", features = ["html_reports"] }
 url = "2"
 percent-encoding = "2"
+adblock = "0.12"
 
 [profile.release]
 debug = "line-tables-only"

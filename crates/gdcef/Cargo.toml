@@ -20,6 +20,7 @@ software_render = { path = "../software_render" }
 wide = { workspace = true }
 url = { workspace = true }
 percent-encoding = { workspace = true }
+adblock = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libloading = { workspace = true }

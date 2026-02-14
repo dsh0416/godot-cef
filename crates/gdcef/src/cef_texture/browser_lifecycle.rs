@@ -1,9 +1,11 @@
 use super::CefTexture;
+use adblock::lists::{FilterSet, ParseOptions};
 use cef::{BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, WindowInfo};
 use cef_app::PhysicalSize;
 use godot::classes::{AudioServer, ImageTexture};
 use godot::prelude::*;
 use std::collections::HashMap;
+use std::fs;
 use std::sync::atomic::{AtomicI32, AtomicI64};
 use std::sync::{Arc, Mutex};
 
@@ -33,6 +35,37 @@ struct BrowserCreateParams {
 }
 
 impl CefTexture {
+    fn build_adblock_engine(&self) -> Option<Arc<adblock::Engine>> {
+        if !crate::settings::is_adblock_enabled() {
+            return None;
+        }
+
+        let Some(rules_path) = crate::settings::get_adblock_rules_path() else {
+            godot::global::godot_warn!(
+                "[CefTexture] Adblock is enabled, but '{}' is empty. Request filtering will be disabled.",
+                "godot_cef/network/adblock_rules_path"
+            );
+            return None;
+        };
+
+        let rules = match fs::read_to_string(&rules_path) {
+            Ok(content) => content,
+            Err(error) => {
+                godot::global::godot_warn!(
+                    "[CefTexture] Failed to read adblock rules file '{}': {}. Request filtering will be disabled.",
+                    rules_path.display().to_string(),
+                    error
+                );
+                return None;
+            }
+        };
+
+        let mut filter_set = FilterSet::new(true);
+        let _metadata = filter_set.add_filter_list(&rules, ParseOptions::default());
+
+        Some(Arc::new(adblock::Engine::from_filter_set(filter_set, true)))
+    }
+
     fn log_cleanup_state_violations(&self) {
         if self.app.state.is_some() {
             godot::global::godot_warn!(
@@ -178,10 +211,11 @@ impl CefTexture {
             ..Default::default()
         };
 
+        let adblock_engine = self.build_adblock_engine();
         let mut context = cef::request_context_create_context(
             Some(&RequestContextSettings::default()),
             Some(&mut webrender::RequestContextHandlerImpl::build(
-                webrender::OsrRequestContextHandler {},
+                webrender::OsrRequestContextHandler::new(adblock_engine),
             )),
         );
 

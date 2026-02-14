@@ -1,5 +1,6 @@
 use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::{CursorType, PhysicalSize};
+use adblock::request::{Request as AdblockRequest, RequestError as AdblockRequestError};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
@@ -202,6 +203,43 @@ fn prompt_permission_to_u32(permission: cef::PermissionRequestTypes) -> u32 {
     {
         permission.get_raw()
     }
+}
+
+fn cef_resource_type_to_adblock_request_type(resource_type: ResourceType) -> &'static str {
+    match resource_type {
+        ResourceType::MAIN_FRAME => "main_frame",
+        ResourceType::SUB_FRAME => "sub_frame",
+        ResourceType::STYLESHEET => "stylesheet",
+        ResourceType::SCRIPT => "script",
+        ResourceType::IMAGE => "image",
+        ResourceType::FONT_RESOURCE => "font",
+        ResourceType::SUB_RESOURCE => "object_subrequest",
+        ResourceType::OBJECT => "object",
+        ResourceType::MEDIA => "media",
+        ResourceType::WORKER => "script",
+        ResourceType::SHARED_WORKER => "script",
+        ResourceType::PREFETCH => "other",
+        ResourceType::FAVICON => "image",
+        ResourceType::XHR => "xhr",
+        ResourceType::PING => "ping",
+        ResourceType::SERVICE_WORKER => "script",
+        ResourceType::CSP_REPORT => "csp_report",
+        ResourceType::PLUGIN_RESOURCE => "object",
+        ResourceType::NAVIGATION_PRELOAD_MAIN_FRAME => "main_frame",
+        ResourceType::NAVIGATION_PRELOAD_SUB_FRAME => "sub_frame",
+        ResourceType::NUM_VALUES => "other",
+        _ => "other",
+    }
+}
+
+fn cef_request_to_adblock_request(
+    request: &cef::Request,
+) -> Result<AdblockRequest, AdblockRequestError> {
+    AdblockRequest::new(
+        &CefStringUtf16::from(&request.url()).to_string(),
+        &CefStringUtf16::from(&request.referrer_url()).to_string(),
+        cef_resource_type_to_adblock_request_type(request.resource_type()),
+    )
 }
 
 /// Common helper for start_dragging implementation.
@@ -1683,15 +1721,77 @@ impl CefClientImpl {
     }
 }
 
+type AdblockEngineHandle = Arc<adblock::Engine>;
+
 #[derive(Clone)]
-pub struct OsrRequestContextHandler {}
+pub struct OsrRequestContextHandler {
+    pub adblock_engine: Option<AdblockEngineHandle>,
+}
+
+impl OsrRequestContextHandler {
+    pub fn new(adblock_engine: Option<AdblockEngineHandle>) -> Self {
+        Self { adblock_engine }
+    }
+}
+
+#[derive(Clone)]
+pub struct OsrResourceRequestHandler {
+    adblock_engine: Option<AdblockEngineHandle>,
+}
+
+wrap_resource_request_handler! {
+    pub(crate) struct ResourceRequestHandlerImpl {
+        handler: OsrResourceRequestHandler,
+    }
+
+    impl ResourceRequestHandler {
+        fn on_before_resource_load(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut cef::Frame>,
+            request: Option<&mut cef::Request>,
+            _callback: Option<&mut cef::Callback>,
+        ) -> ReturnValue {
+            if let Some(adblock_engine) = &self.handler.adblock_engine
+                && let Some(request) = request
+                && let Ok(request) = cef_request_to_adblock_request(request)
+                && adblock_engine.check_network_request(&request).matched
+            {
+                return ReturnValue::CANCEL;
+            }
+
+            ReturnValue::CONTINUE
+        }
+    }
+}
+
+impl ResourceRequestHandlerImpl {
+    pub(crate) fn build(handler: OsrResourceRequestHandler) -> cef::ResourceRequestHandler {
+        Self::new(handler)
+    }
+}
 
 wrap_request_context_handler! {
     pub(crate) struct RequestContextHandlerImpl {
         handler: OsrRequestContextHandler,
     }
 
-    impl RequestContextHandler {}
+    impl RequestContextHandler {
+        fn resource_request_handler(
+            &self,
+            _browser: Option<&mut cef::Browser>,
+            _frame: Option<&mut cef::Frame>,
+            _request: Option<&mut cef::Request>,
+            _is_navigation: ::std::os::raw::c_int,
+            _is_download: ::std::os::raw::c_int,
+            _request_initiator: Option<&cef::CefString>,
+            _disable_default_handling: Option<&mut ::std::os::raw::c_int>,
+        ) -> Option<cef::ResourceRequestHandler> {
+            Some(ResourceRequestHandlerImpl::build(OsrResourceRequestHandler {
+                adblock_engine: self.handler.adblock_engine.clone(),
+            }))
+        }
+    }
 }
 
 impl RequestContextHandlerImpl {
