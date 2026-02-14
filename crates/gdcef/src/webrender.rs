@@ -1291,6 +1291,36 @@ fn map_prompt_permission_types(requested_permissions: u32) -> Vec<&'static str> 
     out
 }
 
+#[cfg(test)]
+mod permission_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn prompt_permissions_empty_defaults_to_unknown() {
+        let res = map_prompt_permission_types(0);
+        assert_eq!(res, vec!["unknown_permission"]);
+    }
+
+    #[test]
+    fn prompt_permissions_unknown_bit_includes_unknown() {
+        // Use a high bit that is very unlikely to collide with known permission bits.
+        let res = map_prompt_permission_types(1u32 << 31);
+        assert!(res.contains(&"unknown_permission"));
+    }
+
+    #[test]
+    fn media_permissions_empty_defaults_to_unknown() {
+        let res = map_media_permission_types(0);
+        assert_eq!(res, vec!["unknown_permission"]);
+    }
+
+    #[test]
+    fn media_permissions_unknown_bit_includes_unknown() {
+        // Use a high bit that is very unlikely to collide with known permission bits.
+        let res = map_media_permission_types(1u32 << 31);
+        assert!(res.contains(&"unknown_permission"));
+    }
+}
 wrap_permission_handler! {
     pub(crate) struct PermissionHandlerImpl {
         event_queues: EventQueuesHandle,
