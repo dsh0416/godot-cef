@@ -8,6 +8,7 @@ const SETTING_DATA_PATH: &str = "godot_cef/storage/data_path";
 const SETTING_ALLOW_INSECURE_CONTENT: &str = "godot_cef/security/allow_insecure_content";
 const SETTING_IGNORE_CERTIFICATE_ERRORS: &str = "godot_cef/security/ignore_certificate_errors";
 const SETTING_DISABLE_WEB_SECURITY: &str = "godot_cef/security/disable_web_security";
+const SETTING_DEFAULT_PERMISSION_POLICY: &str = "godot_cef/security/default_permission_policy";
 const SETTING_ENABLE_AUDIO_CAPTURE: &str = "godot_cef/audio/enable_audio_capture";
 const SETTING_REMOTE_DEVTOOLS_PORT: &str = "godot_cef/debug/remote_devtools_port";
 const SETTING_MAX_FRAME_RATE: &str = "godot_cef/performance/max_frame_rate";
@@ -21,6 +22,7 @@ const DEFAULT_DATA_PATH: &str = "user://cef-data";
 const DEFAULT_ALLOW_INSECURE_CONTENT: bool = false;
 const DEFAULT_IGNORE_CERTIFICATE_ERRORS: bool = false;
 const DEFAULT_DISABLE_WEB_SECURITY: bool = false;
+const DEFAULT_PERMISSION_POLICY: i64 = crate::browser::permission_policy::DENY_ALL as i64;
 const DEFAULT_ENABLE_AUDIO_CAPTURE: bool = false;
 const DEFAULT_REMOTE_DEVTOOLS_PORT: i64 = 9229;
 const DEFAULT_MAX_FRAME_RATE: i64 = 0; // 0 = follow Godot engine FPS
@@ -57,6 +59,14 @@ pub fn register_project_settings() {
         &mut settings,
         SETTING_DISABLE_WEB_SECURITY,
         DEFAULT_DISABLE_WEB_SECURITY,
+    );
+
+    register_int_setting(
+        &mut settings,
+        SETTING_DEFAULT_PERMISSION_POLICY,
+        DEFAULT_PERMISSION_POLICY,
+        PropertyHint::ENUM,
+        "DenyAll:0,AllowAll:1,Signal:2",
     );
 
     register_bool_setting(
@@ -250,6 +260,14 @@ fn get_string_setting(name: &str, default: &str) -> String {
 
 pub fn is_audio_capture_enabled() -> bool {
     get_setting_or(SETTING_ENABLE_AUDIO_CAPTURE, DEFAULT_ENABLE_AUDIO_CAPTURE)
+}
+
+pub fn get_default_permission_policy() -> i32 {
+    let value = get_setting_or(SETTING_DEFAULT_PERMISSION_POLICY, DEFAULT_PERMISSION_POLICY) as i32;
+    value.clamp(
+        crate::browser::permission_policy::DENY_ALL,
+        crate::browser::permission_policy::SIGNAL,
+    )
 }
 
 pub fn get_remote_devtools_port() -> u16 {

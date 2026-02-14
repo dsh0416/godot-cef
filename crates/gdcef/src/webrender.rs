@@ -9,6 +9,8 @@ use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
     AudioState, ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo,
     DragEvent, EventQueues, EventQueuesHandle, ImeCompositionRange, LoadingStateEvent,
+    PendingPermissionDecision, PendingPermissionRequests, PermissionPolicyFlag,
+    PermissionRequestEvent, PermissionRequestIdCounter,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -27,10 +29,22 @@ pub(crate) struct ClientQueues {
     pub audio_shutdown_flag: AudioShutdownFlag,
     /// Whether audio capture is enabled.
     pub enable_audio_capture: bool,
+    /// Default permission policy shared with the permission handler.
+    pub permission_policy: PermissionPolicyFlag,
+    /// Monotonic request-id counter for permission events.
+    pub permission_request_counter: PermissionRequestIdCounter,
+    /// Pending permission callback map keyed by request id.
+    pub pending_permission_requests: PendingPermissionRequests,
 }
 
 impl ClientQueues {
-    pub fn new(sample_rate: f32, enable_audio_capture: bool) -> Self {
+    pub fn new(
+        sample_rate: f32,
+        enable_audio_capture: bool,
+        permission_policy: PermissionPolicyFlag,
+        permission_request_counter: PermissionRequestIdCounter,
+        pending_permission_requests: PendingPermissionRequests,
+    ) -> Self {
         use std::sync::atomic::AtomicBool;
         Self {
             event_queues: Arc::new(Mutex::new(EventQueues::new())),
@@ -39,6 +53,9 @@ impl ClientQueues {
             audio_sample_rate: Arc::new(Mutex::new(sample_rate)),
             audio_shutdown_flag: Arc::new(AtomicBool::new(false)),
             enable_audio_capture,
+            permission_policy,
+            permission_request_counter,
+            pending_permission_requests,
         }
     }
 
@@ -1118,6 +1135,276 @@ impl RequestHandlerImpl {
     }
 }
 
+fn push_permission_request(
+    event_queues: &EventQueuesHandle,
+    pending_permission_requests: &PendingPermissionRequests,
+    permission_request_counter: &PermissionRequestIdCounter,
+    pending_decision: PendingPermissionDecision,
+    permission_type: String,
+    url: String,
+) {
+    use std::sync::atomic::Ordering;
+
+    let request_id = permission_request_counter.fetch_add(1, Ordering::Relaxed) + 1;
+
+    if let Ok(mut pending) = pending_permission_requests.lock() {
+        pending.insert(request_id, pending_decision);
+    } else {
+        return;
+    }
+
+    if let Ok(mut queues) = event_queues.lock() {
+        queues
+            .permission_requests
+            .push_back(PermissionRequestEvent {
+                permission_type,
+                url,
+                request_id,
+            });
+    } else if let Ok(mut pending) = pending_permission_requests.lock() {
+        pending.remove(&request_id);
+    }
+}
+
+fn map_media_permission_types(requested_permissions: u32) -> Vec<(u32, &'static str)> {
+    let mappings = [
+        (
+            cef::MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE.get_raw(),
+            "microphone",
+        ),
+        (
+            cef::MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE.get_raw(),
+            "camera",
+        ),
+        (
+            cef::MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE.get_raw(),
+            "desktop_audio_capture",
+        ),
+        (
+            cef::MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE.get_raw(),
+            "desktop_video_capture",
+        ),
+    ];
+
+    let mut out = Vec::new();
+    let mut known_mask = 0u32;
+    for (bit, label) in mappings {
+        known_mask |= bit;
+        if requested_permissions & bit != 0 {
+            out.push((bit, label));
+        }
+    }
+
+    let unknown = requested_permissions & !known_mask;
+    if unknown != 0 {
+        out.push((unknown, "unknown_media_permission"));
+    }
+
+    if out.is_empty() {
+        out.push((requested_permissions, "unknown_media_permission"));
+    }
+
+    out
+}
+
+fn map_prompt_permission_types(requested_permissions: u32) -> Vec<&'static str> {
+    let mappings = [
+        (
+            cef::PermissionRequestTypes::CAMERA_STREAM.get_raw(),
+            "camera",
+        ),
+        (
+            cef::PermissionRequestTypes::MIC_STREAM.get_raw(),
+            "microphone",
+        ),
+        (
+            cef::PermissionRequestTypes::GEOLOCATION.get_raw(),
+            "geolocation",
+        ),
+        (
+            cef::PermissionRequestTypes::CLIPBOARD.get_raw(),
+            "clipboard",
+        ),
+        (
+            cef::PermissionRequestTypes::NOTIFICATIONS.get_raw(),
+            "notifications",
+        ),
+        (
+            cef::PermissionRequestTypes::MIDI_SYSEX.get_raw(),
+            "midi_sysex",
+        ),
+        (
+            cef::PermissionRequestTypes::POINTER_LOCK.get_raw(),
+            "pointer_lock",
+        ),
+        (
+            cef::PermissionRequestTypes::KEYBOARD_LOCK.get_raw(),
+            "keyboard_lock",
+        ),
+    ];
+
+    let mut out = Vec::new();
+    let mut known_mask = 0u32;
+    for (bit, label) in mappings {
+        known_mask |= bit;
+        if requested_permissions & bit != 0 {
+            out.push(label);
+        }
+    }
+
+    if requested_permissions & !known_mask != 0 {
+        out.push("unknown_permission");
+    }
+
+    if out.is_empty() {
+        out.push("unknown_permission");
+    }
+
+    out
+}
+
+wrap_permission_handler! {
+    pub(crate) struct PermissionHandlerImpl {
+        event_queues: EventQueuesHandle,
+        pending_permission_requests: PendingPermissionRequests,
+        permission_request_counter: PermissionRequestIdCounter,
+        permission_policy: PermissionPolicyFlag,
+    }
+
+    impl PermissionHandler {
+        fn on_request_media_access_permission(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut MediaAccessCallback>,
+        ) -> ::std::os::raw::c_int {
+            use crate::browser::permission_policy;
+            use std::sync::atomic::Ordering;
+
+            let Some(callback) = callback else {
+                return false as _;
+            };
+            let callback = callback.clone();
+            let policy = self.permission_policy.load(Ordering::Relaxed);
+
+            if policy == permission_policy::ALLOW_ALL {
+                callback.cont(requested_permissions);
+                return true as _;
+            }
+
+            if policy == permission_policy::DENY_ALL {
+                callback.cont(cef::MediaAccessPermissionTypes::NONE.get_raw());
+                return true as _;
+            }
+
+            let url = requesting_origin
+                .map(|origin| origin.to_string())
+                .unwrap_or_default();
+            let callback_token = callback.get_raw() as usize;
+
+            for (permission_bit, permission_type) in map_media_permission_types(requested_permissions) {
+                push_permission_request(
+                    &self.event_queues,
+                    &self.pending_permission_requests,
+                    &self.permission_request_counter,
+                    PendingPermissionDecision::Media {
+                        callback: callback.clone(),
+                        permission_bit,
+                        callback_token,
+                    },
+                    permission_type.to_string(),
+                    url.clone(),
+                );
+            }
+
+            true as _
+        }
+
+        fn on_show_permission_prompt(
+            &self,
+            _browser: Option<&mut Browser>,
+            prompt_id: u64,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut PermissionPromptCallback>,
+        ) -> ::std::os::raw::c_int {
+            use crate::browser::permission_policy;
+            use std::sync::atomic::Ordering;
+
+            let Some(callback) = callback else {
+                return false as _;
+            };
+            let callback = callback.clone();
+            let policy = self.permission_policy.load(Ordering::Relaxed);
+
+            if policy == permission_policy::ALLOW_ALL {
+                callback.cont(cef::PermissionRequestResult::ACCEPT);
+                return true as _;
+            }
+
+            if policy == permission_policy::DENY_ALL {
+                callback.cont(cef::PermissionRequestResult::DENY);
+                return true as _;
+            }
+
+            let url = requesting_origin
+                .map(|origin| origin.to_string())
+                .unwrap_or_default();
+            let callback_token = callback.get_raw() as usize;
+            for permission_type in map_prompt_permission_types(requested_permissions) {
+                push_permission_request(
+                    &self.event_queues,
+                    &self.pending_permission_requests,
+                    &self.permission_request_counter,
+                    PendingPermissionDecision::Prompt {
+                        callback: callback.clone(),
+                        prompt_id,
+                        callback_token,
+                    },
+                    permission_type.to_string(),
+                    url.clone(),
+                );
+            }
+
+            true as _
+        }
+
+        fn on_dismiss_permission_prompt(
+            &self,
+            _browser: Option<&mut Browser>,
+            prompt_id: u64,
+            _result: PermissionRequestResult,
+        ) {
+            if let Ok(mut pending) = self.pending_permission_requests.lock() {
+                pending.retain(
+                    |_, entry| !matches!(
+                        entry,
+                        PendingPermissionDecision::Prompt { prompt_id: id, .. } if *id == prompt_id
+                    ),
+                );
+            }
+        }
+    }
+}
+
+impl PermissionHandlerImpl {
+    pub fn build(
+        event_queues: EventQueuesHandle,
+        pending_permission_requests: PendingPermissionRequests,
+        permission_request_counter: PermissionRequestIdCounter,
+        permission_policy: PermissionPolicyFlag,
+    ) -> cef::PermissionHandler {
+        Self::new(
+            event_queues,
+            pending_permission_requests,
+            permission_request_counter,
+            permission_policy,
+        )
+    }
+}
+
 fn on_process_message_received(message: Option<&mut ProcessMessage>, ipc: &ClientIpcQueues) -> i32 {
     let Some(message) = message else { return 0 };
     let route = CefStringUtf16::from(&message.name()).to_string();
@@ -1189,6 +1476,7 @@ pub(crate) struct ClientHandlers {
     pub audio_handler: Option<cef::AudioHandler>,
     pub download_handler: cef::DownloadHandler,
     pub request_handler: cef::RequestHandler,
+    pub permission_handler: cef::PermissionHandler,
 }
 
 #[derive(Clone)]
@@ -1245,6 +1533,10 @@ wrap_client! {
             Some(self.handlers.request_handler.clone())
         }
 
+        fn permission_handler(&self) -> Option<cef::PermissionHandler> {
+            Some(self.handlers.permission_handler.clone())
+        }
+
         fn on_process_message_received(
             &self,
             _browser: Option<&mut cef::Browser>,
@@ -1284,6 +1576,12 @@ fn build_client_handlers(
         audio_handler,
         download_handler: DownloadHandlerImpl::build(queues.event_queues.clone()),
         request_handler: RequestHandlerImpl::build(queues.event_queues.clone()),
+        permission_handler: PermissionHandlerImpl::build(
+            queues.event_queues.clone(),
+            queues.pending_permission_requests.clone(),
+            queues.permission_request_counter.clone(),
+            queues.permission_policy.clone(),
+        ),
     }
 }
 

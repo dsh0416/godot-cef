@@ -7,8 +7,8 @@ use cef::ImplBrowser;
 use cef_app::{CursorType, FrameBuffer, PhysicalSize, PopupState};
 use godot::classes::{ImageTexture, Texture2Drd};
 use godot::prelude::*;
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicI32};
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64};
 use std::sync::{Arc, Mutex};
 
 use crate::cookie::CookieEvent;
@@ -29,6 +29,19 @@ pub mod popup_policy {
 
 /// Shared popup policy state, readable from the CEF IO thread.
 pub type PopupPolicyFlag = Arc<AtomicI32>;
+
+/// Default permission policy constants for handling browser permission prompts.
+pub mod permission_policy {
+    pub const DENY_ALL: i32 = 0;
+    pub const ALLOW_ALL: i32 = 1;
+    pub const SIGNAL: i32 = 2;
+}
+
+/// Shared default permission policy state, readable from the CEF UI thread.
+pub type PermissionPolicyFlag = Arc<AtomicI32>;
+
+/// Monotonic request-id counter for permission requests.
+pub type PermissionRequestIdCounter = Arc<AtomicI64>;
 
 /// Represents a loading state event from the browser.
 #[derive(Debug, Clone)]
@@ -133,6 +146,29 @@ pub struct DownloadUpdateEvent {
     pub is_canceled: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct PermissionRequestEvent {
+    pub permission_type: String,
+    pub url: String,
+    pub request_id: i64,
+}
+
+#[derive(Clone)]
+pub enum PendingPermissionDecision {
+    Media {
+        callback: cef::MediaAccessCallback,
+        permission_bit: u32,
+        callback_token: usize,
+    },
+    Prompt {
+        callback: cef::PermissionPromptCallback,
+        prompt_id: u64,
+        callback_token: usize,
+    },
+}
+
+pub type PendingPermissionRequests = Arc<Mutex<HashMap<i64, PendingPermissionDecision>>>;
+
 /// Consolidated event queues for browser-to-Godot communication.
 ///
 /// All UI-thread callbacks write to this single structure, which is then
@@ -164,6 +200,8 @@ pub struct EventQueues {
     pub download_requests: VecDeque<DownloadRequestEvent>,
     /// Download update events.
     pub download_updates: VecDeque<DownloadUpdateEvent>,
+    /// Permission request events.
+    pub permission_requests: VecDeque<PermissionRequestEvent>,
     /// Cookie operation results.
     pub cookie_events: VecDeque<CookieEvent>,
     /// Render process terminated event.
@@ -279,6 +317,8 @@ pub struct BrowserState {
     pub audio: Option<AudioState>,
     /// Shared popup policy flag, readable from CEF's IO thread.
     pub popup_policy: PopupPolicyFlag,
+    /// Shared map of pending permission callbacks keyed by request id.
+    pub pending_permission_requests: PendingPermissionRequests,
 }
 
 /// CEF browser state and shared resources.

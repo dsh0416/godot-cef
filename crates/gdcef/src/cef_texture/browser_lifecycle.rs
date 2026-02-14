@@ -3,7 +3,8 @@ use cef::{BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings,
 use cef_app::PhysicalSize;
 use godot::classes::{AudioServer, ImageTexture};
 use godot::prelude::*;
-use std::sync::atomic::AtomicI32;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicI32, AtomicI64};
 use std::sync::{Arc, Mutex};
 
 use crate::accelerated_osr::{
@@ -25,6 +26,9 @@ struct BrowserCreateParams {
     pixel_width: i32,
     pixel_height: i32,
     popup_policy: PopupPolicyFlag,
+    permission_policy: crate::browser::PermissionPolicyFlag,
+    permission_request_counter: crate::browser::PermissionRequestIdCounter,
+    pending_permission_requests: crate::browser::PendingPermissionRequests,
 }
 
 impl CefTexture {
@@ -40,6 +44,12 @@ impl CefTexture {
         if self.app.state.is_none() {
             crate::cef_init::cef_release();
             return;
+        }
+
+        if let Some(state) = &self.app.state
+            && let Ok(mut pending) = state.pending_permission_requests.lock()
+        {
+            pending.clear();
         }
 
         // Signal audio handler that we're shutting down to suppress "socket closed" errors
@@ -133,6 +143,13 @@ impl CefTexture {
 
         // Create the shared popup policy flag with the current property value
         let popup_policy: PopupPolicyFlag = Arc::new(AtomicI32::new(self.popup_policy));
+        let default_permission_policy = crate::settings::get_default_permission_policy();
+        let permission_policy: crate::browser::PermissionPolicyFlag =
+            Arc::new(AtomicI32::new(default_permission_policy));
+        let permission_request_counter: crate::browser::PermissionRequestIdCounter =
+            Arc::new(AtomicI64::new(0));
+        let pending_permission_requests: crate::browser::PendingPermissionRequests =
+            Arc::new(Mutex::new(HashMap::new()));
 
         let window_info = WindowInfo {
             bounds: cef::Rect {
@@ -171,6 +188,9 @@ impl CefTexture {
             pixel_width,
             pixel_height,
             popup_policy,
+            permission_policy,
+            permission_request_counter,
+            pending_permission_requests,
         };
 
         if use_accelerated {
@@ -224,6 +244,9 @@ impl CefTexture {
             pixel_width,
             pixel_height,
             popup_policy,
+            permission_policy,
+            permission_request_counter,
+            pending_permission_requests,
         } = params;
         godot::global::godot_print!("[CefTexture] Creating browser in software rendering mode");
         let window_info = WindowInfo {
@@ -251,7 +274,13 @@ impl CefTexture {
         let popup_state: PopupStateQueue = render_handler.get_popup_state();
         let sample_rate = AudioServer::singleton().get_mix_rate();
         let enable_audio_capture = crate::settings::is_audio_capture_enabled();
-        let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture);
+        let queues = webrender::ClientQueues::new(
+            sample_rate,
+            enable_audio_capture,
+            permission_policy.clone(),
+            permission_request_counter.clone(),
+            pending_permission_requests.clone(),
+        );
 
         let texture = ImageTexture::new_gd();
 
@@ -293,6 +322,7 @@ impl CefTexture {
             event_queues,
             audio: queues.into_audio_state(),
             popup_policy,
+            pending_permission_requests,
         });
 
         Ok(())
@@ -326,6 +356,9 @@ impl CefTexture {
             pixel_width,
             pixel_height,
             popup_policy,
+            permission_policy,
+            permission_request_counter,
+            pending_permission_requests,
         } = params;
 
         // Create the RD texture first
@@ -352,7 +385,13 @@ impl CefTexture {
         let popup_state: PopupStateQueue = render_handler.get_popup_state();
         let sample_rate = AudioServer::singleton().get_mix_rate();
         let enable_audio_capture = crate::settings::is_audio_capture_enabled();
-        let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture);
+        let queues = webrender::ClientQueues::new(
+            sample_rate,
+            enable_audio_capture,
+            permission_policy.clone(),
+            permission_request_counter.clone(),
+            pending_permission_requests.clone(),
+        );
 
         let cef_render_handler =
             webrender::AcceleratedOsrHandler::build(render_handler, queues.event_queues.clone());
@@ -398,6 +437,7 @@ impl CefTexture {
             event_queues,
             audio: queues.into_audio_state(),
             popup_policy,
+            pending_permission_requests,
         });
 
         Ok(())

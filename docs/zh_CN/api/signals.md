@@ -306,6 +306,30 @@ func _on_popup_requested(url: String, disposition: int, user_gesture: bool):
 - `2`（SIGNAL_ONLY）：触发此信号，由 GDScript 决定如何处理
 :::
 
+## `permission_requested(permission_type: String, url: String, request_id: int)`
+
+当网页请求权限（例如摄像头、麦克风、地理位置、剪贴板或通知），且 `godot_cef/security/default_permission_policy` 设置为 `2`（SIGNAL）时触发。
+
+**参数：**
+- `permission_type`：权限类型（例如 `camera`、`microphone`、`geolocation`、`clipboard`、`notifications`）
+- `url`：发起请求的来源 URL
+- `request_id`：用于 `grant_permission()` / `deny_permission()` 的请求 ID
+
+当一次浏览器权限请求包含多个权限（例如摄像头 + 麦克风）时，会按权限类型分别触发多个信号，且每个信号都有独立的 `request_id`。
+
+```gdscript
+func _ready():
+    cef_texture.permission_requested.connect(_on_permission_requested)
+
+func _on_permission_requested(permission_type: String, url: String, request_id: int):
+    print("权限请求: ", permission_type, " 来源: ", url)
+    var allow = permission_type in ["microphone", "camera"] and url.begins_with("https://trusted.example")
+    if allow:
+        cef_texture.grant_permission(request_id)
+    else:
+        cef_texture.deny_permission(request_id)
+```
+
 ## `render_process_terminated(status: int, error_message: String)`
 
 当浏览器的渲染进程意外终止时触发（崩溃、被操作系统终止等）。

@@ -4,7 +4,8 @@ mod rendering;
 mod signals;
 
 use cef::{
-    self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, ImplListValue, ImplProcessMessage,
+    self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, ImplListValue,
+    ImplMediaAccessCallback, ImplPermissionPromptCallback, ImplProcessMessage,
     do_message_loop_work,
 };
 use godot::classes::notify::ControlNotification;
@@ -169,6 +170,9 @@ impl CefTexture {
 
     #[signal]
     fn popup_requested(url: GString, disposition: i32, user_gesture: bool);
+
+    #[signal]
+    fn permission_requested(permission_type: GString, url: GString, request_id: i64);
 
     /// Emitted when `get_cookies` or `get_all_cookies` completes.
     /// Contains an `Array` of `CookieInfo` objects.
@@ -759,6 +763,89 @@ impl CefTexture {
         if let Some(state) = self.app.state.as_ref() {
             state.popup_policy.store(policy, Ordering::Relaxed);
         }
+    }
+
+    #[func]
+    pub fn grant_permission(&self, request_id: i64) -> bool {
+        self.resolve_permission_request(request_id, true)
+    }
+
+    #[func]
+    pub fn deny_permission(&self, request_id: i64) -> bool {
+        self.resolve_permission_request(request_id, false)
+    }
+
+    fn resolve_permission_request(&self, request_id: i64, grant: bool) -> bool {
+        use crate::browser::PendingPermissionDecision;
+
+        let Some(state) = self.app.state.as_ref() else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot resolve permission request {}: no active browser",
+                request_id
+            );
+            return false;
+        };
+
+        let decision = {
+            let Ok(mut pending) = state.pending_permission_requests.lock() else {
+                godot::global::godot_warn!(
+                    "[CefTexture] Failed to lock pending permission requests"
+                );
+                return false;
+            };
+            pending.remove(&request_id)
+        };
+
+        let Some(decision) = decision else {
+            godot::global::godot_warn!(
+                "[CefTexture] Unknown or stale permission request id: {}",
+                request_id
+            );
+            return false;
+        };
+
+        let callback_token = match decision {
+            PendingPermissionDecision::Media {
+                callback,
+                permission_bit,
+                callback_token,
+            } => {
+                if grant {
+                    callback.cont(permission_bit);
+                } else {
+                    callback.cont(cef::MediaAccessPermissionTypes::NONE.get_raw());
+                }
+                callback_token
+            }
+            PendingPermissionDecision::Prompt {
+                callback,
+                callback_token,
+                ..
+            } => {
+                let result = if grant {
+                    cef::PermissionRequestResult::ACCEPT
+                } else {
+                    cef::PermissionRequestResult::DENY
+                };
+                callback.cont(result);
+                callback_token
+            }
+        };
+
+        if let Ok(mut pending) = state.pending_permission_requests.lock() {
+            pending.retain(|_, entry| match entry {
+                PendingPermissionDecision::Media {
+                    callback_token: token,
+                    ..
+                } => *token != callback_token,
+                PendingPermissionDecision::Prompt {
+                    callback_token: token,
+                    ..
+                } => *token != callback_token,
+            });
+        }
+
+        true
     }
 
     // ── Cookie & Session Management ─────────────────────────────────────────

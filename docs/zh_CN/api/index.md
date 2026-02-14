@@ -52,6 +52,7 @@ func _ready():
 | `godot_cef/security/allow_insecure_content` | 允许在 HTTPS 页面中加载不安全（HTTP）内容 |
 | `godot_cef/security/ignore_certificate_errors` | 忽略 SSL/TLS 证书错误 |
 | `godot_cef/security/disable_web_security` | 禁用网页安全（CORS、同源策略） |
+| `godot_cef/security/default_permission_policy` | 默认权限策略（`0` 全拒绝，`1` 全允许，`2` 发信号） |
 | `godot_cef/audio/enable_audio_capture` | 将浏览器音频通过 Godot 音频系统路由（默认：`false`） |
 | `godot_cef/debug/remote_devtools_port` | Chrome DevTools 远程调试端口（默认：`9229`） |
 | `godot_cef/performance/max_frame_rate` | 浏览器最大帧率（默认：`0` = 跟随 Godot FPS） |

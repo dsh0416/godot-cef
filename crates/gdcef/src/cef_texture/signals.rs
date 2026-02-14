@@ -247,6 +247,7 @@ impl CefTexture {
         self.emit_console_message_signals(&events.console_messages);
         self.emit_drag_event_signals(&events.drag_events);
         self.emit_popup_request_signals(&events.popup_requests);
+        self.emit_permission_request_signals(&events.permission_requests);
         self.emit_cookie_event_signals(&events.cookie_events);
         self.emit_download_request_signals(&events.download_requests);
         self.emit_download_update_signals(&events.download_updates);
@@ -388,6 +389,22 @@ impl CefTexture {
                     GString::from(&event.target_url).to_variant(),
                     event.disposition.get_raw().to_variant(),
                     event.user_gesture.to_variant(),
+                ],
+            );
+        }
+    }
+
+    fn emit_permission_request_signals(
+        &mut self,
+        events: &VecDeque<crate::browser::PermissionRequestEvent>,
+    ) {
+        for event in events {
+            self.base_mut().emit_signal(
+                "permission_requested",
+                &[
+                    GString::from(&event.permission_type).to_variant(),
+                    GString::from(&event.url).to_variant(),
+                    event.request_id.to_variant(),
                 ],
             );
         }
