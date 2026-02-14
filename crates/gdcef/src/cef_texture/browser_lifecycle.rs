@@ -6,6 +6,7 @@ use godot::classes::{AudioServer, ImageTexture};
 use godot::prelude::*;
 use std::collections::HashMap;
 use std::fs;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, AtomicI64};
 use std::sync::{Arc, Mutex};
 
@@ -35,7 +36,7 @@ struct BrowserCreateParams {
 }
 
 impl CefTexture {
-    fn build_adblock_engine(&self) -> Option<Arc<adblock::Engine>> {
+    fn build_adblock_engine(&self) -> Option<Rc<adblock::Engine>> {
         if !crate::settings::is_adblock_enabled() {
             return None;
         }
@@ -63,7 +64,7 @@ impl CefTexture {
         let mut filter_set = FilterSet::new(true);
         let _metadata = filter_set.add_filter_list(&rules, ParseOptions::default());
 
-        Some(Arc::new(adblock::Engine::from_filter_set(filter_set, true)))
+        Some(Rc::new(adblock::Engine::from_filter_set(filter_set, true)))
     }
 
     fn log_cleanup_state_violations(&self) {

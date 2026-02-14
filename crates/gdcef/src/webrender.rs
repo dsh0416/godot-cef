@@ -1,6 +1,6 @@
+use adblock::request::{Request as AdblockRequest, RequestError as AdblockRequestError};
 use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::{CursorType, PhysicalSize};
-use adblock::request::{Request as AdblockRequest, RequestError as AdblockRequestError};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use wide::{i8x16, u8x16};
@@ -1721,7 +1721,7 @@ impl CefClientImpl {
     }
 }
 
-type AdblockEngineHandle = Arc<adblock::Engine>;
+type AdblockEngineHandle = std::rc::Rc<adblock::Engine>;
 
 #[derive(Clone)]
 pub struct OsrRequestContextHandler {
