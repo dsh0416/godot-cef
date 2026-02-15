@@ -157,6 +157,7 @@ pub struct PermissionRequestEvent {
 pub struct FindResultEvent {
     pub count: i32,
     pub active_index: i32,
+    pub final_update: bool,
 }
 
 #[derive(Clone)]

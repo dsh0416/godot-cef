@@ -432,7 +432,11 @@ impl CefTexture {
         for event in events {
             self.base_mut().emit_signal(
                 "find_result",
-                &[event.count.to_variant(), event.active_index.to_variant()],
+                &[
+                    event.count.to_variant(),
+                    event.active_index.to_variant(),
+                    event.final_update.to_variant(),
+                ],
             );
         }
     }

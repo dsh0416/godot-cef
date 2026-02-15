@@ -192,7 +192,7 @@ impl CefTexture {
     fn permission_requested(permission_type: GString, url: GString, request_id: i64);
 
     #[signal]
-    fn find_result(count: i32, active_index: i32);
+    fn find_result(count: i32, active_index: i32, final_update: bool);
 
     /// Emitted when `get_cookies` or `get_all_cookies` completes.
     /// Contains an `Array` of `CookieInfo` objects.
@@ -553,6 +553,7 @@ impl CefTexture {
         if query_string.trim().is_empty() {
             host.stop_finding(true as _);
             self.last_find_query = GString::new();
+            self.last_find_match_case = false;
             return;
         }
 
@@ -613,6 +614,8 @@ impl CefTexture {
         if let Some(host) = self.app.host() {
             host.stop_finding(true as _);
         }
+        self.last_find_query = GString::new();
+        self.last_find_match_case = false;
     }
 
     #[func]

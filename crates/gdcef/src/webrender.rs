@@ -949,12 +949,13 @@ wrap_find_handler! {
             count: ::std::os::raw::c_int,
             _selection_rect: Option<&Rect>,
             active_match_ordinal: ::std::os::raw::c_int,
-            _final_update: ::std::os::raw::c_int,
+            final_update: ::std::os::raw::c_int,
         ) {
             if let Ok(mut queues) = self.event_queues.lock() {
                 queues.find_results.push_back(FindResultEvent {
                     count,
                     active_index: active_match_ordinal,
+                    final_update: final_update != 0,
                 });
             }
         }
