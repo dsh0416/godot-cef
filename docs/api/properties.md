@@ -29,6 +29,14 @@ browser/render backend. It can be assigned directly to `Sprite2D.texture` and
 3D surface input mapping/raycast routing, and it exposes no signals or event
 queues (it does **not** emit `loading_state_changed`, `title_changed`,
 `console_message`, `popup_requested`, or any other `CefTexture` signals).
+As a result, there is no direct notification from `CefTexture2D` to GDScript
+when the underlying browser instance is initialized or when a page has
+finished loading its first frame. If you need lifecycle notifications (for
+example, to know when it is safe to interact with the page or reveal it to
+the user), use a `CefTexture` node in the scene tree instead and connect to
+its signals (such as `loading_state_changed`). The node-based `CefTexture`
+can be assigned anywhere a `Texture2D` is accepted (e.g. `Sprite2D.texture`
+or material texture slots) whenever you require those events.
 
 ```gdscript
 var browser_tex := CefTexture2D.new()
@@ -47,7 +55,7 @@ $MeshInstance3D.set_surface_override_material(0, mat)
 
 ## Project Settings
 
-Global settings that apply to **all** `CefTexture` instances are configured in **Project Settings > godot_cef**. These must be set before any `CefTexture` enters the scene tree.
+Global settings that apply to **all** `CefTexture` and `CefTexture2D` instances are configured in **Project Settings > godot_cef**. These must be set before any `CefTexture` enters the scene tree.
 
 ### Storage Settings
 

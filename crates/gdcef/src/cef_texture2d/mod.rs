@@ -122,7 +122,16 @@ impl CefTexture2D {
 
     #[func]
     fn set_texture_size_property(&mut self, size: Vector2i) {
-        self.texture_size = Vector2i::new(size.x.max(1), size.y.max(1));
+        let clamped = Vector2i::new(size.x.max(1), size.y.max(1));
+        if clamped == self.texture_size {
+            return;
+        }
+
+        self.texture_size = clamped;
+
+        // Notify the backend that the browser size has changed so it can
+        // resize the off-screen rendering accordingly.
+        backend::handle_size_change(&self.app);
     }
 
     #[func]
@@ -310,7 +319,7 @@ impl CefTexture2D {
             self.disconnect_frame_hook();
             return;
         }
-        self.ensure_frame_hook();
+
         self.try_create_browser();
 
         let max_fps = self.get_max_fps();
@@ -325,7 +334,9 @@ impl CefTexture2D {
             dpi,
         );
         self.update_texture();
-        cef::do_message_loop_work();
+        if self.app.state.is_some() {
+            cef::do_message_loop_work();
+        }
         backend::request_external_begin_frame(&self.app);
     }
 }

@@ -44,7 +44,7 @@ $MeshInstance3D.set_surface_override_material(0, mat)
 
 ## 项目设置
 
-应用于**所有** `CefTexture` 实例的全局设置在 **项目设置 > godot_cef** 中配置。这些设置必须在任何 `CefTexture` 进入场景树之前设置。
+应用于**所有** `CefTexture` 和 `CefTexture2D` 实例的全局设置在 **项目设置 > godot_cef** 中配置。这些设置必须在任何 `CefTexture` 或 `CefTexture2D` 进入场景树之前设置。
 
 ### 存储设置
 
