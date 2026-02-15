@@ -114,6 +114,13 @@ fn cbor_value_to_variant(value: &CborValue) -> Result<Variant, String> {
 }
 
 fn maybe_restore_special_map(entries: &[(CborValue, CborValue)]) -> Option<Variant> {
+    // Only treat this as our internal tagged payload format when the map
+    // contains exactly the two sentinel keys. This avoids collisions with
+    // user dictionaries that happen to include these keys among others.
+    if entries.len() != 2 {
+        return None;
+    }
+
     let mut ty = None::<String>;
     let mut val = None::<String>;
     for (k, v) in entries {
@@ -136,4 +143,43 @@ fn maybe_restore_special_map(entries: &[(CborValue, CborValue)]) -> Option<Varia
         return Some(dict.to_variant());
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn special_map_restores_only_with_exact_two_key_shape() {
+        let tagged = vec![
+            (
+                CborValue::Text(TYPE_KEY.to_string()),
+                CborValue::Text("27".to_string()),
+            ),
+            (
+                CborValue::Text(VALUE_KEY.to_string()),
+                CborValue::Text("opaque".to_string()),
+            ),
+        ];
+        assert!(maybe_restore_special_map(&tagged).is_some());
+    }
+
+    #[test]
+    fn special_map_does_not_restore_when_extra_keys_exist() {
+        let colliding = vec![
+            (
+                CborValue::Text(TYPE_KEY.to_string()),
+                CborValue::Text("27".to_string()),
+            ),
+            (
+                CborValue::Text(VALUE_KEY.to_string()),
+                CborValue::Text("opaque".to_string()),
+            ),
+            (
+                CborValue::Text("user_field".to_string()),
+                CborValue::Text("preserve_me".to_string()),
+            ),
+        ];
+        assert!(maybe_restore_special_map(&colliding).is_none());
+    }
 }

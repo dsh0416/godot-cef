@@ -96,6 +96,19 @@ wrap_render_process_handler! {
             }
         }
 
+        fn on_context_released(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _context: Option<&mut V8Context>,
+        ) {
+            // Listener callbacks hold V8 function references. Clear them when
+            // a V8 context is released so we don't retain stale callbacks.
+            self.handler.string_listeners.clear();
+            self.handler.binary_listeners.clear();
+            self.handler.data_listeners.clear();
+        }
+
         fn on_focused_node_changed(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, node: Option<&mut Domnode>) {
             if let Some(node) = node
                 && node.is_editable() == 1 {
@@ -149,10 +162,12 @@ wrap_render_process_handler! {
                         let msg_str = CefStringUtf16::from(&msg_cef);
 
                         if let Some(frame) = frame {
-                            invoke_js_string_callback(frame, "onIpcMessage", &msg_str);
-                            if let Some(value) = v8_value_create_string(Some(&msg_str)) {
-                                self.handler.string_listeners.emit(&value);
-                            }
+                            invoke_js_string_callback(
+                                frame,
+                                "onIpcMessage",
+                                &msg_str,
+                                Some(&self.handler.string_listeners),
+                            );
                         }
                     }
                     return 1;
@@ -168,13 +183,12 @@ wrap_render_process_handler! {
                                     buffer.truncate(copied);
 
                                     if let Some(frame) = frame {
-                                        invoke_js_binary_callback(frame, "onIpcBinaryMessage", &buffer);
-                                        if let Some(value) = v8_value_create_array_buffer_with_copy(
-                                            buffer.as_mut_ptr(),
-                                            buffer.len(),
-                                        ) {
-                                            self.handler.binary_listeners.emit(&value);
-                                        }
+                                        invoke_js_binary_callback(
+                                            frame,
+                                            "onIpcBinaryMessage",
+                                            &buffer,
+                                            Some(&self.handler.binary_listeners),
+                                        );
                                     }
                                 }
                             }
@@ -192,29 +206,12 @@ wrap_render_process_handler! {
                             if copied > 0 {
                                 buffer.truncate(copied);
                                 if let Some(frame) = frame {
-                                    match cbor_bytes_to_v8_value(&buffer) {
-                                        Ok(value) => {
-                                            if let Some(context) = frame.v8context() {
-                                                let _entered = context.enter();
-                                                invoke_js_data_callback(
-                                                    frame,
-                                                    "onIpcDataMessage",
-                                                    &value,
-                                                );
-                                                self.handler.data_listeners.emit(&value);
-                                            } else {
-                                                eprintln!(
-                                                    "ipcDataGodotToRenderer: unable to obtain V8 context for frame"
-                                                );
-                                            }
-                                        }
-                                        Err(err) => {
-                                            eprintln!(
-                                                "ipcDataGodotToRenderer: failed to decode CBOR payload: {:?}",
-                                                err
-                                            );
-                                        }
-                                    }
+                                    invoke_js_data_callback(
+                                        frame,
+                                        "onIpcDataMessage",
+                                        &buffer,
+                                        Some(&self.handler.data_listeners),
+                                    );
                                 }
                             }
                         }
@@ -230,18 +227,27 @@ wrap_render_process_handler! {
 }
 
 /// Invoke a JavaScript callback with a string argument.
-fn invoke_js_string_callback(frame: &mut Frame, callback_name: &str, msg_str: &CefStringUtf16) {
+fn invoke_js_string_callback(
+    frame: &mut Frame,
+    callback_name: &str,
+    msg_str: &CefStringUtf16,
+    listeners: Option<&IpcListenerSet>,
+) {
     if let Some(context) = frame.v8_context()
         && context.enter() != 0
     {
-        if let Some(mut global) = context.global() {
+        if let Some(mut global) = context.global()
+            && let Some(str_value) = v8_value_create_string(Some(msg_str))
+        {
             let callback_key: CefStringUtf16 = callback_name.into();
             if let Some(callback) = global.value_bykey(Some(&callback_key))
                 && callback.is_function() != 0
-                && let Some(str_value) = v8_value_create_string(Some(msg_str))
             {
-                let args = [Some(str_value)];
+                let args = [Some(str_value.clone())];
                 let _ = callback.execute_function(Some(&mut global), Some(&args));
+            }
+            if let Some(listeners) = listeners {
+                listeners.emit(&str_value);
             }
         }
         context.exit();
@@ -249,39 +255,57 @@ fn invoke_js_string_callback(frame: &mut Frame, callback_name: &str, msg_str: &C
 }
 
 /// Invoke a JavaScript callback with an ArrayBuffer argument.
-fn invoke_js_binary_callback(frame: &mut Frame, callback_name: &str, buffer: &[u8]) {
+fn invoke_js_binary_callback(
+    frame: &mut Frame,
+    callback_name: &str,
+    buffer: &[u8],
+    listeners: Option<&IpcListenerSet>,
+) {
     if let Some(context) = frame.v8_context()
         && context.enter() != 0
     {
         if let Some(mut global) = context.global() {
             let callback_key: CefStringUtf16 = callback_name.into();
             let mut buffer_copy = buffer.to_owned();
-            if let Some(callback) = global.value_bykey(Some(&callback_key))
-                && callback.is_function() != 0
-                && let Some(array_buffer) = v8_value_create_array_buffer_with_copy(
-                    buffer_copy.as_mut_ptr(),
-                    buffer_copy.len(),
-                )
+            if let Some(array_buffer) =
+                v8_value_create_array_buffer_with_copy(buffer_copy.as_mut_ptr(), buffer_copy.len())
             {
-                let args = [Some(array_buffer)];
-                let _ = callback.execute_function(Some(&mut global), Some(&args));
+                if let Some(callback) = global.value_bykey(Some(&callback_key))
+                    && callback.is_function() != 0
+                {
+                    let args = [Some(array_buffer.clone())];
+                    let _ = callback.execute_function(Some(&mut global), Some(&args));
+                }
+                if let Some(listeners) = listeners {
+                    listeners.emit(&array_buffer);
+                }
             }
         }
         context.exit();
     }
 }
 
-fn invoke_js_data_callback(frame: &mut Frame, callback_name: &str, value: &cef::V8Value) {
+fn invoke_js_data_callback(
+    frame: &mut Frame,
+    callback_name: &str,
+    cbor_payload: &[u8],
+    listeners: Option<&IpcListenerSet>,
+) {
     if let Some(context) = frame.v8_context()
         && context.enter() != 0
     {
-        if let Some(mut global) = context.global() {
+        if let Some(mut global) = context.global()
+            && let Ok(value) = cbor_bytes_to_v8_value(cbor_payload)
+        {
             let callback_key: CefStringUtf16 = callback_name.into();
             if let Some(callback) = global.value_bykey(Some(&callback_key))
                 && callback.is_function() != 0
             {
                 let args = [Some(value.clone())];
                 let _ = callback.execute_function(Some(&mut global), Some(&args));
+            }
+            if let Some(listeners) = listeners {
+                listeners.emit(&value);
             }
         }
         context.exit();

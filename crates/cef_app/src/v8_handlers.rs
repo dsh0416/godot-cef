@@ -162,14 +162,24 @@ impl IpcListenerSet {
         }
     }
 
-    pub fn emit(&self, value: &V8Value, frame: &Frame) {
-        if let Some(mut context) = frame.get_v8context() {
-            context.enter();
-            for callback in self.callbacks.borrow().iter() {
-                callback.execute_function(Some(&mut context), Some(&[Some(value.clone())]));
-            }
-            context.exit();
+    pub fn emit(&self, value: &V8Value) {
+        // Drop invalid/non-function callbacks first so stale V8 references
+        // do not accumulate across context lifetimes.
+        {
+            let mut callbacks = self.callbacks.borrow_mut();
+            callbacks.retain(|callback| callback.is_valid() != 0 && callback.is_function() != 0);
         }
+
+        // Snapshot before invoking callbacks to avoid RefCell re-entrancy
+        // if listeners are added/removed while a callback is running.
+        let callbacks_snapshot = self.callbacks.borrow().clone();
+        for callback in callbacks_snapshot {
+            let _ = callback.execute_function(None, Some(&[Some(value.clone())]));
+        }
+    }
+
+    pub fn clear(&self) {
+        self.callbacks.borrow_mut().clear();
     }
 
     pub fn build_api_object(&self) -> Option<V8Value> {
@@ -436,19 +446,15 @@ fn v8_to_cbor_value(value: &V8Value) -> Result<CborValue, String> {
     // Treat plain JS objects as CBOR maps, preserving string keys.
     if value.is_object() != 0 {
         // Retrieve the list of own enumerable property names via CEF.
-        if let Some(keys_list) = value.get_keys() {
-            let len = keys_list.get_size();
-            let mut entries = Vec::with_capacity(len as usize);
-            for i in 0..len {
-                // Obtain the key as a UTF-16 string and convert to Rust `String`.
-                if let Some(key_cef) = keys_list.string_value(i) {
-                    let key = CefStringUtf16::from(&key_cef).to_string();
-                    // Look up the corresponding property value on the object.
-                    let key_cef_for_lookup = CefStringUtf16::from(&key);
-                    if let Some(prop) = value.value_bykey(&key_cef_for_lookup) {
-                        let encoded = v8_to_cbor_value(&prop)?;
-                        entries.push((CborValue::Text(key), encoded));
-                    }
+        let mut keys_list = cef::CefStringList::new();
+        if value.keys(Some(&mut keys_list)) != 0 {
+            let mut entries = Vec::new();
+            for key in keys_list {
+                // Look up the corresponding property value on the object.
+                let key_cef_for_lookup = CefStringUtf16::from(key.as_str());
+                if let Some(prop) = value.value_bykey(Some(&key_cef_for_lookup)) {
+                    let encoded = v8_to_cbor_value(&prop)?;
+                    entries.push((CborValue::Text(key), encoded));
                 }
             }
             return Ok(CborValue::Map(entries));
