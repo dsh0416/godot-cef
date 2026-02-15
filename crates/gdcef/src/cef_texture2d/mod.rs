@@ -1,13 +1,10 @@
 use cef::{ImplBrowser, ImplFrame};
-use godot::classes::image::Format as ImageFormat;
-use godot::classes::{ITexture2D, Image, RenderingServer, Texture2D};
+use godot::classes::{ITexture2D, RenderingServer, Texture2D};
 use godot::prelude::*;
-use software_render::{DestBuffer, composite_popup};
 
 use crate::browser::{App, RenderMode};
+use crate::cef_init;
 use crate::cef_texture::backend;
-use crate::utils::get_display_scale_factor;
-use crate::{cef_init, render};
 
 #[derive(GodotClass)]
 #[class(base=Texture2D)]
@@ -229,120 +226,24 @@ impl CefTexture2D {
         let Some(state) = &mut self.app.state else {
             return;
         };
+        let _ = backend::update_primary_texture(state, "CefTexture2D");
+    }
 
-        if let RenderMode::Software {
-            frame_buffer,
-            texture,
-        } = &mut state.render_mode
-        {
-            let Ok(mut fb) = frame_buffer.lock() else {
-                return;
-            };
-            let popup_metadata = state.popup_state.lock().ok().and_then(|popup| {
-                if popup.visible && !popup.buffer.is_empty() {
-                    Some((
-                        popup.width,
-                        popup.height,
-                        popup.rect.x,
-                        popup.rect.y,
-                        popup.dirty,
-                    ))
-                } else {
-                    None
-                }
-            });
-
-            let popup_dirty = popup_metadata
-                .as_ref()
-                .is_some_and(|(_, _, _, _, dirty)| *dirty);
-
-            if !fb.dirty && !popup_dirty {
-                return;
-            }
-            if fb.data.is_empty() {
-                return;
-            }
-
-            let mut final_data = fb.data.clone();
-            if let Some((popup_width, popup_height, popup_x, popup_y, _)) = popup_metadata {
-                let popup_buffer = state
-                    .popup_state
-                    .lock()
-                    .ok()
-                    .map(|popup| popup.buffer.clone());
-                if let Some(popup_buffer) = popup_buffer {
-                    let display_scale = get_display_scale_factor();
-                    let scaled_x = (popup_x as f32 * display_scale) as i32;
-                    let scaled_y = (popup_y as f32 * display_scale) as i32;
-                    composite_popup(
-                        &mut DestBuffer {
-                            data: &mut final_data,
-                            width: fb.width,
-                            height: fb.height,
-                        },
-                        &software_render::PopupBuffer {
-                            data: &popup_buffer,
-                            width: popup_width,
-                            height: popup_height,
-                            x: scaled_x,
-                            y: scaled_y,
-                        },
-                    );
-                    if let Ok(mut popup) = state.popup_state.lock() {
-                        popup.mark_clean();
-                    }
-                }
-            }
-
-            let byte_array = PackedByteArray::from(final_data.as_slice());
-            let image = Image::create_from_data(
-                fb.width as i32,
-                fb.height as i32,
-                false,
-                ImageFormat::RGBA8,
-                &byte_array,
-            );
-            if let Some(image) = image {
-                texture.set_image(&image);
-            }
-            fb.mark_clean();
+    fn drain_event_queues(&self) {
+        let Some(event_queues) = self.app.state.as_ref().map(|state| &state.event_queues) else {
             return;
-        }
+        };
 
-        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        if let RenderMode::Accelerated {
-            render_state,
-            texture_2d_rd,
-        } = &mut state.render_mode
-        {
-            let Ok(mut accel_state) = render_state.lock() else {
-                return;
-            };
-            if let Some((new_w, new_h)) = accel_state.needs_resize.take()
-                && new_w > 0
-                && new_h > 0
-            {
-                render::free_rd_texture(accel_state.dst_rd_rid);
-                let (new_rd_rid, new_texture_2d_rd) =
-                    match render::create_rd_texture(new_w as i32, new_h as i32) {
-                        Ok(result) => result,
-                        Err(e) => {
-                            godot::global::godot_error!("[CefTexture2D] {}", e);
-                            return;
-                        }
-                    };
-                accel_state.dst_rd_rid = new_rd_rid;
-                accel_state.dst_width = new_w;
-                accel_state.dst_height = new_h;
-                *texture_2d_rd = new_texture_2d_rd;
-            }
+        let Ok(mut queues) = event_queues.lock() else {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Failed to lock event queues while draining events"
+            );
+            return;
+        };
 
-            if accel_state.has_pending_copy
-                && let Err(e) = accel_state.process_pending_copy()
-            {
-                godot::global::godot_error!("[CefTexture2D] Failed to process pending copy: {}", e);
-            }
-        }
+        // `CefTexture2D` is intentionally render-only and does not expose these
+        // events to script; drain every frame to avoid unbounded queue growth.
+        let _ = std::mem::take(&mut *queues);
     }
 
     fn tick(&mut self) {
@@ -371,6 +272,7 @@ impl CefTexture2D {
             cef::do_message_loop_work();
         }
         backend::request_external_begin_frame(&self.app);
+        self.drain_event_queues();
     }
 }
 
