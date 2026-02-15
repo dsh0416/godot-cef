@@ -9,9 +9,10 @@ use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
     AudioState, ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo,
-    DragEvent, EventQueues, EventQueuesHandle, ImeCompositionRange, LoadingStateEvent,
-    PendingPermissionAggregates, PendingPermissionDecision, PendingPermissionRequests,
-    PermissionPolicyFlag, PermissionRequestEvent, PermissionRequestIdCounter,
+    DragEvent, EventQueues, EventQueuesHandle, FindResultEvent, ImeCompositionRange,
+    LoadingStateEvent, PendingPermissionAggregates, PendingPermissionDecision,
+    PendingPermissionRequests, PermissionPolicyFlag, PermissionRequestEvent,
+    PermissionRequestIdCounter,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -935,6 +936,37 @@ impl LoadHandlerImpl {
     }
 }
 
+wrap_find_handler! {
+    pub(crate) struct FindHandlerImpl {
+        event_queues: EventQueuesHandle,
+    }
+
+    impl FindHandler {
+        fn on_find_result(
+            &self,
+            _browser: Option<&mut Browser>,
+            _identifier: ::std::os::raw::c_int,
+            count: ::std::os::raw::c_int,
+            _selection_rect: Option<&Rect>,
+            active_match_ordinal: ::std::os::raw::c_int,
+            _final_update: ::std::os::raw::c_int,
+        ) {
+            if let Ok(mut queues) = self.event_queues.lock() {
+                queues.find_results.push_back(FindResultEvent {
+                    count,
+                    active_index: active_match_ordinal,
+                });
+            }
+        }
+    }
+}
+
+impl FindHandlerImpl {
+    pub fn build(event_queues: EventQueuesHandle) -> cef::FindHandler {
+        Self::new(event_queues)
+    }
+}
+
 wrap_audio_handler! {
     pub(crate) struct AudioHandlerImpl {
         audio_params: AudioParamsState,
@@ -1615,6 +1647,7 @@ pub(crate) struct ClientHandlers {
     pub context_menu_handler: cef::ContextMenuHandler,
     pub life_span_handler: cef::LifeSpanHandler,
     pub load_handler: cef::LoadHandler,
+    pub find_handler: cef::FindHandler,
     pub drag_handler: cef::DragHandler,
     pub audio_handler: Option<cef::AudioHandler>,
     pub download_handler: cef::DownloadHandler,
@@ -1658,6 +1691,10 @@ wrap_client! {
 
         fn load_handler(&self) -> Option<cef::LoadHandler> {
             Some(self.handlers.load_handler.clone())
+        }
+
+        fn find_handler(&self) -> Option<cef::FindHandler> {
+            Some(self.handlers.find_handler.clone())
         }
 
         fn drag_handler(&self) -> Option<cef::DragHandler> {
@@ -1715,6 +1752,7 @@ fn build_client_handlers(
         context_menu_handler: ContextMenuHandlerImpl::build(),
         life_span_handler: LifeSpanHandlerImpl::build(queues.event_queues.clone(), popup_policy),
         load_handler: LoadHandlerImpl::build(queues.event_queues.clone()),
+        find_handler: FindHandlerImpl::build(queues.event_queues.clone()),
         drag_handler: DragHandlerImpl::build(queues.event_queues.clone()),
         audio_handler,
         download_handler: DownloadHandlerImpl::build(queues.event_queues.clone()),

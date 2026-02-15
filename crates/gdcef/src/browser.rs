@@ -153,6 +153,12 @@ pub struct PermissionRequestEvent {
     pub request_id: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct FindResultEvent {
+    pub count: i32,
+    pub active_index: i32,
+}
+
 #[derive(Clone)]
 pub enum PendingPermissionDecision {
     Media {
@@ -235,6 +241,8 @@ pub struct EventQueues {
     pub download_updates: VecDeque<DownloadUpdateEvent>,
     /// Permission request events.
     pub permission_requests: VecDeque<PermissionRequestEvent>,
+    /// Find-in-page result events.
+    pub find_results: VecDeque<FindResultEvent>,
     /// Cookie operation results.
     pub cookie_events: VecDeque<CookieEvent>,
     /// Render process terminated event.

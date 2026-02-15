@@ -369,6 +369,22 @@ func _on_permission_requested(permission_type: String, url: String, request_id: 
         cef_texture.deny_permission(request_id)
 ```
 
+## `find_result(count: int, active_index: int)`
+
+Emitted while a find-in-page search is running.
+
+**Parameters:**
+- `count`: Total number of matches found
+- `active_index`: Index of the currently highlighted match
+
+```gdscript
+func _ready():
+    cef_texture.find_result.connect(_on_find_result)
+
+func _on_find_result(count: int, active_index: int):
+    $FindLabel.text = "%d matches (%d selected)" % [count, active_index]
+```
+
 ## `render_process_terminated(status: int, error_message: String)`
 
 Emitted when the browser's render process terminates unexpectedly (crash, killed by OS, etc.).

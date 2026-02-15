@@ -136,6 +136,8 @@ impl CefTexture {
 
         self.ime_active = false;
         self.ime_proxy = None;
+        self.last_find_query = GString::new();
+        self.last_find_match_case = false;
 
         if let Some(mut overlay) = self.popup_overlay.take() {
             overlay.queue_free();

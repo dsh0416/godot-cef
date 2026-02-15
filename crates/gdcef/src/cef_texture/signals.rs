@@ -249,6 +249,7 @@ impl CefTexture {
         self.emit_drag_event_signals(&events.drag_events);
         self.emit_popup_request_signals(&events.popup_requests);
         self.emit_permission_request_signals(&events.permission_requests);
+        self.emit_find_result_signals(&events.find_results);
         self.emit_cookie_event_signals(&events.cookie_events);
         self.emit_download_request_signals(&events.download_requests);
         self.emit_download_update_signals(&events.download_updates);
@@ -423,6 +424,15 @@ impl CefTexture {
                     GString::from(&event.url).to_variant(),
                     event.request_id.to_variant(),
                 ],
+            );
+        }
+    }
+
+    fn emit_find_result_signals(&mut self, events: &VecDeque<crate::browser::FindResultEvent>) {
+        for event in events {
+            self.base_mut().emit_signal(
+                "find_result",
+                &[event.count.to_variant(), event.active_index.to_variant()],
             );
         }
     }

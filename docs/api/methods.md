@@ -71,6 +71,43 @@ if cef_texture.is_loading():
     print("Page is still loading...")
 ```
 
+## Find in Page
+
+### `find_text(query: String, forward: bool, match_case: bool)`
+
+Starts a find-in-page search for `query`.
+
+- `forward`: Search direction (`true` = next, `false` = previous)
+- `match_case`: Case-sensitive search when `true`
+
+```gdscript
+cef_texture.find_text("player", true, false)
+```
+
+### `find_next()`
+
+Finds the next match for the most recent `find_text()` query.
+
+```gdscript
+cef_texture.find_next()
+```
+
+### `find_previous()`
+
+Finds the previous match for the most recent `find_text()` query.
+
+```gdscript
+cef_texture.find_previous()
+```
+
+### `stop_finding()`
+
+Stops active find-in-page highlighting and clears the current selection.
+
+```gdscript
+cef_texture.stop_finding()
+```
+
 ## JavaScript Execution
 
 ### `eval(code: String)`

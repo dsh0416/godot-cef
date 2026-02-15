@@ -77,6 +77,10 @@ pub struct CefTexture {
     // Touch state
     touch_id_map: HashMap<i32, i32>,
     next_touch_id: i32,
+
+    // Find-in-page state
+    last_find_query: GString,
+    last_find_match_case: bool,
 }
 
 #[godot_api]
@@ -103,6 +107,8 @@ impl ITextureRect for CefTexture {
             popup_texture_2d_rd: None,
             touch_id_map: HashMap::new(),
             next_touch_id: 0,
+            last_find_query: GString::new(),
+            last_find_match_case: false,
         }
     }
 
@@ -184,6 +190,9 @@ impl CefTexture {
 
     #[signal]
     fn permission_requested(permission_type: GString, url: GString, request_id: i64);
+
+    #[signal]
+    fn find_result(count: i32, active_index: i32);
 
     /// Emitted when `get_cookies` or `get_all_cookies` completes.
     /// Contains an `Array` of `CookieInfo` objects.
@@ -530,6 +539,79 @@ impl CefTexture {
     pub fn stop_loading(&mut self) {
         if let Some(browser) = self.app.browser_mut() {
             browser.stop_load();
+        }
+    }
+
+    #[func]
+    /// Starts a new find-in-page search.
+    pub fn find_text(&mut self, query: GString, forward: bool, match_case: bool) {
+        let Some(host) = self.app.host() else {
+            return;
+        };
+
+        let query_string = query.to_string();
+        if query_string.trim().is_empty() {
+            host.stop_finding(true as _);
+            self.last_find_query = GString::new();
+            return;
+        }
+
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(
+            Some(&query_cef),
+            forward as _,
+            match_case as _,
+            false as _, // new search
+        );
+        self.last_find_query = query;
+        self.last_find_match_case = match_case;
+    }
+
+    #[func]
+    /// Jumps to the next result for the last find query.
+    pub fn find_next(&mut self) {
+        let Some(host) = self.app.host() else {
+            return;
+        };
+        if self.last_find_query.is_empty() {
+            return;
+        }
+
+        let query_string = self.last_find_query.to_string();
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(
+            Some(&query_cef),
+            true as _,
+            self.last_find_match_case as _,
+            true as _, // continue existing search
+        );
+    }
+
+    #[func]
+    /// Jumps to the previous result for the last find query.
+    pub fn find_previous(&mut self) {
+        let Some(host) = self.app.host() else {
+            return;
+        };
+        if self.last_find_query.is_empty() {
+            return;
+        }
+
+        let query_string = self.last_find_query.to_string();
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(
+            Some(&query_cef),
+            false as _,
+            self.last_find_match_case as _,
+            true as _, // continue existing search
+        );
+    }
+
+    #[func]
+    /// Stops active find-in-page highlighting and clears selection.
+    pub fn stop_finding(&mut self) {
+        if let Some(host) = self.app.host() {
+            host.stop_finding(true as _);
         }
     }
 
