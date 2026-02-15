@@ -72,6 +72,18 @@ impl ITexture2D for CefTexture2D {
     fn has_alpha(&self) -> bool {
         true
     }
+
+    fn get_rid(&self) -> Rid {
+        let Some(state) = self.app.state.as_ref() else {
+            return Rid::Invalid;
+        };
+
+        match &state.render_mode {
+            RenderMode::Software { texture, .. } => texture.get_rid(),
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            RenderMode::Accelerated { texture_2d_rd, .. } => texture_2d_rd.get_rid(),
+        }
+    }
 }
 
 #[godot_api]
@@ -131,7 +143,15 @@ impl CefTexture2D {
 
         // Notify the backend that the browser size has changed so it can
         // resize the off-screen rendering accordingly.
-        backend::handle_size_change(&self.app);
+        let logical_size = self.logical_size();
+        let dpi = self.get_dpi();
+        backend::handle_size_change(
+            &self.app,
+            &mut self.last_size,
+            &mut self.last_dpi,
+            logical_size,
+            dpi,
+        );
     }
 
     #[func]
