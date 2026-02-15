@@ -386,6 +386,8 @@ pub struct App {
     pub state: Option<BrowserState>,
     /// Current drag state for this browser.
     pub drag_state: DragState,
+    /// Tracks whether this instance currently holds one `cef_retain()` reference.
+    pub cef_retained: bool,
 }
 
 impl App {
@@ -409,6 +411,19 @@ impl App {
     pub fn clear_runtime_state(&mut self) {
         self.state = None;
         self.drag_state = Default::default();
+    }
+
+    /// Marks that this instance has successfully called `cef_retain()`.
+    pub fn mark_cef_retained(&mut self) {
+        self.cef_retained = true;
+    }
+
+    /// Releases CEF only when this instance currently owns a retain reference.
+    pub fn release_cef_if_retained(&mut self) {
+        if self.cef_retained {
+            crate::cef_init::cef_release();
+            self.cef_retained = false;
+        }
     }
 }
 

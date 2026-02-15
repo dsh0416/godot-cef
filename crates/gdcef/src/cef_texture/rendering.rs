@@ -2,7 +2,7 @@ use super::{CefTexture, backend};
 use godot::classes::control::MouseFilter;
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::texture_rect::ExpandMode;
-use godot::classes::{DisplayServer, Engine, Image, TextureRect};
+use godot::classes::{Image, TextureRect};
 use godot::prelude::*;
 use software_render::{DestBuffer, PopupBuffer, composite_popup};
 
@@ -12,22 +12,7 @@ use crate::{cursor, render};
 
 impl CefTexture {
     pub(super) fn get_max_fps(&self) -> i32 {
-        // Check project setting first
-        let setting_fps = crate::settings::get_max_frame_rate();
-        if setting_fps > 0 {
-            return setting_fps;
-        }
-
-        // Fall back to Godot engine's max fps or screen refresh rate
-        let engine_cap_fps = Engine::singleton().get_max_fps();
-        let screen_cap_fps = DisplayServer::singleton().screen_get_refresh_rate().round() as i32;
-        if engine_cap_fps > 0 {
-            engine_cap_fps
-        } else if screen_cap_fps > 0 {
-            screen_cap_fps
-        } else {
-            60
-        }
+        backend::get_max_fps()
     }
 
     pub(super) fn handle_max_fps_change(&mut self) {

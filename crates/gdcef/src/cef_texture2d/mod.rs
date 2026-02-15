@@ -1,6 +1,6 @@
 use cef::{ImplBrowser, ImplFrame};
 use godot::classes::image::Format as ImageFormat;
-use godot::classes::{DisplayServer, ITexture2D, Image, RenderingServer, Texture2D};
+use godot::classes::{ITexture2D, Image, RenderingServer, Texture2D};
 use godot::prelude::*;
 use software_render::{DestBuffer, composite_popup};
 
@@ -43,7 +43,7 @@ pub struct CefTexture2D {
 #[godot_api]
 impl ITexture2D for CefTexture2D {
     fn init(base: Base<Texture2D>) -> Self {
-        Self {
+        let mut texture = Self {
             base,
             app: App::default(),
             url: "https://google.com".into(),
@@ -56,7 +56,9 @@ impl ITexture2D for CefTexture2D {
             last_max_fps: 0,
             frame_hook_connected: false,
             runtime_enabled: true,
-        }
+        };
+        texture.ensure_frame_hook();
+        texture
     }
 
     fn get_width(&self) -> i32 {
@@ -148,19 +150,7 @@ impl CefTexture2D {
     }
 
     fn get_max_fps(&self) -> i32 {
-        let setting_fps = crate::settings::get_max_frame_rate();
-        if setting_fps > 0 {
-            return setting_fps;
-        }
-        let engine_cap_fps = godot::classes::Engine::singleton().get_max_fps();
-        let screen_cap_fps = DisplayServer::singleton().screen_get_refresh_rate().round() as i32;
-        if engine_cap_fps > 0 {
-            engine_cap_fps
-        } else if screen_cap_fps > 0 {
-            screen_cap_fps
-        } else {
-            60
-        }
+        backend::get_max_fps()
     }
 
     fn get_dpi(&self) -> f32 {
@@ -179,6 +169,7 @@ impl CefTexture2D {
             godot::global::godot_error!("[CefTexture2D] {}", e);
             return;
         }
+        self.app.mark_cef_retained();
         let logical_size = self.logical_size();
         let dpi = self.get_dpi();
         let params = backend::BackendCreateParams {
@@ -193,7 +184,7 @@ impl CefTexture2D {
         };
         if let Err(e) = backend::try_create_browser(&mut self.app, &params) {
             godot::global::godot_error!("[CefTexture2D] {}", e);
-            cef_init::cef_release();
+            self.app.release_cef_if_retained();
             return;
         }
         self.last_size = logical_size;

@@ -1,7 +1,7 @@
 use adblock::lists::{FilterSet, ParseOptions};
 use cef::{BrowserSettings, ImplBrowser, ImplBrowserHost, RequestContextSettings, WindowInfo};
 use cef_app::PhysicalSize;
-use godot::classes::{AudioServer, ImageTexture, Texture2Drd};
+use godot::classes::{AudioServer, DisplayServer, Engine, ImageTexture, Texture2Drd};
 use godot::prelude::*;
 use std::collections::HashMap;
 use std::fs;
@@ -95,6 +95,23 @@ pub(crate) fn should_use_accelerated_osr(enable_accelerated_osr: bool, log_prefi
         );
     }
     supported
+}
+
+pub(crate) fn get_max_fps() -> i32 {
+    let setting_fps = crate::settings::get_max_frame_rate();
+    if setting_fps > 0 {
+        return setting_fps;
+    }
+
+    let engine_cap_fps = Engine::singleton().get_max_fps();
+    let screen_cap_fps = DisplayServer::singleton().screen_get_refresh_rate().round() as i32;
+    if engine_cap_fps > 0 {
+        engine_cap_fps
+    } else if screen_cap_fps > 0 {
+        screen_cap_fps
+    } else {
+        60
+    }
 }
 
 pub(crate) fn handle_max_fps_change(app: &App, last_max_fps: &mut i32, max_fps: i32) {
@@ -260,7 +277,7 @@ pub(crate) fn try_create_browser(
 
 pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd<Texture2Drd>>) {
     if app.state.is_none() {
-        crate::cef_init::cef_release();
+        app.release_cef_if_retained();
         return;
     }
 
@@ -307,7 +324,7 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
     }
 
     app.clear_runtime_state();
-    crate::cef_init::cef_release();
+    app.release_cef_if_retained();
 }
 
 fn create_software_browser(

@@ -233,6 +233,7 @@ impl CefTexture {
             godot::global::godot_error!("[CefTexture] {}", e);
             return;
         }
+        self.app.mark_cef_retained();
 
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
         // Must explicitly enable processing when using on_notification instead of fn process()
