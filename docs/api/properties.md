@@ -26,7 +26,9 @@ browser/render backend. It can be assigned directly to `Sprite2D.texture` and
 | `texture_size` | `Vector2i` | `Vector2i(1024, 1024)` | Logical browser texture size in pixels. |
 
 `CefTexture2D` v1 is intentionally render-only: it does not include built-in
-3D surface input mapping/raycast routing.
+3D surface input mapping/raycast routing, and it exposes no signals or event
+queues (it does **not** emit `loading_state_changed`, `title_changed`,
+`console_message`, `popup_requested`, or any other `CefTexture` signals).
 
 ```gdscript
 var browser_tex := CefTexture2D.new()
