@@ -545,7 +545,46 @@ fn cbor_value_to_v8(value: &CborValue) -> Option<V8Value> {
             }
             Some(array)
         }
+        CborValue::Map(v) => {
+            let object = v8_value_create_object(None, None)?;
+            for (key, map_value) in v {
+                let key = cbor_map_key_to_js_property_name(key);
+                let key_cef = CefStringUtf16::from(key.as_str());
+
+                // Preserve map shape even when a value type is unsupported.
+                let mut js_value =
+                    cbor_value_to_v8(map_value).or_else(cef::v8_value_create_null)?;
+                object.set_value_bykey(
+                    Some(&key_cef),
+                    Some(&mut js_value),
+                    cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)),
+                );
+            }
+            Some(object)
+        }
+        CborValue::Tag(_, inner) => cbor_value_to_v8(inner),
         _ => None,
+    }
+}
+
+fn cbor_map_key_to_js_property_name(key: &CborValue) -> String {
+    match key {
+        CborValue::Text(v) => v.clone(),
+        CborValue::Integer(v) => i128::from(*v).to_string(),
+        CborValue::Float(v) => v.to_string(),
+        CborValue::Bool(v) => v.to_string(),
+        CborValue::Null => "null".to_string(),
+        CborValue::Bytes(v) => {
+            // Keep binary keys stable and ASCII-safe for JS object properties.
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            let mut out = String::with_capacity(v.len() * 2);
+            for byte in v {
+                out.push(HEX[(byte >> 4) as usize] as char);
+                out.push(HEX[(byte & 0x0f) as usize] as char);
+            }
+            out
+        }
+        other => format!("{other:?}"),
     }
 }
 
