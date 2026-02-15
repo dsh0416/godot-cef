@@ -240,13 +240,23 @@ impl CefTexture2D {
             };
             let popup_metadata = state.popup_state.lock().ok().and_then(|popup| {
                 if popup.visible && !popup.buffer.is_empty() {
-                    Some((popup.width, popup.height, popup.rect.x, popup.rect.y))
+                    Some((
+                        popup.width,
+                        popup.height,
+                        popup.rect.x,
+                        popup.rect.y,
+                        popup.dirty,
+                    ))
                 } else {
                     None
                 }
             });
 
-            if !fb.dirty && popup_metadata.is_none() {
+            let popup_dirty = popup_metadata
+                .as_ref()
+                .is_some_and(|(_, _, _, _, dirty)| *dirty);
+
+            if !fb.dirty && !popup_dirty {
                 return;
             }
             if fb.data.is_empty() {
@@ -254,7 +264,7 @@ impl CefTexture2D {
             }
 
             let mut final_data = fb.data.clone();
-            if let Some((popup_width, popup_height, popup_x, popup_y)) = popup_metadata {
+            if let Some((popup_width, popup_height, popup_x, popup_y, _)) = popup_metadata {
                 let popup_buffer = state
                     .popup_state
                     .lock()
@@ -278,6 +288,9 @@ impl CefTexture2D {
                             y: scaled_y,
                         },
                     );
+                    if let Ok(mut popup) = state.popup_state.lock() {
+                        popup.mark_clean();
+                    }
                 }
             }
 
