@@ -1754,24 +1754,24 @@ wrap_resource_request_handler! {
         ) -> ReturnValue {
             if let Some(adblock_engine) = &self.handler.adblock_engine
                 && let Some(request) = request
-                {
-                    match cef_request_to_adblock_request(request) {
-                        Ok(adblock_request) => {
-                            if adblock_engine.check_network_request(&adblock_request).matched {
-                                return ReturnValue::CANCEL;
-                            }
-                        }
-                        Err(err) => {
-                            godot::global::godot_warn!(
-                                "[OsrResourceRequestHandler] Failed to convert CEF request to adblock request: {:?}",
-                                err
-                            );
+            {
+                match cef_request_to_adblock_request(request) {
+                    Ok(adblock_request) => {
+                        if adblock_engine.check_network_request(&adblock_request).matched {
+                            return ReturnValue::CANCEL;
                         }
                     }
+                    Err(err) => {
+                        godot::global::godot_warn!(
+                            "[OsrResourceRequestHandler] Failed to convert CEF request to adblock request: {:?}",
+                            err
+                        );
+                    }
                 }
-                            ReturnValue::CONTINUE
             }
 
+            ReturnValue::CONTINUE
+        }
 
 
 
