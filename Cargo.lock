@@ -352,8 +352,8 @@ name = "cef_app"
 version = "1.10.0"
 dependencies = [
  "cef",
+ "ciborium",
  "libloading 0.9.0",
- "serde_cbor",
  "windows-sys 0.61.2",
 ]
 
@@ -393,7 +393,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
 dependencies = [
  "ciborium-io",
- "half 2.7.1",
+ "half",
 ]
 
 [[package]]
@@ -811,6 +811,7 @@ dependencies = [
  "cef",
  "cef-dll-sys",
  "cef_app",
+ "ciborium",
  "godot",
  "libc",
  "libloading 0.9.0",
@@ -819,7 +820,6 @@ dependencies = [
  "percent-encoding",
  "process_path",
  "retour",
- "serde_cbor",
  "software_render",
  "url",
  "wide",
@@ -1022,12 +1022,6 @@ checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.11.0",
 ]
-
-[[package]]
-name = "half"
-version = "1.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
 
 [[package]]
 name = "half"
@@ -1436,7 +1430,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "codespan-reporting",
- "half 2.7.1",
+ "half",
  "hashbrown 0.16.1",
  "hexf-parse",
  "indexmap",
@@ -2037,16 +2031,6 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
-]
-
-[[package]]
-name = "serde_cbor"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bef2ebfde456fb76bbcf9f59315333decc4fda0b2b44b420243c11e0f5ec1f5"
-dependencies = [
- "half 1.8.3",
- "serde",
 ]
 
 [[package]]

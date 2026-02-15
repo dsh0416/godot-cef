@@ -1,7 +1,6 @@
+use ciborium::value::Value as CborValue;
 use godot::builtin::{Array, PackedByteArray, VarDictionary, Variant, VariantType};
 use godot::prelude::*;
-use serde_cbor::Value as CborValue;
-use std::collections::BTreeMap;
 
 const MAX_IPC_DATA_BYTES: usize = 8 * 1024 * 1024;
 const TYPE_KEY: &str = "__godot_type";
@@ -13,12 +12,14 @@ pub fn max_ipc_data_bytes() -> usize {
 
 pub fn encode_variant_to_cbor_bytes(value: &Variant) -> Result<Vec<u8>, String> {
     let cbor = variant_to_cbor_value(value)?;
-    serde_cbor::to_vec(&cbor).map_err(|e| format!("CBOR encode failed: {e}"))
+    let mut out = Vec::new();
+    ciborium::ser::into_writer(&cbor, &mut out).map_err(|e| format!("CBOR encode failed: {e}"))?;
+    Ok(out)
 }
 
 pub fn decode_cbor_bytes_to_variant(bytes: &[u8]) -> Result<Variant, String> {
     let cbor: CborValue =
-        serde_cbor::from_slice(bytes).map_err(|e| format!("CBOR decode failed: {e}"))?;
+        ciborium::de::from_reader(bytes).map_err(|e| format!("CBOR decode failed: {e}"))?;
     cbor_value_to_variant(&cbor)
 }
 
@@ -42,29 +43,30 @@ fn variant_to_cbor_value(value: &Variant) -> Result<CborValue, String> {
         }
         VariantType::DICTIONARY => {
             let dict = value.to::<VarDictionary>();
-            let mut out = BTreeMap::new();
+            let mut out = Vec::new();
             for (key, val) in dict.iter_shared() {
                 let key_str = if key.get_type() == VariantType::STRING {
                     key.to::<GString>().to_string()
                 } else {
                     key.stringify().to_string()
                 };
-                out.insert(CborValue::Text(key_str), variant_to_cbor_value(&val)?);
+                out.push((CborValue::Text(key_str), variant_to_cbor_value(&val)?));
             }
             Ok(CborValue::Map(out))
         }
         // For broad Variant coverage, preserve unsupported Godot-native types by tagging
         // their string representation. This keeps transport robust without panicking.
         _ => {
-            let mut tagged = BTreeMap::new();
-            tagged.insert(
-                CborValue::Text(TYPE_KEY.to_string()),
-                CborValue::Text(value.get_type().ord().to_string()),
-            );
-            tagged.insert(
-                CborValue::Text(VALUE_KEY.to_string()),
-                CborValue::Text(value.stringify().to_string()),
-            );
+            let tagged = vec![
+                (
+                    CborValue::Text(TYPE_KEY.to_string()),
+                    CborValue::Text(value.get_type().ord().to_string()),
+                ),
+                (
+                    CborValue::Text(VALUE_KEY.to_string()),
+                    CborValue::Text(value.stringify().to_string()),
+                ),
+            ];
             Ok(CborValue::Map(tagged))
         }
     }
@@ -75,10 +77,11 @@ fn cbor_value_to_variant(value: &CborValue) -> Result<Variant, String> {
         CborValue::Null => Ok(Variant::nil()),
         CborValue::Bool(v) => Ok(v.to_variant()),
         CborValue::Integer(v) => {
-            if *v < i64::MIN as i128 || *v > i64::MAX as i128 {
+            let int_val = i128::from(*v);
+            if int_val < i64::MIN as i128 || int_val > i64::MAX as i128 {
                 return Err("Integer out of i64 range".to_string());
             }
-            Ok((*v as i64).to_variant())
+            Ok((int_val as i64).to_variant())
         }
         CborValue::Float(v) => Ok(v.to_variant()),
         CborValue::Text(v) => Ok(GString::from(v).to_variant()),
@@ -110,7 +113,7 @@ fn cbor_value_to_variant(value: &CborValue) -> Result<Variant, String> {
     }
 }
 
-fn maybe_restore_special_map(entries: &BTreeMap<CborValue, CborValue>) -> Option<Variant> {
+fn maybe_restore_special_map(entries: &[(CborValue, CborValue)]) -> Option<Variant> {
     let mut ty = None::<String>;
     let mut val = None::<String>;
     for (k, v) in entries {

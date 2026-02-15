@@ -1,3 +1,4 @@
+use ciborium::value::Value as CborValue;
 use std::sync::{Arc, Mutex};
 use std::{cell::RefCell, rc::Rc as StdRc};
 
@@ -7,7 +8,6 @@ use cef::{
     process_message_create, rc::Rc, v8_value_create_bool, v8_value_create_function,
     v8_value_create_object, wrap_v8_handler,
 };
-use serde_cbor::Value as CborValue;
 
 #[derive(Clone)]
 pub(crate) struct OsrIpcHandler {
@@ -382,7 +382,9 @@ wrap_v8_handler! {
 
 fn v8_to_cbor_bytes(value: &V8Value) -> Result<Vec<u8>, String> {
     let cbor = v8_to_cbor_value(value)?;
-    serde_cbor::to_vec(&cbor).map_err(|e| format!("CBOR encode failed: {e}"))
+    let mut out = Vec::new();
+    ciborium::ser::into_writer(&cbor, &mut out).map_err(|e| format!("CBOR encode failed: {e}"))?;
+    Ok(out)
 }
 
 fn v8_to_cbor_value(value: &V8Value) -> Result<CborValue, String> {
@@ -432,7 +434,7 @@ fn v8_to_cbor_value(value: &V8Value) -> Result<CborValue, String> {
 
 pub(crate) fn cbor_bytes_to_v8_value(bytes: &[u8]) -> Result<V8Value, String> {
     let cbor: CborValue =
-        serde_cbor::from_slice(bytes).map_err(|e| format!("CBOR decode failed: {e}"))?;
+        ciborium::de::from_reader(bytes).map_err(|e| format!("CBOR decode failed: {e}"))?;
     cbor_value_to_v8(&cbor).ok_or_else(|| "Failed to convert CBOR to V8".to_string())
 }
 
@@ -441,10 +443,11 @@ fn cbor_value_to_v8(value: &CborValue) -> Option<V8Value> {
         CborValue::Null => cef::v8_value_create_null(),
         CborValue::Bool(v) => v8_value_create_bool(*v as _),
         CborValue::Integer(v) => {
-            if *v >= i32::MIN as i128 && *v <= i32::MAX as i128 {
-                cef::v8_value_create_int(*v as i32)
+            let int_val = i128::from(*v);
+            if int_val >= i32::MIN as i128 && int_val <= i32::MAX as i128 {
+                cef::v8_value_create_int(int_val as i32)
             } else {
-                cef::v8_value_create_double(*v as f64)
+                cef::v8_value_create_double(int_val as f64)
             }
         }
         CborValue::Float(v) => cef::v8_value_create_double(*v),
