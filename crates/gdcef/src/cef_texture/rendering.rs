@@ -1,5 +1,4 @@
-use super::CefTexture;
-use cef::ImplBrowserHost;
+use super::{CefTexture, backend};
 use godot::classes::control::MouseFilter;
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::texture_rect::ExpandMode;
@@ -33,51 +32,19 @@ impl CefTexture {
 
     pub(super) fn handle_max_fps_change(&mut self) {
         let max_fps = self.get_max_fps();
-        if max_fps == self.last_max_fps {
-            return;
-        }
-
-        self.last_max_fps = max_fps;
-        if let Some(host) = self.app.host() {
-            host.set_windowless_frame_rate(max_fps);
-        }
+        backend::handle_max_fps_change(&self.app, &mut self.last_max_fps, max_fps);
     }
 
     pub(super) fn handle_size_change(&mut self) -> bool {
-        let current_dpi = self.get_pixel_scale_factor();
         let logical_size = self.base().get_size();
-        if logical_size.x <= 0.0 || logical_size.y <= 0.0 {
-            return false;
-        }
-
-        let size_diff = (logical_size - self.last_size).abs();
-        let dpi_diff = (current_dpi - self.last_dpi).abs();
-        if size_diff.x < 1e-6 && size_diff.y < 1e-6 && dpi_diff < 1e-6 {
-            return false;
-        }
-
-        let pixel_width = logical_size.x * current_dpi;
-        let pixel_height = logical_size.y * current_dpi;
-
-        if let Some(state) = self.app.state.as_ref() {
-            if let Ok(mut size) = state.render_size.lock() {
-                size.width = pixel_width;
-                size.height = pixel_height;
-            }
-
-            if let Ok(mut dpi) = state.device_scale_factor.lock() {
-                *dpi = current_dpi;
-            }
-        }
-
-        if let Some(host) = self.app.host() {
-            host.notify_screen_info_changed();
-            host.was_resized();
-        }
-
-        self.last_size = logical_size;
-        self.last_dpi = current_dpi;
-        true
+        let dpi = self.get_pixel_scale_factor();
+        backend::handle_size_change(
+            &self.app,
+            &mut self.last_size,
+            &mut self.last_dpi,
+            logical_size,
+            dpi,
+        )
     }
 
     pub(super) fn update_texture(&mut self) {
@@ -362,9 +329,7 @@ impl CefTexture {
     }
 
     pub(super) fn request_external_begin_frame(&mut self) {
-        if let Some(host) = self.app.host() {
-            host.send_external_begin_frame();
-        }
+        backend::request_external_begin_frame(&self.app);
     }
 
     pub(super) fn update_cursor(&mut self) {

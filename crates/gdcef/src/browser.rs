@@ -5,7 +5,7 @@
 
 use cef::ImplBrowser;
 use cef_app::{CursorType, FrameBuffer, PhysicalSize, PopupState};
-use godot::classes::{ImageTexture, Texture2Drd};
+use godot::classes::{ImageTexture, Texture2D, Texture2Drd};
 use godot::prelude::*;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64};
@@ -318,6 +318,17 @@ pub enum RenderMode {
         /// The Texture2DRD wrapper for display in TextureRect.
         texture_2d_rd: Gd<Texture2Drd>,
     },
+}
+
+impl RenderMode {
+    /// Returns the active render texture as a generic `Texture2D`.
+    pub fn texture_2d(&self) -> Gd<Texture2D> {
+        match self {
+            Self::Software { texture, .. } => texture.clone().upcast(),
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            Self::Accelerated { texture_2d_rd, .. } => texture_2d_rd.clone().upcast(),
+        }
+    }
 }
 
 /// Shared popup state for <select> dropdowns and other browser popups.

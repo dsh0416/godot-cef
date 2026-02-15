@@ -2,6 +2,7 @@ mod accelerated_osr;
 mod browser;
 mod cef_init;
 mod cef_texture;
+mod cef_texture2d;
 mod compat;
 mod cookie;
 mod cursor;
@@ -47,3 +48,4 @@ unsafe impl ExtensionLibrary for GodotCef {
 
 // Re-export CefTexture for convenience
 pub use cef_texture::CefTexture;
+pub use cef_texture2d::CefTexture2D;

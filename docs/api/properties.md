@@ -2,6 +2,10 @@
 
 The `CefTexture` node provides several properties for configuration and state management.
 
+`CefTexture2D` is a render-only `Texture2D` resource variant that shares the same
+browser/render backend. It can be assigned directly to `Sprite2D.texture` and
+3D material texture slots.
+
 ## Node Properties
 
 | Property | Type | Default | Description |
@@ -10,6 +14,34 @@ The `CefTexture` node provides several properties for configuration and state ma
 | `enable_accelerated_osr` | `bool` | `true` | Enable GPU-accelerated rendering |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | Background color for the browser. Set alpha to 0 for transparent background, or use a solid color to disable transparency. |
 | `popup_policy` | `int` | `0` | Controls how popup windows are handled. `0` = BLOCK (suppress silently), `1` = REDIRECT (navigate current browser to popup URL), `2` = SIGNAL_ONLY (emit `popup_requested` signal). Can be changed at runtime. |
+
+## CefTexture2D Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `url` | `String` | `"https://google.com"` | URL loaded by the resource-backed browser instance. |
+| `enable_accelerated_osr` | `bool` | `true` | Enables accelerated OSR when supported, otherwise falls back to software rendering. |
+| `background_color` | `Color` | `Color(0, 0, 0, 0)` | Browser background color (supports transparency). |
+| `popup_policy` | `int` | `0` | Popup behavior policy: BLOCK/REDIRECT/SIGNAL_ONLY. |
+| `texture_size` | `Vector2i` | `Vector2i(1024, 1024)` | Logical browser texture size in pixels. |
+
+`CefTexture2D` v1 is intentionally render-only: it does not include built-in
+3D surface input mapping/raycast routing.
+
+```gdscript
+var browser_tex := CefTexture2D.new()
+browser_tex.url = "https://example.com"
+browser_tex.texture_size = Vector2i(1024, 1024)
+$Sprite2D.texture = browser_tex
+```
+
+```gdscript
+var browser_tex := CefTexture2D.new()
+browser_tex.url = "https://example.com"
+var mat := StandardMaterial3D.new()
+mat.albedo_texture = browser_tex
+$MeshInstance3D.set_surface_override_material(0, mat)
+```
 
 ## Project Settings
 

@@ -1,3 +1,4 @@
+pub(crate) mod backend;
 mod browser_lifecycle;
 mod ime;
 mod rendering;
@@ -934,12 +935,9 @@ impl CefTexture {
 
     #[func]
     fn set_popup_policy(&mut self, policy: i32) {
-        use std::sync::atomic::Ordering;
         self.popup_policy = policy;
-        // Update the shared atomic flag so the CEF IO thread sees the change immediately
-        if let Some(state) = self.app.state.as_ref() {
-            state.popup_policy.store(policy, Ordering::Relaxed);
-        }
+        // Update the shared atomic flag so the CEF IO thread sees the change immediately.
+        backend::apply_popup_policy(&self.app, policy);
     }
 
     #[func]
