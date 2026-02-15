@@ -9,6 +9,9 @@ use cef::{
     v8_value_create_object, wrap_v8_handler,
 };
 
+// Keep this in sync with crates/gdcef/src/ipc_data.rs.
+const MAX_IPC_DATA_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Clone)]
 pub(crate) struct OsrIpcHandler {
     frame: Option<Arc<Mutex<Frame>>>,
@@ -116,27 +119,58 @@ wrap_v8_handler! {
             _object: Option<&mut V8Value>,
             arguments: Option<&[Option<V8Value>]>,
             retval: Option<&mut Option<cef::V8Value>>,
-            _exception: Option<&mut CefStringUtf16>
+            exception: Option<&mut CefStringUtf16>
         ) -> i32 {
             if let Some(arguments) = arguments
                 && let Some(Some(arg)) = arguments.first()
-                && let Ok(encoded) = v8_to_cbor_bytes(arg)
-                && let Some(mut binary) = binary_value_create(Some(&encoded))
-                && let Some(frame) = self.handler.frame.as_ref()
             {
-                let frame = frame
-                    .lock()
-                    .expect("OsrIpcDataHandler: failed to lock frame mutex (poisoned)");
-                let route = CefStringUtf16::from("ipcDataRendererToGodot");
-                if let Some(mut process_message) = process_message_create(Some(&route))
-                    && let Some(argument_list) = process_message.argument_list()
-                {
-                    argument_list.set_binary(0, Some(&mut binary));
-                    frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-                    if let Some(retval) = retval {
-                        *retval = v8_value_create_bool(true as _);
+                match v8_to_cbor_bytes(arg) {
+                    Ok(encoded) => {
+                        if encoded.len() > MAX_IPC_DATA_BYTES {
+                            if let Some(retval) = retval {
+                                *retval = v8_value_create_bool(false as _);
+                            }
+                            if let Some(exception) = exception {
+                                let msg = format!(
+                                    "IPC data payload exceeds maximum size of {} bytes",
+                                    MAX_IPC_DATA_BYTES
+                                );
+                                *exception = CefStringUtf16::from(msg.as_str());
+                            }
+                            return 0;
+                        }
+
+                        if let Some(mut binary) = binary_value_create(Some(&encoded))
+                            && let Some(frame) = self.handler.frame.as_ref()
+                        {
+                            let frame = frame
+                                .lock()
+                                .expect("OsrIpcDataHandler: failed to lock frame mutex (poisoned)");
+                            let route = CefStringUtf16::from("ipcDataRendererToGodot");
+                            if let Some(mut process_message) = process_message_create(Some(&route))
+                                && let Some(argument_list) = process_message.argument_list()
+                            {
+                                argument_list.set_binary(0, Some(&mut binary));
+                                frame.send_process_message(
+                                    ProcessId::BROWSER,
+                                    Some(&mut process_message),
+                                );
+                                if let Some(retval) = retval {
+                                    *retval = v8_value_create_bool(true as _);
+                                }
+                                return 1;
+                            }
+                        }
                     }
-                    return 1;
+                    Err(err) => {
+                        if let Some(retval) = retval {
+                            *retval = v8_value_create_bool(false as _);
+                        }
+                        if let Some(exception) = exception {
+                            *exception = CefStringUtf16::from(err.as_str());
+                        }
+                        return 0;
+                    }
                 }
             }
 
@@ -398,6 +432,12 @@ fn v8_to_cbor_bytes(value: &V8Value) -> Result<Vec<u8>, String> {
     let cbor = v8_to_cbor_value(value)?;
     let mut out = Vec::new();
     ciborium::ser::into_writer(&cbor, &mut out).map_err(|e| format!("CBOR encode failed: {e}"))?;
+    if out.len() > MAX_IPC_DATA_BYTES {
+        return Err(format!(
+            "CBOR payload exceeds maximum size of {} bytes",
+            MAX_IPC_DATA_BYTES
+        ));
+    }
     Ok(out)
 }
 
@@ -425,6 +465,12 @@ fn v8_to_cbor_value(value: &V8Value) -> Result<CborValue, String> {
     if value.is_array_buffer() != 0 {
         let ptr = value.array_buffer_data();
         let len = value.array_buffer_byte_length();
+        if len > MAX_IPC_DATA_BYTES {
+            return Err(format!(
+                "ArrayBuffer exceeds maximum IPC data size of {} bytes",
+                MAX_IPC_DATA_BYTES
+            ));
+        }
         if ptr.is_null() || len == 0 {
             return Ok(CborValue::Bytes(Vec::new()));
         }
