@@ -137,4 +137,3 @@ fn maybe_restore_special_map(entries: &[(CborValue, CborValue)]) -> Option<Varia
     }
     None
 }
-
