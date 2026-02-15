@@ -43,8 +43,7 @@ impl CefTexture {
 
         let Some(rules_path) = crate::settings::get_adblock_rules_path() else {
             godot::global::godot_warn!(
-                "[CefTexture] Adblock is enabled, but '{}' is empty. Request filtering will be disabled.",
-                "godot_cef/network/adblock_rules_path"
+                "[CefTexture] Adblock is enabled, but adblock rules path setting is empty. Request filtering will be disabled."
             );
             return None;
         };
@@ -63,6 +62,7 @@ impl CefTexture {
 
         let mut filter_set = FilterSet::new(true);
         let _metadata = filter_set.add_filter_list(&rules, ParseOptions::default());
+        godot::global::godot_print!("[CefTexture] Adblock filter list loaded.");
 
         Some(Rc::new(adblock::Engine::from_filter_set(filter_set, true)))
     }

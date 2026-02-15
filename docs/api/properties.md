@@ -59,7 +59,7 @@ These settings are dangerous and should only be enabled for specific use cases (
 | `godot_cef/network/user_agent` | `String` | `""` | Custom user agent string. Leave empty to use CEF's default user agent. |
 | `godot_cef/network/proxy_server` | `String` | `""` | Proxy server URL (e.g., `socks5://127.0.0.1:1080` or `http://proxy:8080`). Leave empty for direct connection. |
 | `godot_cef/network/proxy_bypass_list` | `String` | `""` | Comma-separated list of hosts to bypass proxy (e.g., `localhost,127.0.0.1,*.local`). |
-| `godot_cef/network/enable_adblock` | `bool` | `false` | Enables request-level filtering using adblock rules (applies to all browsers created after startup). |
+| `godot_cef/network/enable_adblock` | `bool` | `false` | Enables request-level filtering using adblock rules for browsers created after this setting is configured (adblock configuration is determined at browser creation time). |
 | `godot_cef/network/adblock_rules_path` | `String` | `""` | Path to an EasyList/ABP-compatible rules file. Supports `user://` and `res://`. Ignored when adblock is disabled. |
 
 ### Advanced Settings
