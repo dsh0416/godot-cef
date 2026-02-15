@@ -2,6 +2,10 @@
 
 `CefTexture` 提供多项属性，用于配置与状态管理。
 
+`CefTexture2D` 是一个仅渲染的 `Texture2D` 资源变体，与 `CefTexture`
+共享同一套浏览器/渲染后端。它可以直接赋值给 `Sprite2D.texture`
+以及 3D 材质纹理槽位。
+
 ## 节点属性
 
 | 属性 | 类型 | 默认值 | 描述 |
@@ -10,6 +14,33 @@
 | `enable_accelerated_osr` | `bool` | `true` | 启用 GPU 加速渲染 |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色。将 alpha 设为 0 表示透明背景，或使用实色以禁用透明效果。 |
 | `popup_policy` | `int` | `0` | 控制弹出窗口的处理方式。`0` = BLOCK（静默阻止），`1` = REDIRECT（在当前浏览器中导航到弹出 URL），`2` = SIGNAL_ONLY（触发 `popup_requested` 信号）。可在运行时更改。 |
+
+## CefTexture2D 属性
+
+| 属性 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `url` | `String` | `"https://google.com"` | 该资源实例加载的 URL。 |
+| `enable_accelerated_osr` | `bool` | `true` | 在支持的平台启用加速 OSR，否则自动回退到软件渲染。 |
+| `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色（支持透明）。 |
+| `popup_policy` | `int` | `0` | 弹窗策略：BLOCK / REDIRECT / SIGNAL_ONLY。 |
+| `texture_size` | `Vector2i` | `Vector2i(1024, 1024)` | 浏览器纹理逻辑尺寸（像素）。 |
+
+`CefTexture2D` 的 v1 版本刻意保持为仅渲染：不包含内置的 3D 表面输入映射/射线投射路由。
+
+```gdscript
+var browser_tex := CefTexture2D.new()
+browser_tex.url = "https://example.com"
+browser_tex.texture_size = Vector2i(1024, 1024)
+$Sprite2D.texture = browser_tex
+```
+
+```gdscript
+var browser_tex := CefTexture2D.new()
+browser_tex.url = "https://example.com"
+var mat := StandardMaterial3D.new()
+mat.albedo_texture = browser_tex
+$MeshInstance3D.set_surface_override_material(0, mat)
+```
 
 ## 项目设置
 
@@ -59,6 +90,8 @@
 | `godot_cef/network/user_agent` | `String` | `""` | 自定义 User-Agent 字符串。留空则使用 CEF 默认 User-Agent。 |
 | `godot_cef/network/proxy_server` | `String` | `""` | 代理服务器 URL（如 `socks5://127.0.0.1:1080` 或 `http://proxy:8080`）。留空表示直连。 |
 | `godot_cef/network/proxy_bypass_list` | `String` | `""` | 不走代理的主机列表（逗号分隔，如 `localhost,127.0.0.1,*.local`）。 |
+| `godot_cef/network/enable_adblock` | `bool` | `false` | 启用基于规则的请求过滤（adblock）。仅对该设置生效后新创建的浏览器实例生效（adblock 配置在浏览器创建时确定）。 |
+| `godot_cef/network/adblock_rules_path` | `String` | `""` | EasyList/ABP 兼容规则文件路径。支持 `user://` 与 `res://`。当 adblock 关闭时忽略该项。 |
 
 ### 高级设置
 
@@ -89,6 +122,8 @@ performance/max_frame_rate=60
 network/user_agent="MyApp/1.0 (Godot Engine)"
 network/proxy_server="socks5://127.0.0.1:1080"
 network/proxy_bypass_list="localhost,127.0.0.1"
+network/enable_adblock=true
+network/adblock_rules_path="user://filters/easylist.txt"
 advanced/custom_command_line_switches="disable-gpu-compositing\nenable-features=WebRTC"
 ```
 
