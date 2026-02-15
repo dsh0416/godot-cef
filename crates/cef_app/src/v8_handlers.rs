@@ -162,9 +162,13 @@ impl IpcListenerSet {
         }
     }
 
-    pub fn emit(&self, value: &V8Value) {
-        for callback in self.callbacks.borrow().iter() {
-            callback.execute_function(None, Some(&[Some(value.clone())]));
+    pub fn emit(&self, value: &V8Value, frame: &Frame) {
+        if let Some(mut context) = frame.get_v8context() {
+            context.enter();
+            for callback in self.callbacks.borrow().iter() {
+                callback.execute_function(Some(&mut context), Some(&[Some(value.clone())]));
+            }
+            context.exit();
         }
     }
 
@@ -428,6 +432,27 @@ fn v8_to_cbor_value(value: &V8Value) -> Result<CborValue, String> {
             }
         }
         return Ok(CborValue::Array(out));
+    }
+    // Treat plain JS objects as CBOR maps, preserving string keys.
+    if value.is_object() != 0 {
+        // Retrieve the list of own enumerable property names via CEF.
+        if let Some(keys_list) = value.get_keys() {
+            let len = keys_list.get_size();
+            let mut entries = Vec::with_capacity(len as usize);
+            for i in 0..len {
+                // Obtain the key as a UTF-16 string and convert to Rust `String`.
+                if let Some(key_cef) = keys_list.string_value(i) {
+                    let key = CefStringUtf16::from(&key_cef).to_string();
+                    // Look up the corresponding property value on the object.
+                    let key_cef_for_lookup = CefStringUtf16::from(&key);
+                    if let Some(prop) = value.value_bykey(&key_cef_for_lookup) {
+                        let encoded = v8_to_cbor_value(&prop)?;
+                        entries.push((CborValue::Text(key), encoded));
+                    }
+                }
+            }
+            return Ok(CborValue::Map(entries));
+        }
     }
     Err("Unsupported JS value for CBOR IPC".to_string())
 }

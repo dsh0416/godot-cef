@@ -18,7 +18,7 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 - **Dynamic Scaling** — Automatic handling of DPI changes and window resizing
 - **Multi-Process Architecture** — Proper CEF subprocess handling for stability and consistency
 - **Remote Debugging** — Built-in Chrome DevTools support
-- **Typed IPC (CBOR)** — Send/receive structured data (`Variant` / JS objects) without manual JSON serialization
+- **Typed IPC (CBOR)** — Send/receive typed primitives, arrays, and binary buffers (`Variant` / JS values) without manual JSON serialization
 - **Listener-based JS Bridge** — Multi-subscriber IPC listeners via `addListener/removeListener/hasListener`
 
 ## Screenshots

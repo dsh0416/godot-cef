@@ -191,6 +191,10 @@ window.ipcDataMessage.addListener((data) => {
 });
 ```
 
+The `data` argument here will be one of the CBOR types currently supported by the renderer-side encoder/decoder:
+primitive values (numbers, strings, booleans, etc.) and raw bytes (for example, `Uint8Array`/`ArrayBuffer` when you send a `PackedByteArray` from Godot).
+CBOR maps / Godot `Dictionary` values are **not yet** mapped to JavaScript objects, so sending a `Dictionary` with `send_ipc_data` will not produce a decoded JS object on the renderer side.
+For structured data, encode it yourself into a supported form (for example, a JSON string or a binary representation) before sending.
 ## JavaScript IPC APIs
 
 Godot CEF exposes three send functions in the renderer:

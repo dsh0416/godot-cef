@@ -191,11 +191,31 @@ wrap_render_process_handler! {
                             let copied = binary_value.data(Some(&mut buffer), 0);
                             if copied > 0 {
                                 buffer.truncate(copied);
-                                if let Some(frame) = frame
-                                    && let Ok(value) = cbor_bytes_to_v8_value(&buffer) {
-                                        invoke_js_data_callback(frame, "onIpcDataMessage", &value);
-                                        self.handler.data_listeners.emit(&value);
+                                if let Some(frame) = frame {
+                                    match cbor_bytes_to_v8_value(&buffer) {
+                                        Ok(value) => {
+                                            if let Some(context) = frame.v8context() {
+                                                let _entered = context.enter();
+                                                invoke_js_data_callback(
+                                                    frame,
+                                                    "onIpcDataMessage",
+                                                    &value,
+                                                );
+                                                self.handler.data_listeners.emit(&value);
+                                            } else {
+                                                eprintln!(
+                                                    "ipcDataGodotToRenderer: unable to obtain V8 context for frame"
+                                                );
+                                            }
+                                        }
+                                        Err(err) => {
+                                            eprintln!(
+                                                "ipcDataGodotToRenderer: failed to decode CBOR payload: {:?}",
+                                                err
+                                            );
+                                        }
                                     }
+                                }
                             }
                         }
                     }
