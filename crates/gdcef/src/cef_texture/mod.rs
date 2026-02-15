@@ -191,6 +191,11 @@ impl CefTexture {
     #[signal]
     fn permission_requested(permission_type: GString, url: GString, request_id: i64);
 
+    /// Emitted after a find-in-page operation completes or is updated.
+    ///
+    /// - `count` is the total number of matches found.
+    /// - `active_index` corresponds to CEF's `active_match_ordinal` and is **1-based**.
+    ///   A value of `0` means there is no active match.
     #[signal]
     fn find_result(count: i32, active_index: i32, final_update: bool);
 
@@ -550,7 +555,7 @@ impl CefTexture {
         };
 
         let query_string = query.to_string();
-        if query_string.trim().is_empty() {
+        if query_string.is_empty() {
             host.stop_finding(true as _);
             self.last_find_query = GString::new();
             self.last_find_match_case = false;
