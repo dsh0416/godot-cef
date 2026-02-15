@@ -160,17 +160,20 @@ Sends typed data from Godot to JavaScript through the CBOR IPC lane. This is use
 
 Supported payloads include:
 - `null`, `bool`, `int`, `float`, `String`
-- `Array`, `Dictionary`
+- `Array` of the above primitive types
 - `PackedByteArray` (as binary data)
 
+> Note: While `Dictionary` values can be sent, they are not yet mapped to plain JavaScript objects. For structured key/value data, prefer sending a JSON-serialized `String` and parsing it on the JavaScript side.
+
 ```gdscript
-# Send structured data directly
+# Send structured data as JSON (recommended for key/value payloads)
 var payload := {
     "type": "player_state",
     "hp": 88,
     "tags": ["tank", "boss"]
 }
-cef_texture.send_ipc_data(payload)
+var payload_json := JSON.stringify(payload)
+cef_texture.send_ipc_data(payload_json)
 
 # Send raw bytes through typed lane
 var bytes := PackedByteArray([0xCA, 0xFE, 0xBA, 0xBE])
