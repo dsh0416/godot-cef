@@ -6,6 +6,7 @@ use software_render::{DestBuffer, composite_popup};
 
 use crate::browser::{App, RenderMode};
 use crate::cef_texture::backend;
+use crate::utils::get_display_scale_factor;
 use crate::{cef_init, render};
 
 #[derive(GodotClass)]
@@ -36,6 +37,7 @@ pub struct CefTexture2D {
     last_dpi: f32,
     last_max_fps: i32,
     frame_hook_connected: bool,
+    runtime_enabled: bool,
 }
 
 #[godot_api]
@@ -53,6 +55,7 @@ impl ITexture2D for CefTexture2D {
             last_dpi: 1.0,
             last_max_fps: 0,
             frame_hook_connected: false,
+            runtime_enabled: true,
         }
     }
 
@@ -122,6 +125,7 @@ impl CefTexture2D {
 
     #[func]
     pub fn shutdown(&mut self) {
+        self.runtime_enabled = false;
         self.cleanup_instance();
     }
 
@@ -132,6 +136,15 @@ impl CefTexture2D {
         let callable = self.base().callable("_on_frame_pre_draw");
         RenderingServer::singleton().connect("frame_pre_draw", &callable);
         self.frame_hook_connected = true;
+    }
+
+    fn disconnect_frame_hook(&mut self) {
+        if !self.frame_hook_connected {
+            return;
+        }
+        let callable = self.base().callable("_on_frame_pre_draw");
+        RenderingServer::singleton().disconnect("frame_pre_draw", &callable);
+        self.frame_hook_connected = false;
     }
 
     fn get_max_fps(&self) -> i32 {
@@ -159,7 +172,7 @@ impl CefTexture2D {
     }
 
     fn try_create_browser(&mut self) {
-        if self.app.state.is_some() {
+        if !self.runtime_enabled || self.app.state.is_some() {
             return;
         }
         if let Err(e) = cef_init::cef_retain() {
@@ -188,6 +201,7 @@ impl CefTexture2D {
     }
 
     fn cleanup_instance(&mut self) {
+        self.disconnect_frame_hook();
         backend::cleanup_runtime(&mut self.app, None);
     }
 
@@ -227,6 +241,9 @@ impl CefTexture2D {
                     .ok()
                     .map(|popup| popup.buffer.clone());
                 if let Some(popup_buffer) = popup_buffer {
+                    let display_scale = get_display_scale_factor();
+                    let scaled_x = (popup_x as f32 * display_scale) as i32;
+                    let scaled_y = (popup_y as f32 * display_scale) as i32;
                     composite_popup(
                         &mut DestBuffer {
                             data: &mut final_data,
@@ -237,8 +254,8 @@ impl CefTexture2D {
                             data: &popup_buffer,
                             width: popup_width,
                             height: popup_height,
-                            x: popup_x,
-                            y: popup_y,
+                            x: scaled_x,
+                            y: scaled_y,
                         },
                     );
                 }
@@ -296,6 +313,12 @@ impl CefTexture2D {
     }
 
     fn tick(&mut self) {
+        if !self.runtime_enabled {
+            // Defensive: if the frame callback was not disconnected for any reason,
+            // prevent re-creating runtime state after an explicit shutdown().
+            self.disconnect_frame_hook();
+            return;
+        }
         self.ensure_frame_hook();
         self.try_create_browser();
 

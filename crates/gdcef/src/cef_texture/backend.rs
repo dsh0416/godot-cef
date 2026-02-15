@@ -547,3 +547,30 @@ fn create_accelerated_browser(
         log_prefix,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::color_to_cef_color;
+    use godot::prelude::Color;
+
+    #[test]
+    fn color_to_cef_color_packs_argb_in_big_endian_order() {
+        let color = Color::from_rgba(0.1, 0.2, 0.3, 0.4);
+
+        // 0.1,0.2,0.3,0.4 map to 25,51,76,102 with truncating conversion.
+        assert_eq!(
+            color_to_cef_color(color),
+            u32::from_be_bytes([102, 25, 51, 76])
+        );
+    }
+
+    #[test]
+    fn color_to_cef_color_clamps_components_to_zero_through_one() {
+        let color = Color::from_rgba(-1.0, 2.0, 0.25, 1.5);
+
+        assert_eq!(
+            color_to_cef_color(color),
+            u32::from_be_bytes([255, 0, 255, 63])
+        );
+    }
+}

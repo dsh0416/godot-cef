@@ -9,6 +9,7 @@ use cef::{
     ImplMediaAccessCallback, ImplPermissionPromptCallback, ImplProcessMessage,
     do_message_loop_work,
 };
+use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
     ITextureRect, ImageTexture, InputEvent, InputEventKey, InputEventMagnifyGesture,
@@ -63,7 +64,6 @@ pub struct CefTexture {
     last_cursor: cef_app::CursorType,
     last_max_fps: i32,
     browser_create_deferred_pending: bool,
-    browser_create_in_progress: bool,
 
     // IME state
     ime_active: bool,
@@ -101,7 +101,6 @@ impl ITextureRect for CefTexture {
             last_cursor: cef_app::CursorType::Arrow,
             last_max_fps: 0,
             browser_create_deferred_pending: false,
-            browser_create_in_progress: false,
             ime_active: false,
             ime_proxy: None,
             ime_focus_regrab_pending: false,
@@ -116,22 +115,36 @@ impl ITextureRect for CefTexture {
         }
     }
 
-    fn ready(&mut self) {
-        self.on_ready();
-    }
-
-    fn process(&mut self, _delta: f64) {
-        self.on_process();
+    fn on_notification(&mut self, what: ControlNotification) {
+        match what {
+            ControlNotification::READY => {
+                self.on_ready();
+            }
+            ControlNotification::PROCESS => {
+                self.on_process();
+            }
+            ControlNotification::PREDELETE => {
+                self.cleanup_instance();
+            }
+            ControlNotification::FOCUS_ENTER => {
+                if let Some(host) = self.app.host() {
+                    host.set_focus(true as _);
+                }
+            }
+            ControlNotification::FOCUS_EXIT => {
+                if let Some(host) = self.app.host() {
+                    host.set_focus(false as _);
+                }
+            }
+            ControlNotification::OS_IME_UPDATE => {
+                self.handle_os_ime_update();
+            }
+            _ => {}
+        }
     }
 
     fn input(&mut self, event: Gd<InputEvent>) {
         self.handle_input_event(event);
-    }
-}
-
-impl Drop for CefTexture {
-    fn drop(&mut self) {
-        self.cleanup_instance();
     }
 }
 
@@ -224,7 +237,7 @@ impl CefTexture {
         self.base_mut().set_expand_mode(ExpandMode::IGNORE_SIZE);
         // Must explicitly enable processing when using on_notification instead of fn process()
         self.base_mut().set_process(true);
-        // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF
+        // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF.
         self.base_mut().set_focus_mode(FocusMode::CLICK);
 
         // Create hidden LineEdit for IME proxy
@@ -244,7 +257,6 @@ impl CefTexture {
             let size = self.base().get_size();
             if size.x > 0.0 && size.y > 0.0 && !self.browser_create_deferred_pending {
                 self.browser_create_deferred_pending = true;
-                self.browser_create_in_progress = true;
                 self.base_mut().set_process(false);
                 self.base_mut()
                     .call_deferred("_deferred_create_browser", &[]);
@@ -253,7 +265,6 @@ impl CefTexture {
 
         self.handle_max_fps_change();
         _ = self.handle_size_change();
-        self.handle_os_ime_update();
         self.update_texture();
 
         if self.app.state.is_some() {
@@ -273,7 +284,6 @@ impl CefTexture {
         if self.app.state.is_none() {
             self.create_browser();
         }
-        self.browser_create_in_progress = false;
         self.base_mut().set_process(true);
     }
 
