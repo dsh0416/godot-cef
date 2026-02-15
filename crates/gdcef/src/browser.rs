@@ -321,7 +321,6 @@ pub enum RenderMode {
 }
 
 impl RenderMode {
-    /// Returns the active render texture as a generic `Texture2D`.
     pub fn texture_2d(&self) -> Gd<Texture2D> {
         match self {
             Self::Software { texture, .. } => texture.clone().upcast(),

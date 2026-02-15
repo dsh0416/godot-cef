@@ -12,9 +12,7 @@ impl CefTexture {
     }
 
     pub(super) fn cleanup_instance(&mut self) {
-        // Hide before freeing resources to avoid rendering stale texture state.
         self.base_mut().set_visible(false);
-
         backend::cleanup_runtime(&mut self.app, self.popup_texture_2d_rd.as_mut());
 
         self.ime_active = false;
@@ -42,8 +40,6 @@ impl CefTexture {
     }
 
     pub(super) fn try_create_browser(&mut self) -> Result<(), CefError> {
-        // Prevent double-initialization: if browser already exists, do nothing.
-        // This avoids resource leaks (unclosed browser handles, leaked textures, etc.).
         if self.app.state.is_some() {
             return Ok(());
         }
