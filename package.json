@@ -1,6 +1,6 @@
 {
   "name": "godot-cef",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "",
   "main": "index.js",
   "scripts": {
