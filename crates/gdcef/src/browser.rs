@@ -428,7 +428,9 @@ impl App {
     pub fn clear_runtime_state(&mut self) {
         self.state = None;
         self.drag_state = Default::default();
-        if !self.cef_retained {
+        if self.cef_retained {
+            self.lifecycle_state = LifecycleState::Retained;
+        } else {
             self.lifecycle_state = LifecycleState::Closed;
         }
     }
