@@ -1,4 +1,5 @@
 use cef::{ImplBrowser, ImplFrame};
+use godot::classes::notify::ObjectNotification;
 use godot::classes::{ITexture2D, RenderingServer, Texture2D};
 use godot::prelude::*;
 
@@ -33,6 +34,7 @@ pub struct CefTexture2D {
     last_size: Vector2,
     last_dpi: f32,
     last_max_fps: i32,
+    frame_hook_callable: Option<Callable>,
     frame_hook_connected: bool,
     runtime_enabled: bool,
 }
@@ -40,7 +42,10 @@ pub struct CefTexture2D {
 #[godot_api]
 impl ITexture2D for CefTexture2D {
     fn init(base: Base<Texture2D>) -> Self {
-        let mut texture = Self {
+        let frame_hook_callable = base.to_init_gd().callable("_on_frame_pre_draw");
+        RenderingServer::singleton().connect("frame_pre_draw", &frame_hook_callable);
+
+        Self {
             base,
             app: App::default(),
             url: "https://google.com".into(),
@@ -51,11 +56,16 @@ impl ITexture2D for CefTexture2D {
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
             last_max_fps: 0,
-            frame_hook_connected: false,
+            frame_hook_callable: Some(frame_hook_callable),
+            frame_hook_connected: true,
             runtime_enabled: true,
-        };
-        texture.ensure_frame_hook();
-        texture
+        }
+    }
+
+    fn on_notification(&mut self, what: ObjectNotification) {
+        if what == ObjectNotification::PREDELETE {
+            self.cleanup_instance()
+        }
     }
 
     fn get_width(&self) -> i32 {
@@ -157,21 +167,16 @@ impl CefTexture2D {
         self.cleanup_instance();
     }
 
-    fn ensure_frame_hook(&mut self) {
-        if self.frame_hook_connected {
-            return;
-        }
-        let callable = self.base().callable("_on_frame_pre_draw");
-        RenderingServer::singleton().connect("frame_pre_draw", &callable);
-        self.frame_hook_connected = true;
-    }
-
     fn disconnect_frame_hook(&mut self) {
         if !self.frame_hook_connected {
             return;
         }
-        let callable = self.base().callable("_on_frame_pre_draw");
-        RenderingServer::singleton().disconnect("frame_pre_draw", &callable);
+
+        if let Some(callable) = self.frame_hook_callable.as_ref() {
+            RenderingServer::singleton().disconnect("frame_pre_draw", callable);
+        }
+
+        self.frame_hook_callable = None;
         self.frame_hook_connected = false;
     }
 
@@ -215,6 +220,9 @@ impl CefTexture2D {
         }
         self.last_size = logical_size;
         self.last_dpi = dpi;
+        // Tell Godot this custom Texture2D now has a valid backing resource.
+        // Without this, Sprite2D may keep an early invalid RID cached.
+        self.base_mut().emit_changed();
     }
 
     fn cleanup_instance(&mut self) {
@@ -227,6 +235,8 @@ impl CefTexture2D {
             return;
         };
         let _ = backend::update_primary_texture(state, "CefTexture2D");
+        // Keep Texture2D consumers in sync with updated frame contents.
+        self.base_mut().emit_changed();
     }
 
     fn drain_event_queues(&self) {

@@ -529,7 +529,21 @@ fn create_software_browser(
         pending_permission_aggregates.clone(),
     );
 
-    let texture = ImageTexture::new_gd();
+    let mut texture = ImageTexture::new_gd();
+    // Avoid Godot's magenta placeholder while waiting for the first CEF paint.
+    let initial_bytes =
+        vec![0u8; (pixel_width.max(1) as usize) * (pixel_height.max(1) as usize) * 4];
+    let initial_byte_array = PackedByteArray::from(initial_bytes.as_slice());
+    if let Some(initial_image) = Image::create_from_data(
+        pixel_width.max(1),
+        pixel_height.max(1),
+        false,
+        ImageFormat::RGBA8,
+        &initial_byte_array,
+    ) {
+        texture.set_image(&initial_image);
+    }
+
     let cef_render_handler =
         webrender::SoftwareOsrHandler::build(render_handler, queues.event_queues.clone());
     let mut client = webrender::CefClientImpl::build(
