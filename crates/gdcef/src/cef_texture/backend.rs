@@ -423,9 +423,11 @@ pub(crate) fn try_create_browser(
 
 pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd<Texture2Drd>>) {
     if app.state.is_none() {
+        app.mark_browser_closed();
         app.release_cef_if_retained();
         return;
     }
+    app.mark_browser_closing();
 
     if let Some(state) = &app.state
         && let Ok(mut pending) = state.pending_permission_requests.lock()
@@ -470,6 +472,7 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
     }
 
     app.clear_runtime_state();
+    app.mark_browser_closed();
     app.release_cef_if_retained();
 }
 

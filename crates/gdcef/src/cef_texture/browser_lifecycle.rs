@@ -1,4 +1,5 @@
 use super::{CefTexture, backend};
+use crate::browser::LifecycleState;
 use crate::error::CefError;
 use godot::prelude::*;
 
@@ -7,6 +8,15 @@ impl CefTexture {
         if self.app.state.is_some() {
             godot::global::godot_warn!(
                 "[CefTexture] Cleanup invariant violation: runtime state not fully cleared"
+            );
+        }
+        if !matches!(
+            self.app.lifecycle_state(),
+            LifecycleState::Closed | LifecycleState::Retained
+        ) {
+            godot::global::godot_warn!(
+                "[CefTexture] Cleanup invariant violation: unexpected lifecycle state {:?}",
+                self.app.lifecycle_state()
             );
         }
     }
@@ -43,6 +53,9 @@ impl CefTexture {
         if self.app.state.is_some() {
             return Ok(());
         }
+        if !self.app.begin_browser_create() {
+            return Ok(());
+        }
 
         let logical_size = self.base().get_size();
         let dpi = self.get_pixel_scale_factor();
@@ -56,7 +69,11 @@ impl CefTexture {
             popup_policy: self.popup_policy,
             log_prefix: "CefTexture",
         };
-        backend::try_create_browser(&mut self.app, &params)?;
+        if let Err(err) = backend::try_create_browser(&mut self.app, &params) {
+            self.app.mark_browser_closed();
+            return Err(err);
+        }
+        self.app.mark_browser_running();
         if let Some(state) = self.app.state.as_ref() {
             let texture = state.render_mode.texture_2d();
             self.base_mut().set_texture(&texture);

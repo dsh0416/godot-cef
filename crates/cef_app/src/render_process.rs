@@ -10,6 +10,10 @@ use cef::{
     wrap_render_process_handler,
 };
 
+use crate::ipc_contract::{
+    ROUTE_IPC_BINARY_GODOT_TO_RENDERER, ROUTE_IPC_DATA_GODOT_TO_RENDERER,
+    ROUTE_IPC_GODOT_TO_RENDERER, ROUTE_TRIGGER_IME,
+};
 use crate::v8_handlers::{
     IpcListenerSet, OsrImeCaretHandler, OsrImeCaretHandlerBuilder, OsrIpcBinaryHandler,
     OsrIpcBinaryHandlerBuilder, OsrIpcDataHandler, OsrIpcDataHandlerBuilder, OsrIpcHandler,
@@ -113,7 +117,7 @@ wrap_render_process_handler! {
             if let Some(node) = node
                 && node.is_editable() == 1 {
                     // send to the browser process to activate IME
-                    let route = cef::CefStringUtf16::from("triggerIme");
+                    let route = cef::CefStringUtf16::from(ROUTE_TRIGGER_IME);
                     let process_message = process_message_create(Some(&route));
                     if let Some(mut process_message) = process_message {
                         if let Some(argument_list) = process_message.argument_list() {
@@ -130,7 +134,7 @@ wrap_render_process_handler! {
                 }
 
             // send to the browser process to deactivate IME
-            let route = cef::CefStringUtf16::from("triggerIme");
+            let route = cef::CefStringUtf16::from(ROUTE_TRIGGER_IME);
             let process_message = process_message_create(Some(&route));
             if let Some(mut process_message) = process_message {
                 if let Some(argument_list) = process_message.argument_list() {
@@ -156,7 +160,7 @@ wrap_render_process_handler! {
             let route = CefStringUtf16::from(&message.name()).to_string();
 
             match route.as_str() {
-                "ipcGodotToRenderer" => {
+                ROUTE_IPC_GODOT_TO_RENDERER => {
                     if let Some(args) = message.argument_list() {
                         let msg_cef = args.string(0);
                         let msg_str = CefStringUtf16::from(&msg_cef);
@@ -172,7 +176,7 @@ wrap_render_process_handler! {
                     }
                     return 1;
                 }
-                "ipcBinaryGodotToRenderer" => {
+                ROUTE_IPC_BINARY_GODOT_TO_RENDERER => {
                     if let Some(args) = message.argument_list()
                         && let Some(binary_value) = args.binary(0) {
                             let size = binary_value.size();
@@ -195,7 +199,7 @@ wrap_render_process_handler! {
                         }
                     return 1;
                 }
-                "ipcDataGodotToRenderer" => {
+                ROUTE_IPC_DATA_GODOT_TO_RENDERER => {
                     if let Some(args) = message.argument_list()
                         && let Some(binary_value) = args.binary(0)
                     {

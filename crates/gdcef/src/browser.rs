@@ -380,6 +380,17 @@ pub struct BrowserState {
 /// Contains an optional browser state (present when browser is active)
 /// and drag state that persists across browser lifecycle.
 /// Local Godot state (change detection, IME widgets) lives on CefTexture directly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LifecycleState {
+    #[default]
+    Uninitialized,
+    Retained,
+    Creating,
+    Running,
+    Closing,
+    Closed,
+}
+
 #[derive(Default)]
 pub struct App {
     /// Active browser state, present when a browser instance is running.
@@ -388,6 +399,8 @@ pub struct App {
     pub drag_state: DragState,
     /// Tracks whether this instance currently holds one `cef_retain()` reference.
     pub cef_retained: bool,
+    /// Tracks browser lifecycle transitions for invariant checks.
+    lifecycle_state: LifecycleState,
 }
 
 impl App {
@@ -406,16 +419,52 @@ impl App {
         self.state.as_ref().and_then(|s| s.browser.host())
     }
 
+    pub fn lifecycle_state(&self) -> LifecycleState {
+        self.lifecycle_state
+    }
+
     /// Clears per-instance runtime state. This is used during `CefTexture` cleanup
     /// and can be reused by tests as a deterministic reset point.
     pub fn clear_runtime_state(&mut self) {
         self.state = None;
         self.drag_state = Default::default();
+        if !self.cef_retained {
+            self.lifecycle_state = LifecycleState::Closed;
+        }
     }
 
     /// Marks that this instance has successfully called `cef_retain()`.
     pub fn mark_cef_retained(&mut self) {
         self.cef_retained = true;
+        self.lifecycle_state = LifecycleState::Retained;
+    }
+
+    /// Marks transition into browser creation.
+    pub fn begin_browser_create(&mut self) -> bool {
+        if matches!(
+            self.lifecycle_state,
+            LifecycleState::Creating | LifecycleState::Running
+        ) {
+            return false;
+        }
+        self.lifecycle_state = LifecycleState::Creating;
+        true
+    }
+
+    pub fn mark_browser_running(&mut self) {
+        self.lifecycle_state = LifecycleState::Running;
+    }
+
+    pub fn mark_browser_closing(&mut self) {
+        self.lifecycle_state = LifecycleState::Closing;
+    }
+
+    pub fn mark_browser_closed(&mut self) {
+        self.lifecycle_state = if self.cef_retained {
+            LifecycleState::Retained
+        } else {
+            LifecycleState::Closed
+        };
     }
 
     /// Releases CEF only when this instance currently owns a retain reference.
@@ -423,6 +472,9 @@ impl App {
         if self.cef_retained {
             crate::cef_init::cef_release();
             self.cef_retained = false;
+            if self.state.is_none() {
+                self.lifecycle_state = LifecycleState::Closed;
+            }
         }
     }
 }
@@ -446,5 +498,29 @@ mod tests {
             assert!(!app.drag_state.is_dragging_from_browser);
             assert_eq!(app.drag_state.allowed_ops, 0);
         }
+    }
+
+    #[test]
+    fn lifecycle_state_transitions_are_explicit() {
+        let mut app = App::default();
+        assert_eq!(app.lifecycle_state(), LifecycleState::Uninitialized);
+
+        app.mark_cef_retained();
+        assert_eq!(app.lifecycle_state(), LifecycleState::Retained);
+
+        assert!(app.begin_browser_create());
+        assert_eq!(app.lifecycle_state(), LifecycleState::Creating);
+
+        app.mark_browser_running();
+        assert_eq!(app.lifecycle_state(), LifecycleState::Running);
+
+        app.mark_browser_closing();
+        assert_eq!(app.lifecycle_state(), LifecycleState::Closing);
+
+        app.mark_browser_closed();
+        assert_eq!(app.lifecycle_state(), LifecycleState::Retained);
+
+        app.release_cef_if_retained();
+        assert_eq!(app.lifecycle_state(), LifecycleState::Closed);
     }
 }

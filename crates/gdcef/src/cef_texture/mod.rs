@@ -1,12 +1,13 @@
 pub(crate) mod backend;
 mod browser_lifecycle;
+mod cookie_ops;
 mod ime;
+mod permission_ops;
 mod rendering;
 mod signals;
 
 use cef::{
-    self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, ImplListValue,
-    ImplMediaAccessCallback, ImplPermissionPromptCallback, ImplProcessMessage,
+    self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, ImplListValue, ImplProcessMessage,
     do_message_loop_work,
 };
 use godot::classes::notify::ControlNotification;
@@ -21,6 +22,10 @@ use std::collections::HashMap;
 
 use crate::browser::App;
 use crate::{cef_init, input};
+use cef_app::ipc_contract::{
+    ROUTE_IPC_BINARY_GODOT_TO_RENDERER, ROUTE_IPC_DATA_GODOT_TO_RENDERER,
+    ROUTE_IPC_GODOT_TO_RENDERER,
+};
 
 #[derive(GodotClass)]
 #[class(base=TextureRect)]
@@ -377,143 +382,6 @@ impl CefTexture {
     }
 
     #[func]
-    /// Sends a message into the page via `window.onIpcMessage`.
-    ///
-    /// This is intentionally separate from [`eval`]: callers could achieve a
-    /// similar effect with `eval("window.onIpcMessage(...);")`, but this
-    /// helper enforces a consistent IPC pattern (`window.onIpcMessage(message)`).
-    ///
-    /// Uses native CEF process messaging for efficient transfer without
-    /// script injection overhead.
-    ///
-    /// Use this when you want structured IPC into the page, and `eval` when
-    /// you truly need arbitrary JavaScript execution.
-    pub fn send_ipc_message(&mut self, message: GString) {
-        let Some(state) = self.app.state.as_ref() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no browser");
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no main frame");
-            return;
-        };
-
-        let route = cef::CefStringUtf16::from("ipcGodotToRenderer");
-        let msg_str: cef::CefStringUtf16 = message.to_string().as_str().into();
-
-        if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
-            if let Some(argument_list) = process_message.argument_list() {
-                argument_list.set_string(0, Some(&msg_str));
-            }
-            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-        }
-    }
-
-    #[func]
-    /// Sends binary data into the page via `window.onIpcBinaryMessage`.
-    ///
-    /// The data will be delivered as an ArrayBuffer to the JavaScript callback
-    /// `window.onIpcBinaryMessage(arrayBuffer)` if it is registered.
-    ///
-    /// Uses native CEF process messaging with BinaryValue for zero-copy
-    /// binary transfer without encoding overhead.
-    pub fn send_ipc_binary_message(&mut self, data: PackedByteArray) {
-        let Some(state) = self.app.state.as_ref() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send binary IPC message: no browser");
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send binary IPC message: no main frame"
-            );
-            return;
-        };
-
-        let route = cef::CefStringUtf16::from("ipcBinaryGodotToRenderer");
-        let bytes = data.to_vec();
-
-        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send binary IPC message: failed to create BinaryValue"
-            );
-            return;
-        };
-
-        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send binary IPC message: failed to create process message"
-            );
-            return;
-        };
-
-        let Some(argument_list) = process_message.argument_list() else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send binary IPC message: failed to get argument list"
-            );
-            return;
-        };
-
-        argument_list.set_binary(0, Some(&mut binary_value));
-        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-    }
-
-    #[func]
-    /// Sends typed data into the page via the CBOR-based IPC lane.
-    ///
-    /// Supported inputs include primitive types, arrays, dictionaries and
-    /// packed byte arrays. Unsupported Godot-specific types are tagged as
-    /// metadata maps to keep transport failure-safe.
-    pub fn send_ipc_data(&mut self, data: Variant) {
-        let Some(state) = self.app.state.as_ref() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send IPC data: no browser");
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send IPC data: no main frame");
-            return;
-        };
-
-        let bytes = match crate::ipc_data::encode_variant_to_cbor_bytes(&data) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                godot::global::godot_warn!("[CefTexture] Cannot encode IPC data: {}", err);
-                return;
-            }
-        };
-
-        if bytes.len() > crate::ipc_data::max_ipc_data_bytes() {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send IPC data: payload too large ({} bytes)",
-                bytes.len()
-            );
-            return;
-        }
-
-        let route = cef::CefStringUtf16::from("ipcDataGodotToRenderer");
-        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send IPC data: failed to create BinaryValue"
-            );
-            return;
-        };
-        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send IPC data: failed to create process message"
-            );
-            return;
-        };
-        let Some(argument_list) = process_message.argument_list() else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send IPC data: failed to get argument list"
-            );
-            return;
-        };
-
-        argument_list.set_binary(0, Some(&mut binary_value));
-        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-    }
-
-    #[func]
     /// Navigates back in the browser history.
     pub fn go_back(&mut self) {
         if let Some(browser) = self.app.browser_mut() {
@@ -682,6 +550,143 @@ impl CefTexture {
     }
 
     #[func]
+    /// Sends a message into the page via `window.onIpcMessage`.
+    ///
+    /// This is intentionally separate from [`Self::eval`]: callers could achieve a
+    /// similar effect with `eval("window.onIpcMessage(...);")`, but this
+    /// helper enforces a consistent IPC pattern (`window.onIpcMessage(message)`).
+    ///
+    /// Uses native CEF process messaging for efficient transfer without
+    /// script injection overhead.
+    ///
+    /// Use this when you want structured IPC into the page, and `eval` when
+    /// you truly need arbitrary JavaScript execution.
+    pub fn send_ipc_message(&mut self, message: GString) {
+        let Some(state) = self.app.state.as_ref() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no browser");
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no main frame");
+            return;
+        };
+
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_GODOT_TO_RENDERER);
+        let msg_str: cef::CefStringUtf16 = message.to_string().as_str().into();
+
+        if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
+            if let Some(argument_list) = process_message.argument_list() {
+                argument_list.set_string(0, Some(&msg_str));
+            }
+            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+        }
+    }
+
+    #[func]
+    /// Sends binary data into the page via `window.onIpcBinaryMessage`.
+    ///
+    /// The data will be delivered as an ArrayBuffer to the JavaScript callback
+    /// `window.onIpcBinaryMessage(arrayBuffer)` if it is registered.
+    ///
+    /// Uses native CEF process messaging with BinaryValue for zero-copy
+    /// binary transfer without encoding overhead.
+    pub fn send_ipc_binary_message(&mut self, data: PackedByteArray) {
+        let Some(state) = self.app.state.as_ref() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send binary IPC message: no browser");
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send binary IPC message: no main frame"
+            );
+            return;
+        };
+
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_BINARY_GODOT_TO_RENDERER);
+        let bytes = data.to_vec();
+
+        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send binary IPC message: failed to create BinaryValue"
+            );
+            return;
+        };
+
+        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send binary IPC message: failed to create process message"
+            );
+            return;
+        };
+
+        let Some(argument_list) = process_message.argument_list() else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send binary IPC message: failed to get argument list"
+            );
+            return;
+        };
+
+        argument_list.set_binary(0, Some(&mut binary_value));
+        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+    }
+
+    #[func]
+    /// Sends typed data into the page via the CBOR-based IPC lane.
+    ///
+    /// Supported inputs include primitive types, arrays, dictionaries and
+    /// packed byte arrays. Unsupported Godot-specific types are tagged as
+    /// metadata maps to keep transport failure-safe.
+    pub fn send_ipc_data(&mut self, data: Variant) {
+        let Some(state) = self.app.state.as_ref() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send IPC data: no browser");
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture] Cannot send IPC data: no main frame");
+            return;
+        };
+
+        let bytes = match crate::ipc_data::encode_variant_to_cbor_bytes(&data) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                godot::global::godot_warn!("[CefTexture] Cannot encode IPC data: {}", err);
+                return;
+            }
+        };
+
+        if bytes.len() > crate::ipc_data::max_ipc_data_bytes() {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send IPC data: payload too large ({} bytes)",
+                bytes.len()
+            );
+            return;
+        }
+
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_DATA_GODOT_TO_RENDERER);
+        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send IPC data: failed to create BinaryValue"
+            );
+            return;
+        };
+        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send IPC data: failed to create process message"
+            );
+            return;
+        };
+        let Some(argument_list) = process_message.argument_list() else {
+            godot::global::godot_warn!(
+                "[CefTexture] Cannot send IPC data: failed to get argument list"
+            );
+            return;
+        };
+
+        argument_list.set_binary(0, Some(&mut binary_value));
+        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+    }
+
+    #[func]
     /// Mutes or unmutes audio from this browser instance.
     pub fn set_audio_muted(&mut self, muted: bool) {
         if let Some(host) = self.app.host() {
@@ -795,33 +800,6 @@ impl CefTexture {
     #[func]
     pub fn is_audio_capture_enabled(&self) -> bool {
         crate::settings::is_audio_capture_enabled()
-    }
-
-    /// Called when the IME proxy LineEdit text changes during composition.
-    #[func]
-    fn on_ime_proxy_text_changed(&mut self, new_text: GString) {
-        self.on_ime_proxy_text_changed_impl(new_text);
-    }
-
-    #[func]
-    fn on_ime_proxy_focus_exited(&mut self) {
-        self.on_ime_proxy_focus_exited_impl();
-    }
-
-    #[func]
-    fn _check_ime_focus_after_exit(&mut self) {
-        self.check_ime_focus_after_exit_impl();
-    }
-
-    fn get_pixel_scale_factor(&self) -> f32 {
-        self.base()
-            .get_viewport()
-            .map(|viewport| viewport.get_stretch_transform().a.x)
-            .unwrap_or(1.0)
-    }
-
-    fn get_device_scale_factor(&self) -> f32 {
-        crate::utils::get_display_scale_factor()
     }
 
     #[func]
@@ -956,187 +934,19 @@ impl CefTexture {
 
     #[func]
     pub fn grant_permission(&self, request_id: i64) -> bool {
-        self.resolve_permission_request(request_id, true)
+        permission_ops::resolve_permission_request(&self.app, request_id, true)
     }
 
     #[func]
     pub fn deny_permission(&self, request_id: i64) -> bool {
-        self.resolve_permission_request(request_id, false)
-    }
-
-    fn media_permission_none_mask() -> u32 {
-        #[cfg(target_os = "windows")]
-        {
-            cef::MediaAccessPermissionTypes::NONE.get_raw() as u32
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            cef::MediaAccessPermissionTypes::NONE.get_raw()
-        }
-    }
-
-    fn resolve_permission_request(&self, request_id: i64, grant: bool) -> bool {
-        use crate::browser::{PendingPermissionAggregate, PendingPermissionDecision};
-
-        let Some(state) = self.app.state.as_ref() else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot resolve permission request {}: no active browser",
-                request_id
-            );
-            return false;
-        };
-
-        let (decision, remaining_for_callback) = {
-            let Ok(mut pending) = state.pending_permission_requests.lock() else {
-                godot::global::godot_warn!(
-                    "[CefTexture] Failed to lock pending permission requests"
-                );
-                return false;
-            };
-            let Some(decision) = pending.remove(&request_id) else {
-                return {
-                    godot::global::godot_warn!(
-                        "[CefTexture] Unknown or stale permission request id: {}",
-                        request_id
-                    );
-                    false
-                };
-            };
-
-            let token = match &decision {
-                PendingPermissionDecision::Media { callback_token, .. } => *callback_token,
-                PendingPermissionDecision::Prompt { callback_token, .. } => *callback_token,
-            };
-            let remaining_for_callback = pending
-                .values()
-                .filter(|entry| match entry {
-                    PendingPermissionDecision::Media { callback_token, .. } => {
-                        *callback_token == token
-                    }
-                    PendingPermissionDecision::Prompt { callback_token, .. } => {
-                        *callback_token == token
-                    }
-                })
-                .count();
-
-            (decision, remaining_for_callback)
-        };
-
-        let mut aggregates = match state.pending_permission_aggregates.lock() {
-            Ok(aggregates) => aggregates,
-            Err(_) => {
-                godot::global::godot_warn!(
-                    "[CefTexture] Failed to lock pending permission aggregates"
-                );
-                return false;
-            }
-        };
-
-        match decision {
-            PendingPermissionDecision::Media {
-                callback,
-                permission_bit,
-                callback_token,
-            } => {
-                let entry = aggregates
-                    .entry(callback_token)
-                    .or_insert_with(|| PendingPermissionAggregate::new_media(callback.clone(), 0));
-                match entry {
-                    PendingPermissionAggregate::Media { granted_mask, .. } => {
-                        if grant {
-                            *granted_mask |= permission_bit;
-                        }
-                    }
-                    PendingPermissionAggregate::Prompt { .. } => {
-                        godot::global::godot_warn!(
-                            "[CefTexture] Permission aggregate type mismatch for callback token {}",
-                            callback_token
-                        );
-                        *entry = PendingPermissionAggregate::new_media(
-                            callback.clone(),
-                            if grant { permission_bit } else { 0 },
-                        );
-                    }
-                }
-
-                if remaining_for_callback == 0
-                    && let Some(PendingPermissionAggregate::Media {
-                        callback,
-                        granted_mask,
-                    }) = aggregates.remove(&callback_token)
-                {
-                    let allowed_mask = if granted_mask == 0 {
-                        Self::media_permission_none_mask()
-                    } else {
-                        granted_mask
-                    };
-                    callback.cont(allowed_mask);
-                }
-            }
-            PendingPermissionDecision::Prompt {
-                callback,
-                callback_token,
-                ..
-            } => {
-                let entry = aggregates.entry(callback_token).or_insert_with(|| {
-                    PendingPermissionAggregate::new_prompt(callback.clone(), true)
-                });
-                match entry {
-                    PendingPermissionAggregate::Prompt { all_granted, .. } => {
-                        *all_granted &= grant;
-                    }
-                    PendingPermissionAggregate::Media { .. } => {
-                        godot::global::godot_warn!(
-                            "[CefTexture] Permission aggregate type mismatch for callback token {}",
-                            callback_token
-                        );
-                        *entry = PendingPermissionAggregate::new_prompt(callback.clone(), grant);
-                    }
-                }
-
-                if remaining_for_callback == 0
-                    && let Some(PendingPermissionAggregate::Prompt {
-                        callback,
-                        all_granted,
-                    }) = aggregates.remove(&callback_token)
-                {
-                    let result = if all_granted {
-                        cef::PermissionRequestResult::ACCEPT
-                    } else {
-                        cef::PermissionRequestResult::DENY
-                    };
-                    callback.cont(result);
-                }
-            }
-        }
-
-        true
-    }
-
-    // ── Cookie & Session Management ─────────────────────────────────────────
-
-    /// Gets the `CookieManager` for this browser's `RequestContext`.
-    fn cookie_manager(&self) -> Option<cef::CookieManager> {
-        use cef::ImplBrowserHost;
-        let host = self.app.host()?;
-        let ctx = host.request_context()?;
-        use cef::ImplRequestContext;
-        ctx.cookie_manager(None)
+        permission_ops::resolve_permission_request(&self.app, request_id, false)
     }
 
     /// Retrieves all cookies. Results are emitted via `cookies_received` signal.
     /// Returns `true` if the request was initiated, `false` on failure.
     #[func]
     pub fn get_all_cookies(&self) -> bool {
-        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
-            return false;
-        };
-        let Some(manager) = self.cookie_manager() else {
-            return false;
-        };
-        use cef::ImplCookieManager;
-        let mut visitor = crate::cookie::CookieVisitorImpl::build(event_queues.clone());
-        manager.visit_all_cookies(Some(&mut visitor)) != 0
+        cookie_ops::get_all_cookies(&self.app)
     }
 
     /// Retrieves cookies for a specific URL. Results are emitted via `cookies_received` signal.
@@ -1144,16 +954,7 @@ impl CefTexture {
     /// Returns `true` if the request was initiated, `false` on failure.
     #[func]
     pub fn get_cookies(&self, url: GString, include_http_only: bool) -> bool {
-        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
-            return false;
-        };
-        let Some(manager) = self.cookie_manager() else {
-            return false;
-        };
-        use cef::ImplCookieManager;
-        let url_cef = cef::CefStringUtf16::from(url.to_string().as_str());
-        let mut visitor = crate::cookie::CookieVisitorImpl::build(event_queues.clone());
-        manager.visit_url_cookies(Some(&url_cef), include_http_only as _, Some(&mut visitor)) != 0
+        cookie_ops::get_cookies(&self.app, url, include_http_only)
     }
 
     /// Sets a cookie for the given URL.
@@ -1171,27 +972,7 @@ impl CefTexture {
         secure: bool,
         httponly: bool,
     ) -> bool {
-        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
-            return false;
-        };
-        let Some(manager) = self.cookie_manager() else {
-            return false;
-        };
-        use cef::ImplCookieManager;
-
-        let url_cef = cef::CefStringUtf16::from(url.to_string().as_str());
-        let cookie = cef::Cookie {
-            size: std::mem::size_of::<cef::Cookie>(),
-            name: cef::CefStringUtf16::from(name.to_string().as_str()),
-            value: cef::CefStringUtf16::from(value.to_string().as_str()),
-            domain: cef::CefStringUtf16::from(domain.to_string().as_str()),
-            path: cef::CefStringUtf16::from(path.to_string().as_str()),
-            secure: secure as _,
-            httponly: httponly as _,
-            ..Default::default()
-        };
-        let mut callback = crate::cookie::SetCookieCallbackImpl::build(event_queues.clone());
-        manager.set_cookie(Some(&url_cef), Some(&cookie), Some(&mut callback)) != 0
+        cookie_ops::set_cookie(&self.app, url, name, value, domain, path, secure, httponly)
     }
 
     /// Deletes cookies matching the given URL and/or name.
@@ -1200,28 +981,7 @@ impl CefTexture {
     /// Returns `true` if the request was initiated, `false` on failure.
     #[func]
     pub fn delete_cookies(&self, url: GString, cookie_name: GString) -> bool {
-        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
-            return false;
-        };
-        let Some(manager) = self.cookie_manager() else {
-            return false;
-        };
-        use cef::ImplCookieManager;
-
-        let url_str = url.to_string();
-        let name_str = cookie_name.to_string();
-        let url_opt = if url_str.is_empty() {
-            None
-        } else {
-            Some(cef::CefStringUtf16::from(url_str.as_str()))
-        };
-        let name_opt = if name_str.is_empty() {
-            None
-        } else {
-            Some(cef::CefStringUtf16::from(name_str.as_str()))
-        };
-        let mut callback = crate::cookie::DeleteCookiesCallbackImpl::build(event_queues.clone());
-        manager.delete_cookies(url_opt.as_ref(), name_opt.as_ref(), Some(&mut callback)) != 0
+        cookie_ops::delete_cookies(&self.app, url, cookie_name)
     }
 
     /// Convenience method to delete all cookies.
@@ -1236,14 +996,33 @@ impl CefTexture {
     /// Returns `true` if the request was initiated, `false` on failure.
     #[func]
     pub fn flush_cookies(&self) -> bool {
-        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
-            return false;
-        };
-        let Some(manager) = self.cookie_manager() else {
-            return false;
-        };
-        use cef::ImplCookieManager;
-        let mut callback = crate::cookie::FlushCookieStoreCallbackImpl::build(event_queues.clone());
-        manager.flush_store(Some(&mut callback)) != 0
+        cookie_ops::flush_cookies(&self.app)
+    }
+
+    /// Called when the IME proxy LineEdit text changes during composition.
+    #[func]
+    fn on_ime_proxy_text_changed(&mut self, new_text: GString) {
+        self.on_ime_proxy_text_changed_impl(new_text);
+    }
+
+    #[func]
+    fn on_ime_proxy_focus_exited(&mut self) {
+        self.on_ime_proxy_focus_exited_impl();
+    }
+
+    #[func]
+    fn _check_ime_focus_after_exit(&mut self) {
+        self.check_ime_focus_after_exit_impl();
+    }
+
+    fn get_pixel_scale_factor(&self) -> f32 {
+        self.base()
+            .get_viewport()
+            .map(|viewport| viewport.get_stretch_transform().a.x)
+            .unwrap_or(1.0)
+    }
+
+    fn get_device_scale_factor(&self) -> f32 {
+        crate::utils::get_display_scale_factor()
     }
 }

@@ -2,7 +2,7 @@ use ciborium::value::Value as CborValue;
 use godot::builtin::{Array, PackedByteArray, VarDictionary, Variant, VariantType};
 use godot::prelude::*;
 
-const MAX_IPC_DATA_BYTES: usize = 8 * 1024 * 1024;
+const MAX_IPC_DATA_BYTES: usize = cef_app::ipc_contract::MAX_IPC_DATA_BYTES;
 const TYPE_KEY: &str = "__godot_type";
 const VALUE_KEY: &str = "__godot_value";
 

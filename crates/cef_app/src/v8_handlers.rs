@@ -9,8 +9,10 @@ use cef::{
     v8_value_create_object, wrap_v8_handler,
 };
 
-// Keep this in sync with crates/gdcef/src/ipc_data.rs.
-const MAX_IPC_DATA_BYTES: usize = 8 * 1024 * 1024;
+use crate::ipc_contract::{
+    MAX_IPC_DATA_BYTES, ROUTE_IME_CARET_POSITION, ROUTE_IPC_BINARY_RENDERER_TO_GODOT,
+    ROUTE_IPC_DATA_RENDERER_TO_GODOT, ROUTE_IPC_RENDERER_TO_GODOT,
+};
 
 #[derive(Clone)]
 pub(crate) struct OsrIpcHandler {
@@ -54,7 +56,7 @@ wrap_v8_handler! {
                             return 0;
                         }
 
-                        let route = CefStringUtf16::from("ipcRendererToGodot");
+                        let route = CefStringUtf16::from(ROUTE_IPC_RENDERER_TO_GODOT);
                         let msg_str = CefStringUtf16::from(&arg.string_value());
                         if let Some(frame) = self.handler.frame.as_ref() {
                             let frame = frame.lock().unwrap();
@@ -146,7 +148,7 @@ wrap_v8_handler! {
                             let frame = frame
                                 .lock()
                                 .expect("OsrIpcDataHandler: failed to lock frame mutex (poisoned)");
-                            let route = CefStringUtf16::from("ipcDataRendererToGodot");
+                            let route = CefStringUtf16::from(ROUTE_IPC_DATA_RENDERER_TO_GODOT);
                             if let Some(mut process_message) = process_message_create(Some(&route))
                                 && let Some(argument_list) = process_message.argument_list()
                             {
@@ -401,7 +403,7 @@ wrap_v8_handler! {
                         .lock()
                         .expect("OsrIpcHandler: failed to lock frame mutex (poisoned)");
 
-                    let route = CefStringUtf16::from("ipcBinaryRendererToGodot");
+                    let route = CefStringUtf16::from(ROUTE_IPC_BINARY_RENDERER_TO_GODOT);
                     let process_message = process_message_create(Some(&route));
                     if let Some(mut process_message) = process_message {
                         if let Some(argument_list) = process_message.argument_list() {
@@ -632,7 +634,7 @@ wrap_v8_handler! {
                 if let Some(frame) = self.handler.frame.as_ref() {
                     match frame.lock() {
                         Ok(frame) => {
-                            let route = CefStringUtf16::from("imeCaretPosition");
+                            let route = CefStringUtf16::from(ROUTE_IME_CARET_POSITION);
                             let process_message = process_message_create(Some(&route));
                             if let Some(mut process_message) = process_message {
                                 if let Some(argument_list) = process_message.argument_list() {
