@@ -155,6 +155,12 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
+    fn event_position_to_local(&self, position: Vector2) -> Vector2 {
+        // `input()` delivers positions in viewport space for this node path, while
+        // CEF expects view-local coordinates relative to the browser texture.
+        position - self.base().get_global_position()
+    }
+
     #[signal]
     fn ipc_message(message: GString);
 
@@ -301,28 +307,36 @@ impl CefTexture {
             return;
         };
 
-        if let Ok(mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
+        if let Ok(mut mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
+            let local_position = self.event_position_to_local(mouse_button.get_position());
+            mouse_button.set_position(local_position);
             input::handle_mouse_button(
                 &host,
                 &mouse_button,
                 self.get_pixel_scale_factor(),
                 self.get_device_scale_factor(),
             );
-        } else if let Ok(mouse_motion) = event.clone().try_cast::<InputEventMouseMotion>() {
+        } else if let Ok(mut mouse_motion) = event.clone().try_cast::<InputEventMouseMotion>() {
+            let local_position = self.event_position_to_local(mouse_motion.get_position());
+            mouse_motion.set_position(local_position);
             input::handle_mouse_motion(
                 &host,
                 &mouse_motion,
                 self.get_pixel_scale_factor(),
                 self.get_device_scale_factor(),
             );
-        } else if let Ok(pan_gesture) = event.clone().try_cast::<InputEventPanGesture>() {
+        } else if let Ok(mut pan_gesture) = event.clone().try_cast::<InputEventPanGesture>() {
+            let local_position = self.event_position_to_local(pan_gesture.get_position());
+            pan_gesture.set_position(local_position);
             input::handle_pan_gesture(
                 &host,
                 &pan_gesture,
                 self.get_pixel_scale_factor(),
                 self.get_device_scale_factor(),
             );
-        } else if let Ok(screen_touch) = event.clone().try_cast::<InputEventScreenTouch>() {
+        } else if let Ok(mut screen_touch) = event.clone().try_cast::<InputEventScreenTouch>() {
+            let local_position = self.event_position_to_local(screen_touch.get_position());
+            screen_touch.set_position(local_position);
             input::handle_screen_touch(
                 &host,
                 &screen_touch,
@@ -331,7 +345,9 @@ impl CefTexture {
                 &mut self.touch_id_map,
                 &mut self.next_touch_id,
             );
-        } else if let Ok(screen_drag) = event.clone().try_cast::<InputEventScreenDrag>() {
+        } else if let Ok(mut screen_drag) = event.clone().try_cast::<InputEventScreenDrag>() {
+            let local_position = self.event_position_to_local(screen_drag.get_position());
+            screen_drag.set_position(local_position);
             input::handle_screen_drag(
                 &host,
                 &screen_drag,
