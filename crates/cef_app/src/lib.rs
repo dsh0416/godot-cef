@@ -1,5 +1,6 @@
 mod app;
 mod browser_process;
+pub mod ipc_contract;
 mod loader;
 mod render_handler;
 mod render_process;

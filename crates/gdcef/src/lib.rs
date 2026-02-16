@@ -16,6 +16,7 @@ mod settings;
 mod utils;
 mod vulkan_hook;
 mod webrender;
+mod webrender_ipc;
 
 use godot::init::*;
 
