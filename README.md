@@ -253,6 +253,10 @@ MIT License — Copyright 2025-2026 Delton Ding
 
 See [LICENSE](LICENSE) for details.
 
+## Related Repositories
+
+- [custom-unit-pxp](https://github.com/LemonNekoGH/custom-unit-pxp): A set of packages for the custom `pxp` unit (`px` + `var`) that can be useful for game UI workflows.
+
 ## Acknowledgments
 
 - [godot_wry](https://github.com/doceazedo/godot_wry)
