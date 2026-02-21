@@ -10,6 +10,16 @@ use std::collections::VecDeque;
 use crate::browser::{DragEvent, LoadingStateEvent};
 use crate::drag::DragDataInfo;
 
+macro_rules! emit_signal_variants {
+    ($self:expr, $name:literal $(,)?) => {{
+        $self.base_mut().emit_signal($name, &[]);
+    }};
+    ($self:expr, $name:literal, $($arg:expr),+ $(,)?) => {{
+        let args = [$(($arg).to_variant()),+];
+        $self.base_mut().emit_signal($name, &args);
+    }};
+}
+
 #[derive(GodotClass)]
 #[class(base=RefCounted)]
 pub struct DownloadRequestInfo {
@@ -190,8 +200,7 @@ impl IRefCounted for CookieInfo {
 
 impl CookieInfo {
     fn from_data(data: &crate::cookie::CookieData) -> Gd<Self> {
-        #[cfg(target_os = "windows")]
-        return Gd::from_init_fn(|base| Self {
+        Gd::from_init_fn(|base| Self {
             base,
             name: GString::from(&data.name),
             value: GString::from(&data.value),
@@ -199,21 +208,9 @@ impl CookieInfo {
             path: GString::from(&data.path),
             secure: data.secure,
             httponly: data.httponly,
-            same_site: data.same_site.get_raw(),
+            same_site: crate::cef_raw_to_i32!(data.same_site.get_raw()),
             has_expires: data.has_expires,
-        });
-        #[cfg(not(target_os = "windows"))]
-        return Gd::from_init_fn(|base| Self {
-            base,
-            name: GString::from(&data.name),
-            value: GString::from(&data.value),
-            domain: GString::from(&data.domain),
-            path: GString::from(&data.path),
-            secure: data.secure,
-            httponly: data.httponly,
-            same_site: data.same_site.get_raw() as i32,
-            has_expires: data.has_expires,
-        });
+        })
     }
 }
 
@@ -266,16 +263,14 @@ impl CefTexture {
 
     fn emit_message_signals(&mut self, messages: &VecDeque<String>) {
         for message in messages {
-            self.base_mut()
-                .emit_signal("ipc_message", &[GString::from(message).to_variant()]);
+            emit_signal_variants!(self, "ipc_message", GString::from(message));
         }
     }
 
     fn emit_binary_message_signals(&mut self, messages: &VecDeque<Vec<u8>>) {
         for data in messages {
             let byte_array = PackedByteArray::from(data.as_slice());
-            self.base_mut()
-                .emit_signal("ipc_binary_message", &[byte_array.to_variant()]);
+            emit_signal_variants!(self, "ipc_binary_message", byte_array);
         }
     }
 
@@ -297,15 +292,13 @@ impl CefTexture {
 
     fn emit_url_change_signals(&mut self, urls: &VecDeque<String>) {
         for url in urls {
-            self.base_mut()
-                .emit_signal("url_changed", &[GString::from(url).to_variant()]);
+            emit_signal_variants!(self, "url_changed", GString::from(url));
         }
     }
 
     fn emit_title_change_signals(&mut self, titles: &VecDeque<String>) {
         for title in titles {
-            self.base_mut()
-                .emit_signal("title_changed", &[GString::from(title).to_variant()]);
+            emit_signal_variants!(self, "title_changed", GString::from(title));
         }
     }
 
@@ -313,19 +306,17 @@ impl CefTexture {
         for event in events {
             match event {
                 LoadingStateEvent::Started { url } => {
-                    self.base_mut()
-                        .emit_signal("load_started", &[GString::from(url).to_variant()]);
+                    emit_signal_variants!(self, "load_started", GString::from(url));
                 }
                 LoadingStateEvent::Finished {
                     url,
                     http_status_code,
                 } => {
-                    self.base_mut().emit_signal(
+                    emit_signal_variants!(
+                        self,
                         "load_finished",
-                        &[
-                            GString::from(url).to_variant(),
-                            http_status_code.to_variant(),
-                        ],
+                        GString::from(url),
+                        http_status_code
                     );
                 }
                 LoadingStateEvent::Error {
@@ -333,13 +324,12 @@ impl CefTexture {
                     error_code,
                     error_text,
                 } => {
-                    self.base_mut().emit_signal(
+                    emit_signal_variants!(
+                        self,
                         "load_error",
-                        &[
-                            GString::from(url).to_variant(),
-                            error_code.to_variant(),
-                            GString::from(error_text).to_variant(),
-                        ],
+                        GString::from(url),
+                        error_code,
+                        GString::from(error_text)
                     );
                 }
             }
@@ -351,14 +341,13 @@ impl CefTexture {
         events: &VecDeque<crate::browser::ConsoleMessageEvent>,
     ) {
         for event in events {
-            self.base_mut().emit_signal(
+            emit_signal_variants!(
+                self,
                 "console_message",
-                &[
-                    event.level.to_variant(),
-                    GString::from(&event.message).to_variant(),
-                    GString::from(&event.source).to_variant(),
-                    event.line.to_variant(),
-                ],
+                event.level,
+                GString::from(&event.message),
+                GString::from(&event.source),
+                event.line
             );
         }
     }
@@ -374,13 +363,12 @@ impl CefTexture {
                 } => {
                     let drag_info = DragDataInfo::from_internal(drag_data);
                     let position = Vector2::new(*x as f32, *y as f32);
-                    self.base_mut().emit_signal(
+                    emit_signal_variants!(
+                        self,
                         "drag_started",
-                        &[
-                            drag_info.to_variant(),
-                            position.to_variant(),
-                            (*allowed_ops as i32).to_variant(),
-                        ],
+                        drag_info,
+                        position,
+                        *allowed_ops as i32
                     );
                     self.with_app_mut(|app| {
                         app.drag_state.is_dragging_from_browser = true;
@@ -388,15 +376,11 @@ impl CefTexture {
                     });
                 }
                 DragEvent::UpdateCursor { operation } => {
-                    self.base_mut()
-                        .emit_signal("drag_cursor_updated", &[(*operation as i32).to_variant()]);
+                    emit_signal_variants!(self, "drag_cursor_updated", *operation as i32);
                 }
                 DragEvent::Entered { drag_data, mask } => {
                     let drag_info = DragDataInfo::from_internal(drag_data);
-                    self.base_mut().emit_signal(
-                        "drag_entered",
-                        &[drag_info.to_variant(), (*mask as i32).to_variant()],
-                    );
+                    emit_signal_variants!(self, "drag_entered", drag_info, *mask as i32);
                     self.with_app_mut(|app| {
                         app.drag_state.is_drag_over = true;
                     });
@@ -407,13 +391,12 @@ impl CefTexture {
 
     fn emit_popup_request_signals(&mut self, events: &VecDeque<crate::browser::PopupRequestEvent>) {
         for event in events {
-            self.base_mut().emit_signal(
+            emit_signal_variants!(
+                self,
                 "popup_requested",
-                &[
-                    GString::from(&event.target_url).to_variant(),
-                    event.disposition.get_raw().to_variant(),
-                    event.user_gesture.to_variant(),
-                ],
+                GString::from(&event.target_url),
+                event.disposition.get_raw(),
+                event.user_gesture
             );
         }
     }
@@ -423,26 +406,24 @@ impl CefTexture {
         events: &VecDeque<crate::browser::PermissionRequestEvent>,
     ) {
         for event in events {
-            self.base_mut().emit_signal(
+            emit_signal_variants!(
+                self,
                 "permission_requested",
-                &[
-                    GString::from(&event.permission_type).to_variant(),
-                    GString::from(&event.url).to_variant(),
-                    event.request_id.to_variant(),
-                ],
+                GString::from(&event.permission_type),
+                GString::from(&event.url),
+                event.request_id
             );
         }
     }
 
     fn emit_find_result_signals(&mut self, events: &VecDeque<crate::browser::FindResultEvent>) {
         for event in events {
-            self.base_mut().emit_signal(
+            emit_signal_variants!(
+                self,
                 "find_result",
-                &[
-                    event.count.to_variant(),
-                    event.active_index.to_variant(),
-                    event.final_update.to_variant(),
-                ],
+                event.count,
+                event.active_index,
+                event.final_update
             );
         }
     }
@@ -453,19 +434,16 @@ impl CefTexture {
                 crate::cookie::CookieEvent::Received(cookies) => {
                     let array: Array<Gd<CookieInfo>> =
                         cookies.iter().map(CookieInfo::from_data).collect();
-                    self.base_mut()
-                        .emit_signal("cookies_received", &[array.to_variant()]);
+                    emit_signal_variants!(self, "cookies_received", array);
                 }
                 crate::cookie::CookieEvent::Set(success) => {
-                    self.base_mut()
-                        .emit_signal("cookie_set", &[success.to_variant()]);
+                    emit_signal_variants!(self, "cookie_set", success);
                 }
                 crate::cookie::CookieEvent::Deleted(count) => {
-                    self.base_mut()
-                        .emit_signal("cookies_deleted", &[count.to_variant()]);
+                    emit_signal_variants!(self, "cookies_deleted", count);
                 }
                 crate::cookie::CookieEvent::Flushed => {
-                    self.base_mut().emit_signal("cookies_flushed", &[]);
+                    emit_signal_variants!(self, "cookies_flushed");
                 }
             }
         }
@@ -477,8 +455,7 @@ impl CefTexture {
     ) {
         for event in events {
             let download_info = DownloadRequestInfo::from_event(event);
-            self.base_mut()
-                .emit_signal("download_requested", &[download_info.to_variant()]);
+            emit_signal_variants!(self, "download_requested", download_info);
         }
     }
 
@@ -488,8 +465,7 @@ impl CefTexture {
     ) {
         for event in events {
             let download_info = DownloadUpdateInfo::from_event(event);
-            self.base_mut()
-                .emit_signal("download_updated", &[download_info.to_variant()]);
+            emit_signal_variants!(self, "download_updated", download_info);
         }
     }
 
@@ -498,12 +474,11 @@ impl CefTexture {
         events: &VecDeque<(String, cef::TerminationStatus)>,
     ) {
         for (reason, status) in events {
-            self.base_mut().emit_signal(
+            emit_signal_variants!(
+                self,
                 "render_process_terminated",
-                &[
-                    status.get_raw().to_variant(),
-                    GString::from(reason).to_variant(),
-                ],
+                status.get_raw(),
+                GString::from(reason)
             );
         }
     }

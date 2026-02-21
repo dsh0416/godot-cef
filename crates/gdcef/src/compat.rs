@@ -7,19 +7,63 @@
 
 use cef::sys::cef_event_flags_t;
 
+/// Casts a CEF "raw" integer value to `u32` across platforms.
+///
+/// Some CEF raw values are `i32` on Windows and `u32` elsewhere.
+#[macro_export]
+macro_rules! cef_raw_to_u32 {
+    ($value:expr) => {{
+        #[cfg(target_os = "windows")]
+        {
+            $value as u32
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            $value
+        }
+    }};
+}
+
+/// Casts a CEF "raw" integer value to `i32` across platforms.
+///
+/// Some CEF raw values are `u32` on non-Windows targets.
+#[macro_export]
+macro_rules! cef_raw_to_i32 {
+    ($value:expr) => {{
+        #[cfg(target_os = "windows")]
+        {
+            $value
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            $value as i32
+        }
+    }};
+}
+
+/// Casts an `i32` input to the platform-specific raw CEF integer type.
+///
+/// Useful when constructing raw CEF tuple structs that differ by target.
+#[macro_export]
+macro_rules! cef_i32_to_raw {
+    ($value:expr) => {{
+        #[cfg(target_os = "windows")]
+        {
+            $value
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            $value as u32
+        }
+    }};
+}
+
 /// Converts a `cef_event_flags_t` bitfield to `u32`.
 ///
 /// On Windows the inner type is `i32`; on other platforms it is already `u32`.
 #[inline]
 pub fn event_flags_to_u32(flags: cef_event_flags_t) -> u32 {
-    #[cfg(target_os = "windows")]
-    {
-        flags.0 as u32
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        flags.0
-    }
+    crate::cef_raw_to_u32!(flags.0)
 }
 
 #[cfg(test)]
