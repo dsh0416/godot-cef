@@ -62,7 +62,6 @@ impl CefTexture {
         let logical_size = self.base().get_size();
         let dpi = self.get_pixel_scale_factor();
         let max_fps = self.get_max_fps();
-        self.sync_runtime_config();
         let params = backend::BackendCreateParams {
             logical_size,
             dpi,

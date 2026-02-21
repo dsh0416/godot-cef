@@ -35,8 +35,6 @@ impl CefTexture {
 
     pub(super) fn update_texture(&mut self) {
         let should_bind_initial = self.base().get_texture().is_none();
-        // Capture an initial texture handle before taking a mutable runtime borrow.
-        // Keeping this as a separate immutable-read phase makes borrow intent explicit.
         let initial_texture = if should_bind_initial {
             self.with_app(|app| {
                 app.state

@@ -31,12 +31,14 @@ pub struct CefTexture {
     url: GString,
 
     #[export]
+    #[var(get = get_enable_accelerated_osr, set = set_enable_accelerated_osr)]
     /// Enable GPU-accelerated Off-Screen Rendering (OSR).
     /// If true, uses shared textures (Vulkan/D3D12/Metal) for high performance.
     /// If false or unsupported, falls back to software rendering.
     enable_accelerated_osr: bool,
 
     #[export]
+    #[var(get = get_background_color, set = set_background_color)]
     /// The background color of the browser view.
     /// Useful for transparent pages.
     background_color: Color,
@@ -160,14 +162,6 @@ impl CefTexture {
         f(helper.runtime_app_mut())
     }
 
-    fn sync_runtime_config(&mut self) {
-        let mut helper = self.texture2d_helper.bind_mut();
-        helper.set_url_state_property(self.url.clone());
-        helper.set_enable_accelerated_osr_property(self.enable_accelerated_osr);
-        helper.set_background_color_property(self.background_color);
-        helper.set_popup_policy_state(self.popup_policy);
-    }
-
     fn event_position_to_local(&self, position: Vector2) -> Vector2 {
         // `input()` delivers positions in viewport space for this node path, while
         // CEF expects view-local coordinates relative to the browser texture.
@@ -253,7 +247,6 @@ impl CefTexture {
     #[func]
     fn on_ready(&mut self) {
         use godot::classes::control::FocusMode;
-        self.sync_runtime_config();
         if let Err(e) = cef_init::cef_retain() {
             godot::global::godot_error!("[CefTexture] {}", e);
             return;
@@ -277,7 +270,6 @@ impl CefTexture {
 
     #[func]
     fn on_process(&mut self) {
-        self.sync_runtime_config();
         // Lazy browser creation: if browser doesn't exist yet (e.g., size was 0 in on_ready
         // because we're inside a Container), try to create it now that layout may be complete.
         if self.with_app(|app| app.state.is_none()) {
@@ -380,6 +372,32 @@ impl CefTexture {
     fn set_url_property(&mut self, url: GString) {
         self.url = url.clone();
         self.texture2d_helper.bind_mut().set_url_property(url);
+    }
+
+    #[func]
+    fn get_enable_accelerated_osr(&self) -> bool {
+        self.enable_accelerated_osr
+    }
+
+    #[func]
+    fn set_enable_accelerated_osr(&mut self, enabled: bool) {
+        self.enable_accelerated_osr = enabled;
+        self.texture2d_helper
+            .bind_mut()
+            .set_enable_accelerated_osr_property(enabled);
+    }
+
+    #[func]
+    fn get_background_color(&self) -> Color {
+        self.background_color
+    }
+
+    #[func]
+    fn set_background_color(&mut self, color: Color) {
+        self.background_color = color;
+        self.texture2d_helper
+            .bind_mut()
+            .set_background_color_property(color);
     }
 
     #[func]
@@ -752,7 +770,6 @@ impl CefTexture {
     fn set_popup_policy(&mut self, policy: i32) {
         self.popup_policy = policy;
         self.texture2d_helper.bind_mut().set_popup_policy(policy);
-        self.with_app(|app| backend::apply_popup_policy(app, policy));
     }
 
     #[func]

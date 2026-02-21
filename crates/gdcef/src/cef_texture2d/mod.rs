@@ -311,16 +311,6 @@ impl CefTexture2D {
         self.background_color = color;
     }
 
-    /// Updates local URL property without triggering navigation.
-    pub(crate) fn set_url_state_property(&mut self, url: GString) {
-        self.url = url;
-    }
-
-    /// Updates local popup policy property without applying to a live browser.
-    pub(crate) fn set_popup_policy_state(&mut self, policy: i32) {
-        self.popup_policy = policy;
-    }
-
     #[func]
     fn _on_frame_pre_draw(&mut self) {
         self.tick();
