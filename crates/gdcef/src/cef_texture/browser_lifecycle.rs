@@ -67,6 +67,7 @@ impl CefTexture {
             enable_accelerated_osr: self.enable_accelerated_osr,
             background_color: self.background_color,
             popup_policy: self.popup_policy,
+            software_target_texture: None,
             log_prefix: "CefTexture",
         };
         if let Err(err) = backend::try_create_browser(&mut self.app, &params) {

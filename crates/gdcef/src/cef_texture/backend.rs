@@ -29,6 +29,7 @@ pub(crate) struct BackendCreateParams {
     pub enable_accelerated_osr: bool,
     pub background_color: Color,
     pub popup_policy: i32,
+    pub software_target_texture: Option<Gd<ImageTexture>>,
     pub log_prefix: &'static str,
 }
 
@@ -409,10 +410,10 @@ pub(crate) fn try_create_browser(
     } else {
         create_software_browser(
             app,
-            &window_info,
             &browser_settings,
             context.as_mut(),
             create_params,
+            params.software_target_texture.clone(),
             &params.url,
             params.log_prefix,
         )?;
@@ -478,10 +479,10 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
 
 fn create_software_browser(
     app: &mut App,
-    _window_info: &WindowInfo,
     browser_settings: &BrowserSettings,
     context: Option<&mut cef::RequestContext>,
     params: BrowserCreateParams,
+    software_target_texture: Option<Gd<ImageTexture>>,
     url: &str,
     log_prefix: &str,
 ) -> Result<(), CefError> {
@@ -532,7 +533,7 @@ fn create_software_browser(
         pending_permission_aggregates.clone(),
     );
 
-    let mut texture = ImageTexture::new_gd();
+    let mut texture = software_target_texture.unwrap_or_else(ImageTexture::new_gd);
     // Avoid Godot's magenta placeholder while waiting for the first CEF paint.
     let initial_bytes =
         vec![0u8; (pixel_width.max(1) as usize) * (pixel_height.max(1) as usize) * 4];
@@ -612,10 +613,10 @@ fn create_accelerated_browser(
             );
             return create_software_browser(
                 app,
-                window_info,
                 browser_settings,
                 context,
                 params,
+                None,
                 url,
                 log_prefix,
             );
@@ -719,10 +720,10 @@ fn create_accelerated_browser(
 ) -> Result<(), CefError> {
     create_software_browser(
         app,
-        window_info,
         browser_settings,
         context,
         params,
+        None,
         url,
         log_prefix,
     )
