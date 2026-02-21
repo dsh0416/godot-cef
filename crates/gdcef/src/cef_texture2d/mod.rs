@@ -21,24 +21,27 @@ use cef_app::ipc_contract::{
 
 pub(crate) struct CefTextureRuntime {
     app: App,
-    url: GString,
-    enable_accelerated_osr: bool,
-    background_color: Color,
-    popup_policy: i32,
     last_size: Vector2,
     last_dpi: f32,
     last_max_fps: i32,
     runtime_enabled: bool,
 }
 
+pub(crate) struct RuntimeCreateConfig {
+    logical_size: Vector2,
+    dpi: f32,
+    url: GString,
+    enable_accelerated_osr: bool,
+    background_color: Color,
+    popup_policy: i32,
+    software_target_texture: Option<Gd<ImageTexture>>,
+    log_prefix: &'static str,
+}
+
 impl CefTextureRuntime {
     pub(crate) fn new(runtime_enabled: bool) -> Self {
         Self {
             app: App::default(),
-            url: "https://google.com".into(),
-            enable_accelerated_osr: true,
-            background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
-            popup_policy: crate::browser::popup_policy::BLOCK,
             last_size: Vector2::ZERO,
             last_dpi: 1.0,
             last_max_fps: 0,
@@ -62,8 +65,7 @@ impl CefTextureRuntime {
         self.runtime_enabled = enabled;
     }
 
-    pub(crate) fn set_url(&mut self, url: GString) {
-        self.url = url.clone();
+    pub(crate) fn set_url(&self, url: GString) {
         if let Some(state) = self.app.state.as_ref()
             && let Some(frame) = state.browser.main_frame()
         {
@@ -72,11 +74,7 @@ impl CefTextureRuntime {
         }
     }
 
-    pub(crate) fn set_url_state(&mut self, url: GString) {
-        self.url = url;
-    }
-
-    pub(crate) fn get_url_property(&self) -> GString {
+    pub(crate) fn get_live_url_or(&self, fallback: &GString) -> GString {
         if let Some(state) = self.app.state.as_ref()
             && let Some(frame) = state.browser.main_frame()
         {
@@ -84,33 +82,28 @@ impl CefTextureRuntime {
             let url_string = cef::CefStringUtf16::from(&frame_url).to_string();
             return GString::from(url_string.as_str());
         }
-        self.url.clone()
+        fallback.clone()
     }
 
-    pub(crate) fn set_popup_policy(&mut self, policy: i32) {
-        self.popup_policy = policy;
+    pub(crate) fn apply_popup_policy(&self, policy: i32) {
         backend::apply_popup_policy(&self.app, policy);
-    }
-
-    pub(crate) fn set_enable_accelerated_osr(&mut self, enabled: bool) {
-        self.enable_accelerated_osr = enabled;
-    }
-
-    pub(crate) fn set_background_color(&mut self, color: Color) {
-        self.background_color = color;
     }
 
     pub(crate) fn shutdown(&mut self) {
         self.runtime_enabled = false;
     }
 
-    pub(crate) fn try_create_browser(
-        &mut self,
-        logical_size: Vector2,
-        dpi: f32,
-        software_target_texture: Option<Gd<ImageTexture>>,
-        log_prefix: &'static str,
-    ) {
+    pub(crate) fn try_create_browser(&mut self, config: RuntimeCreateConfig) {
+        let RuntimeCreateConfig {
+            logical_size,
+            dpi,
+            url,
+            enable_accelerated_osr,
+            background_color,
+            popup_policy,
+            software_target_texture,
+            log_prefix,
+        } = config;
         if !self.runtime_enabled || self.app.state.is_some() {
             return;
         }
@@ -123,10 +116,10 @@ impl CefTextureRuntime {
             logical_size,
             dpi,
             max_fps: backend::get_max_fps(),
-            url: self.url.to_string(),
-            enable_accelerated_osr: self.enable_accelerated_osr,
-            background_color: self.background_color,
-            popup_policy: self.popup_policy,
+            url: url.to_string(),
+            enable_accelerated_osr,
+            background_color,
+            popup_policy,
             software_target_texture,
             log_prefix,
         };
@@ -302,22 +295,30 @@ impl ITexture2D for CefTexture2D {
 
 #[godot_api]
 impl CefTexture2D {
+    pub(crate) fn runtime_app(&self) -> &App {
+        self.runtime.app()
+    }
+
+    pub(crate) fn runtime_app_mut(&mut self) -> &mut App {
+        self.runtime.app_mut()
+    }
+
     pub(crate) fn set_enable_accelerated_osr_property(&mut self, enabled: bool) {
         self.enable_accelerated_osr = enabled;
-        self.runtime.set_enable_accelerated_osr(enabled);
     }
 
     pub(crate) fn set_background_color_property(&mut self, color: Color) {
         self.background_color = color;
-        self.runtime.set_background_color(color);
     }
 
-    fn sync_runtime_config(&mut self) {
-        self.runtime.set_url_state(self.url.clone());
-        self.runtime
-            .set_enable_accelerated_osr(self.enable_accelerated_osr);
-        self.runtime.set_background_color(self.background_color);
-        self.runtime.set_popup_policy(self.popup_policy);
+    /// Updates local URL property without triggering navigation.
+    pub(crate) fn set_url_state_property(&mut self, url: GString) {
+        self.url = url;
+    }
+
+    /// Updates local popup policy property without applying to a live browser.
+    pub(crate) fn set_popup_policy_state(&mut self, policy: i32) {
+        self.popup_policy = policy;
     }
 
     #[func]
@@ -333,7 +334,7 @@ impl CefTexture2D {
 
     #[func]
     pub(crate) fn get_url_property(&self) -> GString {
-        self.runtime.get_url_property()
+        self.runtime.get_live_url_or(&self.url)
     }
 
     #[func]
@@ -344,7 +345,7 @@ impl CefTexture2D {
     #[func]
     pub(crate) fn set_popup_policy(&mut self, policy: i32) {
         self.popup_policy = policy;
-        self.runtime.set_popup_policy(policy);
+        self.runtime.apply_popup_policy(policy);
     }
 
     #[func]
@@ -662,281 +663,6 @@ impl CefTexture2D {
         self.runtime.app().host().map(f)
     }
 
-    pub(crate) fn eval_in_app(&self, app: &App, code: GString, log_prefix: &str) {
-        let Some(state) = app.state.as_ref() else {
-            godot::global::godot_warn!("[{}] Cannot execute JS: no browser", log_prefix);
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[{}] Cannot execute JS: no main frame", log_prefix);
-            return;
-        };
-        let code_str: cef::CefStringUtf16 = code.to_string().as_str().into();
-        frame.execute_java_script(Some(&code_str), None, 0);
-    }
-
-    pub(crate) fn go_back_in_app(&self, app: &mut App) {
-        if let Some(browser) = app.browser_mut() {
-            browser.go_back();
-        }
-    }
-
-    pub(crate) fn go_forward_in_app(&self, app: &mut App) {
-        if let Some(browser) = app.browser_mut() {
-            browser.go_forward();
-        }
-    }
-
-    pub(crate) fn can_go_back_in_app(&self, app: &App) -> bool {
-        app.browser().map(|b| b.can_go_back() != 0).unwrap_or(false)
-    }
-
-    pub(crate) fn can_go_forward_in_app(&self, app: &App) -> bool {
-        app.browser()
-            .map(|b| b.can_go_forward() != 0)
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn reload_in_app(&self, app: &mut App) {
-        if let Some(browser) = app.browser_mut() {
-            browser.reload();
-        }
-    }
-
-    pub(crate) fn reload_ignore_cache_in_app(&self, app: &mut App) {
-        if let Some(browser) = app.browser_mut() {
-            browser.reload_ignore_cache();
-        }
-    }
-
-    pub(crate) fn stop_loading_in_app(&self, app: &mut App) {
-        if let Some(browser) = app.browser_mut() {
-            browser.stop_load();
-        }
-    }
-
-    pub(crate) fn is_loading_in_app(&self, app: &App) -> bool {
-        app.browser().map(|b| b.is_loading() != 0).unwrap_or(false)
-    }
-
-    pub(crate) fn set_zoom_level_in_app(&self, app: &App, level: f64) {
-        if let Some(host) = app.host() {
-            host.set_zoom_level(level);
-        }
-    }
-
-    pub(crate) fn get_zoom_level_in_app(&self, app: &App) -> f64 {
-        app.host().map(|h| h.zoom_level()).unwrap_or(0.0)
-    }
-
-    pub(crate) fn set_audio_muted_in_app(&self, app: &App, muted: bool) {
-        if let Some(host) = app.host() {
-            host.set_audio_muted(muted as i32);
-        }
-    }
-
-    pub(crate) fn is_audio_muted_in_app(&self, app: &App) -> bool {
-        app.host().map(|h| h.is_audio_muted() != 0).unwrap_or(false)
-    }
-
-    pub(crate) fn send_ipc_message_in_app(&self, app: &App, message: GString, log_prefix: &str) {
-        let Some(state) = app.state.as_ref() else {
-            godot::global::godot_warn!("[{}] Cannot send IPC message: no browser", log_prefix);
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[{}] Cannot send IPC message: no main frame", log_prefix);
-            return;
-        };
-        let route = cef::CefStringUtf16::from(ROUTE_IPC_GODOT_TO_RENDERER);
-        let msg_str: cef::CefStringUtf16 = message.to_string().as_str().into();
-        if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
-            if let Some(argument_list) = process_message.argument_list() {
-                argument_list.set_string(0, Some(&msg_str));
-            }
-            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-        }
-    }
-
-    pub(crate) fn send_ipc_binary_message_in_app(
-        &self,
-        app: &App,
-        data: PackedByteArray,
-        log_prefix: &str,
-    ) {
-        let Some(state) = app.state.as_ref() else {
-            godot::global::godot_warn!(
-                "[{}] Cannot send binary IPC message: no browser",
-                log_prefix
-            );
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!(
-                "[{}] Cannot send binary IPC message: no main frame",
-                log_prefix
-            );
-            return;
-        };
-        let route = cef::CefStringUtf16::from(ROUTE_IPC_BINARY_GODOT_TO_RENDERER);
-        let bytes = data.to_vec();
-        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
-            godot::global::godot_warn!(
-                "[{}] Cannot send binary IPC message: failed to create BinaryValue",
-                log_prefix
-            );
-            return;
-        };
-        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
-            godot::global::godot_warn!(
-                "[{}] Cannot send binary IPC message: failed to create process message",
-                log_prefix
-            );
-            return;
-        };
-        let Some(argument_list) = process_message.argument_list() else {
-            godot::global::godot_warn!(
-                "[{}] Cannot send binary IPC message: failed to get argument list",
-                log_prefix
-            );
-            return;
-        };
-        argument_list.set_binary(0, Some(&mut binary_value));
-        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-    }
-
-    pub(crate) fn send_ipc_data_in_app(&self, app: &App, data: Variant, log_prefix: &str) {
-        let Some(state) = app.state.as_ref() else {
-            godot::global::godot_warn!("[{}] Cannot send IPC data: no browser", log_prefix);
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[{}] Cannot send IPC data: no main frame", log_prefix);
-            return;
-        };
-        let bytes = match crate::ipc_data::encode_variant_to_cbor_bytes(&data) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                godot::global::godot_warn!("[{}] Cannot encode IPC data: {}", log_prefix, err);
-                return;
-            }
-        };
-        if bytes.len() > crate::ipc_data::max_ipc_data_bytes() {
-            godot::global::godot_warn!(
-                "[{}] Cannot send IPC data: payload too large ({} bytes)",
-                log_prefix,
-                bytes.len()
-            );
-            return;
-        }
-        let route = cef::CefStringUtf16::from(ROUTE_IPC_DATA_GODOT_TO_RENDERER);
-        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
-            godot::global::godot_warn!(
-                "[{}] Cannot send IPC data: failed to create BinaryValue",
-                log_prefix
-            );
-            return;
-        };
-        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
-            godot::global::godot_warn!(
-                "[{}] Cannot send IPC data: failed to create process message",
-                log_prefix
-            );
-            return;
-        };
-        let Some(argument_list) = process_message.argument_list() else {
-            godot::global::godot_warn!(
-                "[{}] Cannot send IPC data: failed to get argument list",
-                log_prefix
-            );
-            return;
-        };
-        argument_list.set_binary(0, Some(&mut binary_value));
-        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-    }
-
-    pub(crate) fn find_text_in_app(
-        &self,
-        app: &App,
-        query: GString,
-        forward: bool,
-        match_case: bool,
-        last_find_query: &mut GString,
-        last_find_match_case: &mut bool,
-    ) {
-        let Some(host) = app.host() else {
-            return;
-        };
-        let query_string = query.to_string();
-        if query_string.is_empty() {
-            host.stop_finding(true as _);
-            *last_find_query = GString::new();
-            *last_find_match_case = false;
-            return;
-        }
-        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
-        host.find(Some(&query_cef), forward as _, match_case as _, false as _);
-        *last_find_query = query;
-        *last_find_match_case = match_case;
-    }
-
-    pub(crate) fn find_next_in_app(
-        &self,
-        app: &App,
-        last_find_query: &GString,
-        last_find_match_case: bool,
-    ) {
-        let Some(host) = app.host() else {
-            return;
-        };
-        if last_find_query.is_empty() {
-            return;
-        }
-        let query_string = last_find_query.to_string();
-        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
-        host.find(
-            Some(&query_cef),
-            true as _,
-            last_find_match_case as _,
-            true as _,
-        );
-    }
-
-    pub(crate) fn find_previous_in_app(
-        &self,
-        app: &App,
-        last_find_query: &GString,
-        last_find_match_case: bool,
-    ) {
-        let Some(host) = app.host() else {
-            return;
-        };
-        if last_find_query.is_empty() {
-            return;
-        }
-        let query_string = last_find_query.to_string();
-        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
-        host.find(
-            Some(&query_cef),
-            false as _,
-            last_find_match_case as _,
-            true as _,
-        );
-    }
-
-    pub(crate) fn stop_finding_in_app(
-        &self,
-        app: &App,
-        last_find_query: &mut GString,
-        last_find_match_case: &mut bool,
-    ) {
-        if let Some(host) = app.host() {
-            host.stop_finding(true as _);
-        }
-        *last_find_query = GString::new();
-        *last_find_match_case = false;
-    }
-
     #[func]
     pub fn forward_mouse_button_event(
         &self,
@@ -1087,13 +813,16 @@ impl CefTexture2D {
     fn try_create_browser(&mut self) {
         let logical_size = self.logical_size();
         let dpi = self.get_dpi();
-        self.sync_runtime_config();
-        self.runtime.try_create_browser(
+        self.runtime.try_create_browser(RuntimeCreateConfig {
             logical_size,
             dpi,
-            Some(self.fallback_texture.clone()),
-            "CefTexture2D",
-        );
+            url: self.url.clone(),
+            enable_accelerated_osr: self.enable_accelerated_osr,
+            background_color: self.background_color,
+            popup_policy: self.popup_policy,
+            software_target_texture: Some(self.fallback_texture.clone()),
+            log_prefix: "CefTexture2D",
+        });
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         if self.enable_accelerated_osr
             && let Some(state) = self.runtime.app_mut().state.as_mut()
