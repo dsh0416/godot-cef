@@ -1,12 +1,12 @@
-use ash::vk;
-use godot::global::godot_print;
-
 macro_rules! impl_vulkan_common_methods {
     (
         memory_field: $memory_field:ident,
         memory_fn_name: $memory_fn_name:literal,
         memory_fn_type: $memory_fn_type:ty
     ) => {
+        use ash::vk;
+        use godot::global::godot_print;
+
         fn load_vulkan_functions(lib: &libloading::Library, device: vk::Device) -> VulkanFunctions {
             type GetDeviceProcAddr = unsafe extern "system" fn(
                 vk::Device,

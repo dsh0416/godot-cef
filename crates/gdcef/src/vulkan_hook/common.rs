@@ -1,6 +1,3 @@
-use ash::vk::{self, Handle};
-use std::ffi::{CStr, c_char};
-
 macro_rules! define_vulkan_hook {
     (
         log_prefix: $log_prefix:literal,
@@ -8,7 +5,9 @@ macro_rules! define_vulkan_hook {
         status_extension: $status_extension:ident,
         required_extensions: [$($required_extension:ident),+ $(,)?]
     ) => {
+        use ash::vk;
         use retour::GenericDetour;
+        use std::ffi::{CStr, c_char};
         use std::ffi::{c_void};
         use std::sync::OnceLock;
         use std::sync::atomic::{AtomicBool, Ordering};
