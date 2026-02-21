@@ -21,6 +21,7 @@ use godot::prelude::*;
 use std::collections::HashMap;
 
 use crate::browser::App;
+use crate::cef_texture2d::CefTextureRuntime;
 use crate::{cef_init, input};
 use cef_app::ipc_contract::{
     ROUTE_IPC_BINARY_GODOT_TO_RENDERER, ROUTE_IPC_DATA_GODOT_TO_RENDERER,
@@ -63,11 +64,10 @@ pub struct CefTexture {
     /// automatically updated from the browser's caret position.
     ime_position: Vector2i,
 
-    // Change detection state
-    last_size: Vector2,
-    last_dpi: f32,
+    // Runtime settings and frame change tracking shared with CefTexture2D.
+    runtime: CefTextureRuntime,
+    // UI-only change detection state
     last_cursor: cef_app::CursorType,
-    last_max_fps: i32,
     browser_create_deferred_pending: bool,
 
     // IME state
@@ -101,10 +101,8 @@ impl ITextureRect for CefTexture {
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
             popup_policy: crate::browser::popup_policy::BLOCK,
             ime_position: Vector2i::new(0, 0),
-            last_size: Vector2::ZERO,
-            last_dpi: 1.0,
+            runtime: CefTextureRuntime::new(true),
             last_cursor: cef_app::CursorType::Arrow,
-            last_max_fps: 0,
             browser_create_deferred_pending: false,
             ime_active: false,
             ime_proxy: None,
@@ -155,6 +153,14 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
+    fn sync_runtime_config(&mut self) {
+        self.runtime.set_url_state(self.url.clone());
+        self.runtime
+            .set_enable_accelerated_osr(self.enable_accelerated_osr);
+        self.runtime.set_background_color(self.background_color);
+        self.runtime.set_popup_policy_state(self.popup_policy);
+    }
+
     fn event_position_to_local(&self, position: Vector2) -> Vector2 {
         // `input()` delivers positions in viewport space for this node path, while
         // CEF expects view-local coordinates relative to the browser texture.
@@ -240,6 +246,7 @@ impl CefTexture {
     #[func]
     fn on_ready(&mut self) {
         use godot::classes::control::FocusMode;
+        self.sync_runtime_config();
         if let Err(e) = cef_init::cef_retain() {
             godot::global::godot_error!("[CefTexture] {}", e);
             return;
@@ -263,6 +270,7 @@ impl CefTexture {
 
     #[func]
     fn on_process(&mut self) {
+        self.sync_runtime_config();
         // Lazy browser creation: if browser doesn't exist yet (e.g., size was 0 in on_ready
         // because we're inside a Container), try to create it now that layout may be complete.
         if self.app.state.is_none() {
@@ -388,6 +396,7 @@ impl CefTexture {
     #[func]
     fn set_url_property(&mut self, url: GString) {
         self.url = url.clone();
+        self.runtime.set_url_state(url.clone());
 
         if let Some(state) = self.app.state.as_ref()
             && let Some(frame) = state.browser.main_frame()
@@ -547,7 +556,7 @@ impl CefTexture {
             let url_string = cef::CefStringUtf16::from(&frame_url).to_string();
             return GString::from(url_string.as_str());
         }
-        self.url.clone()
+        self.runtime.url_state()
     }
 
     #[func]
@@ -945,7 +954,8 @@ impl CefTexture {
     #[func]
     fn set_popup_policy(&mut self, policy: i32) {
         self.popup_policy = policy;
-        backend::apply_popup_policy(&self.app, policy);
+        self.runtime.set_popup_policy_state(policy);
+        self.runtime.apply_popup_policy_for_app(&self.app, policy);
     }
 
     #[func]

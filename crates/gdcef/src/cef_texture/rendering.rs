@@ -1,4 +1,4 @@
-use super::{CefTexture, backend};
+use super::CefTexture;
 use godot::classes::TextureRect;
 use godot::classes::control::MouseFilter;
 use godot::classes::texture_rect::ExpandMode;
@@ -10,33 +10,38 @@ use crate::{cursor, render};
 
 impl CefTexture {
     pub(super) fn get_max_fps(&self) -> i32 {
-        backend::get_max_fps()
+        self.runtime.max_fps_setting()
     }
 
     pub(super) fn handle_max_fps_change(&mut self) {
         let max_fps = self.get_max_fps();
-        backend::handle_max_fps_change(&self.app, &mut self.last_max_fps, max_fps);
+        self.runtime.handle_max_fps_change_for_app(&self.app, max_fps);
     }
 
     pub(super) fn handle_size_change(&mut self) -> bool {
         let logical_size = self.base().get_size();
         let dpi = self.get_pixel_scale_factor();
-        backend::handle_size_change(
-            &self.app,
-            &mut self.last_size,
-            &mut self.last_dpi,
-            logical_size,
-            dpi,
-        )
+        self.runtime
+            .handle_size_change_for_app(&self.app, logical_size, dpi)
     }
 
     pub(super) fn update_texture(&mut self) {
-        let Some(state) = &mut self.app.state else {
-            return;
+        let should_bind_initial = self.base().get_texture().is_none();
+        let mut initial_texture = None;
+        let replacement = {
+            let Some(state) = &mut self.app.state else {
+                return;
+            };
+            if should_bind_initial {
+                initial_texture = Some(state.render_mode.texture_2d());
+            }
+            self.runtime.update_primary_texture_for_state(state, "CefTexture")
         };
 
-        if let Some(tex) = backend::update_primary_texture(state, "CefTexture") {
+        if let Some(tex) = replacement {
             self.base_mut().set_texture(&tex);
+        } else if let Some(texture) = initial_texture {
+            self.base_mut().set_texture(&texture);
         }
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -180,7 +185,7 @@ impl CefTexture {
     }
 
     pub(super) fn request_external_begin_frame(&mut self) {
-        backend::request_external_begin_frame(&self.app);
+        self.runtime.request_external_begin_frame_for_app(&self.app);
     }
 
     pub(super) fn update_cursor(&mut self) {

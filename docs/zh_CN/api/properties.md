@@ -1,9 +1,11 @@
 # 属性
 
 `CefTexture` 提供多项属性，用于配置与状态管理。
+在内部实现上，`CefTexture` 现与 `CefTexture2D` 共享同一套运行时/设置核心，
+而交互相关能力（输入路由、IME 代理、弹出层与信号发射）仍由 `CefTexture` 负责。
 
-`CefTexture2D` 是一个仅渲染的 `Texture2D` 资源变体，与 `CefTexture`
-共享同一套浏览器/渲染后端。它可以直接赋值给 `Sprite2D.texture`
+`CefTexture2D` 是一个仅渲染的 `Texture2D` 资源变体，并且现在是浏览器
+运行时与设置状态的主要承载者；它与 `CefTexture` 共享同一套浏览器/渲染后端。它可以直接赋值给 `Sprite2D.texture`
 以及 3D 材质纹理槽位。
 
 ## 节点属性

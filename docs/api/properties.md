@@ -1,10 +1,13 @@
 # Properties
 
 The `CefTexture` node provides several properties for configuration and state management.
+Internally, `CefTexture` now shares the same runtime/settings core as `CefTexture2D`,
+while still owning interaction-specific features (input routing, IME proxy, popup
+overlay, and signal emission).
 
-`CefTexture2D` is a render-only `Texture2D` resource variant that shares the same
-browser/render backend. It can be assigned directly to `Sprite2D.texture` and
-3D material texture slots.
+`CefTexture2D` is a render-only `Texture2D` resource variant that is now the
+primary home for browser runtime/settings state. It can be assigned directly to
+`Sprite2D.texture` and 3D material texture slots.
 
 ## Node Properties
 
