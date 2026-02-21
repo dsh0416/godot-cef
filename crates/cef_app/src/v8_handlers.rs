@@ -160,7 +160,7 @@ wrap_v8_handler! {
                                 );
                                 *exception = CefStringUtf16::from(msg.as_str());
                             }
-                            return v8_fail(None);
+                            return 0;
                         }
 
                         if let Some(mut binary) = binary_value_create(Some(&encoded))
@@ -180,7 +180,7 @@ wrap_v8_handler! {
                         if let Some(exception) = exception {
                             *exception = CefStringUtf16::from(err.as_str());
                         }
-                        return v8_fail(None);
+                        return 0;
                     }
                 }
             }
