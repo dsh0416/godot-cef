@@ -2,6 +2,11 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+mod vulkan_common;
 #[cfg(target_os = "windows")]
 mod windows;
 

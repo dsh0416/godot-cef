@@ -8,6 +8,12 @@
 //! - Linux: `VK_EXT_external_memory_dma_buf` for DMA-Buf sharing
 //! - macOS: Not supported — Godot statically links MoltenVK, making hook injection impossible. Use the Metal backend instead, which supports IOSurface sharing natively.
 
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+mod common;
+
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 mod windows;
 

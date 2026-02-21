@@ -16,6 +16,28 @@ use crate::browser::{
 };
 use crate::utils::get_display_scale_factor;
 
+macro_rules! impl_build_new {
+    ($vis:vis $name:ident => $ret:ty; $($arg:ident : $arg_ty:ty),* $(,)?) => {
+        impl $name {
+            $vis fn build($($arg: $arg_ty),*) -> $ret {
+                Self::new($($arg),*)
+            }
+        }
+    };
+}
+
+fn with_event_queues<F>(event_queues: &EventQueuesHandle, f: F) -> bool
+where
+    F: FnOnce(&mut EventQueues),
+{
+    if let Ok(mut queues) = event_queues.lock() {
+        f(&mut queues);
+        true
+    } else {
+        false
+    }
+}
+
 /// Bundles all the event queues and audio state used for browser-to-Godot communication.
 #[derive(Clone)]
 pub(crate) struct ClientQueues {
@@ -232,25 +254,25 @@ fn handle_start_dragging(
 ) -> ::std::os::raw::c_int {
     if let Some(drag_data) = drag_data {
         let drag_info = extract_drag_data_info(drag_data);
-        if let Ok(mut queues) = event_queues.lock() {
+        with_event_queues(event_queues, |queues| {
             queues.drag_events.push_back(DragEvent::Started {
                 drag_data: drag_info,
                 x,
                 y,
                 allowed_ops: drag_ops_to_u32(allowed_ops),
             });
-        }
+        });
     }
     1
 }
 
 /// Common helper for update_drag_cursor implementation.
 fn handle_update_drag_cursor(operation: DragOperationsMask, event_queues: &EventQueuesHandle) {
-    if let Ok(mut queues) = event_queues.lock() {
+    with_event_queues(event_queues, |queues| {
         queues.drag_events.push_back(DragEvent::UpdateCursor {
             operation: drag_ops_to_u32(operation),
         });
-    }
+    });
 }
 
 wrap_render_handler! {
@@ -365,14 +387,11 @@ wrap_render_handler! {
     }
 }
 
-impl SoftwareOsrHandler {
-    pub fn build(
-        handler: cef_app::OsrRenderHandler,
-        event_queues: EventQueuesHandle,
-    ) -> cef::RenderHandler {
-        Self::new(handler, event_queues)
-    }
-}
+impl_build_new!(
+    pub SoftwareOsrHandler => cef::RenderHandler;
+    handler: cef_app::OsrRenderHandler,
+    event_queues: EventQueuesHandle
+);
 
 wrap_render_handler! {
     pub struct AcceleratedOsrHandler {
@@ -493,14 +512,11 @@ wrap_render_handler! {
     }
 }
 
-impl AcceleratedOsrHandler {
-    pub fn build(
-        handler: PlatformAcceleratedRenderHandler,
-        event_queues: EventQueuesHandle,
-    ) -> cef::RenderHandler {
-        Self::new(handler, event_queues)
-    }
-}
+impl_build_new!(
+    pub AcceleratedOsrHandler => cef::RenderHandler;
+    handler: PlatformAcceleratedRenderHandler,
+    event_queues: EventQueuesHandle
+);
 
 fn cef_cursor_to_cursor_type(cef_type: cef::sys::cef_cursor_type_t) -> CursorType {
     match cef_type {
@@ -624,11 +640,7 @@ wrap_drag_handler! {
     }
 }
 
-impl DragHandlerImpl {
-    pub fn build(event_queues: EventQueuesHandle) -> cef::DragHandler {
-        Self::new(event_queues)
-    }
-}
+impl_build_new!(pub DragHandlerImpl => cef::DragHandler; event_queues: EventQueuesHandle);
 
 wrap_display_handler! {
     pub(crate) struct DisplayHandlerImpl {
@@ -678,9 +690,9 @@ wrap_display_handler! {
         ) {
             if let Some(url) = url {
                 let url_str = url.to_string();
-                if let Ok(mut queues) = self.event_queues.lock() {
+                with_event_queues(&self.event_queues, |queues| {
                     queues.url_changes.push_back(url_str);
-                }
+                });
             }
         }
 
@@ -691,9 +703,9 @@ wrap_display_handler! {
         ) {
             if let Some(title) = title {
                 let title_str = title.to_string();
-                if let Ok(mut queues) = self.event_queues.lock() {
+                with_event_queues(&self.event_queues, |queues| {
                     queues.title_changes.push_back(title_str);
-                }
+                });
             }
         }
 
@@ -709,14 +721,14 @@ wrap_display_handler! {
             let source_str = source.map(|s| s.to_string()).unwrap_or_default();
             let level: u32 = crate::cef_raw_to_u32!(level.get_raw());
 
-            if let Ok(mut queues) = self.event_queues.lock() {
+            with_event_queues(&self.event_queues, |queues| {
                 queues.console_messages.push_back(ConsoleMessageEvent {
                     level,
                     message: message_str,
                     source: source_str,
                     line,
                 });
-            }
+            });
 
             // Return false to allow default console output
             false as _
@@ -724,14 +736,11 @@ wrap_display_handler! {
     }
 }
 
-impl DisplayHandlerImpl {
-    pub fn build(
-        cursor_type: Arc<Mutex<CursorType>>,
-        event_queues: EventQueuesHandle,
-    ) -> cef::DisplayHandler {
-        Self::new(cursor_type, event_queues)
-    }
-}
+impl_build_new!(
+    pub DisplayHandlerImpl => cef::DisplayHandler;
+    cursor_type: Arc<Mutex<CursorType>>,
+    event_queues: EventQueuesHandle
+);
 
 wrap_context_menu_handler! {
     pub(crate) struct ContextMenuHandlerImpl {}
@@ -751,11 +760,7 @@ wrap_context_menu_handler! {
     }
 }
 
-impl ContextMenuHandlerImpl {
-    pub fn build() -> cef::ContextMenuHandler {
-        Self::new()
-    }
-}
+impl_build_new!(pub ContextMenuHandlerImpl => cef::ContextMenuHandler;);
 
 wrap_life_span_handler! {
     pub(crate) struct LifeSpanHandlerImpl {
@@ -803,13 +808,13 @@ wrap_life_span_handler! {
                 }
                 popup_policy::SIGNAL_ONLY => {
                     // Queue the event for GDScript to handle
-                    if let Ok(mut queues) = self.event_queues.lock() {
+                    with_event_queues(&self.event_queues, |queues| {
                         queues.popup_requests.push_back(PopupRequestEvent {
                             target_url: url,
                             disposition: target_disposition,
                             user_gesture: user_gesture != 0,
                         });
-                    }
+                    });
                     // Return true to cancel the popup (GDScript decides what to do)
                     true as _
                 }
@@ -822,14 +827,11 @@ wrap_life_span_handler! {
     }
 }
 
-impl LifeSpanHandlerImpl {
-    pub fn build(
-        event_queues: EventQueuesHandle,
-        popup_policy: crate::browser::PopupPolicyFlag,
-    ) -> cef::LifeSpanHandler {
-        Self::new(event_queues, popup_policy)
-    }
-}
+impl_build_new!(
+    pub LifeSpanHandlerImpl => cef::LifeSpanHandler;
+    event_queues: EventQueuesHandle,
+    popup_policy: crate::browser::PopupPolicyFlag
+);
 
 wrap_load_handler! {
     pub(crate) struct LoadHandlerImpl {
@@ -847,9 +849,9 @@ wrap_load_handler! {
                 && frame.is_main() != 0
             {
                 let url = CefStringUtf16::from(&frame.url()).to_string();
-                if let Ok(mut queues) = self.event_queues.lock() {
+                with_event_queues(&self.event_queues, |queues| {
                     queues.loading_states.push_back(LoadingStateEvent::Started { url });
-                }
+                });
             }
         }
 
@@ -863,12 +865,12 @@ wrap_load_handler! {
                 && frame.is_main() != 0
             {
                 let url = CefStringUtf16::from(&frame.url()).to_string();
-                if let Ok(mut queues) = self.event_queues.lock() {
+                with_event_queues(&self.event_queues, |queues| {
                     queues.loading_states.push_back(LoadingStateEvent::Finished {
                         url,
                         http_status_code,
                     });
-                }
+                });
             }
         }
 
@@ -891,23 +893,19 @@ wrap_load_handler! {
                     .unwrap_or_default();
                 // Use the get_raw() method to safely convert Errorcode to i32
                 let error_code_i32: i32 = error_code.get_raw();
-                if let Ok(mut queues) = self.event_queues.lock() {
+                with_event_queues(&self.event_queues, |queues| {
                     queues.loading_states.push_back(LoadingStateEvent::Error {
                         url,
                         error_code: error_code_i32,
                         error_text,
                     });
-                }
+                });
             }
         }
     }
 }
 
-impl LoadHandlerImpl {
-    pub fn build(event_queues: EventQueuesHandle) -> cef::LoadHandler {
-        Self::new(event_queues)
-    }
-}
+impl_build_new!(pub LoadHandlerImpl => cef::LoadHandler; event_queues: EventQueuesHandle);
 
 wrap_find_handler! {
     pub(crate) struct FindHandlerImpl {
@@ -924,22 +922,18 @@ wrap_find_handler! {
             active_match_ordinal: ::std::os::raw::c_int,
             final_update: ::std::os::raw::c_int,
         ) {
-            if let Ok(mut queues) = self.event_queues.lock() {
+            with_event_queues(&self.event_queues, |queues| {
                 queues.find_results.push_back(FindResultEvent {
                     count,
                     active_index: active_match_ordinal,
                     final_update: final_update != 0,
                 });
-            }
+            });
         }
     }
 }
 
-impl FindHandlerImpl {
-    pub fn build(event_queues: EventQueuesHandle) -> cef::FindHandler {
-        Self::new(event_queues)
-    }
-}
+impl_build_new!(pub FindHandlerImpl => cef::FindHandler; event_queues: EventQueuesHandle);
 
 wrap_audio_handler! {
     pub(crate) struct AudioHandlerImpl {
@@ -1063,21 +1057,13 @@ wrap_audio_handler! {
     }
 }
 
-impl AudioHandlerImpl {
-    pub fn build(
-        audio_params: AudioParamsState,
-        audio_packet_queue: AudioPacketQueue,
-        audio_sample_rate: AudioSampleRateState,
-        audio_shutdown_flag: AudioShutdownFlag,
-    ) -> cef::AudioHandler {
-        Self::new(
-            audio_params,
-            audio_packet_queue,
-            audio_sample_rate,
-            audio_shutdown_flag,
-        )
-    }
-}
+impl_build_new!(
+    pub AudioHandlerImpl => cef::AudioHandler;
+    audio_params: AudioParamsState,
+    audio_packet_queue: AudioPacketQueue,
+    audio_sample_rate: AudioSampleRateState,
+    audio_shutdown_flag: AudioShutdownFlag
+);
 
 wrap_download_handler! {
     pub(crate) struct DownloadHandlerImpl {
@@ -1111,7 +1097,7 @@ wrap_download_handler! {
                 let total_bytes = item.total_bytes();
                 let id = item.id();
 
-                if let Ok(mut queues) = self.event_queues.lock() {
+                with_event_queues(&self.event_queues, |queues| {
                     queues.download_requests.push_back(DownloadRequestEvent {
                         id,
                         url,
@@ -1120,7 +1106,7 @@ wrap_download_handler! {
                         mime_type,
                         total_bytes,
                     });
-                }
+                });
 
                 if let Some(callback) = callback {
                     let empty_path: cef::CefStringUtf16 = "".into();
@@ -1148,7 +1134,7 @@ wrap_download_handler! {
                 let is_complete = item.is_complete() != 0;
                 let is_canceled = item.is_canceled() != 0;
 
-                if let Ok(mut queues) = self.event_queues.lock() {
+                with_event_queues(&self.event_queues, |queues| {
                     queues.download_updates.push_back(DownloadUpdateEvent {
                         id,
                         url,
@@ -1161,17 +1147,13 @@ wrap_download_handler! {
                         is_complete,
                         is_canceled,
                     });
-                }
+                });
             }
         }
     }
 }
 
-impl DownloadHandlerImpl {
-    pub fn build(event_queues: EventQueuesHandle) -> cef::DownloadHandler {
-        Self::new(event_queues)
-    }
-}
+impl_build_new!(pub DownloadHandlerImpl => cef::DownloadHandler; event_queues: EventQueuesHandle);
 
 wrap_request_handler! {
     pub(crate) struct RequestHandlerImpl {
@@ -1194,18 +1176,14 @@ wrap_request_handler! {
                 _ => "Unknown",
             };
 
-            if let Ok(mut queues) = self.event_queues.lock() {
+            with_event_queues(&self.event_queues, |queues| {
                 queues.render_process_terminated.push_back((reason.to_string(), status));
-            }
+            });
         }
     }
 }
 
-impl RequestHandlerImpl {
-    pub fn build(event_queues: EventQueuesHandle) -> cef::RequestHandler {
-        Self::new(event_queues)
-    }
-}
+impl_build_new!(pub RequestHandlerImpl => cef::RequestHandler; event_queues: EventQueuesHandle);
 
 fn push_permission_request(
     event_queues: &EventQueuesHandle,
@@ -1225,7 +1203,7 @@ fn push_permission_request(
         return;
     }
 
-    if let Ok(mut queues) = event_queues.lock() {
+    let queued = with_event_queues(event_queues, |queues| {
         queues
             .permission_requests
             .push_back(PermissionRequestEvent {
@@ -1233,7 +1211,8 @@ fn push_permission_request(
                 url,
                 request_id,
             });
-    } else if let Ok(mut pending) = pending_permission_requests.lock() {
+    });
+    if !queued && let Ok(mut pending) = pending_permission_requests.lock() {
         pending.remove(&request_id);
     }
 }
@@ -1511,23 +1490,14 @@ wrap_permission_handler! {
     }
 }
 
-impl PermissionHandlerImpl {
-    pub fn build(
-        event_queues: EventQueuesHandle,
-        pending_permission_requests: PendingPermissionRequests,
-        pending_permission_aggregates: PendingPermissionAggregates,
-        permission_request_counter: PermissionRequestIdCounter,
-        permission_policy: PermissionPolicyFlag,
-    ) -> cef::PermissionHandler {
-        Self::new(
-            event_queues,
-            pending_permission_requests,
-            pending_permission_aggregates,
-            permission_request_counter,
-            permission_policy,
-        )
-    }
-}
+impl_build_new!(
+    pub PermissionHandlerImpl => cef::PermissionHandler;
+    event_queues: EventQueuesHandle,
+    pending_permission_requests: PendingPermissionRequests,
+    pending_permission_aggregates: PendingPermissionAggregates,
+    permission_request_counter: PermissionRequestIdCounter,
+    permission_policy: PermissionPolicyFlag
+);
 
 #[derive(Clone)]
 pub(crate) struct ClientHandlers {
@@ -1731,11 +1701,10 @@ wrap_resource_request_handler! {
     }
 }
 
-impl ResourceRequestHandlerImpl {
-    pub(crate) fn build(handler: OsrResourceRequestHandler) -> cef::ResourceRequestHandler {
-        Self::new(handler)
-    }
-}
+impl_build_new!(
+    pub(crate) ResourceRequestHandlerImpl => cef::ResourceRequestHandler;
+    handler: OsrResourceRequestHandler
+);
 
 wrap_request_context_handler! {
     pub(crate) struct RequestContextHandlerImpl {
@@ -1760,11 +1729,10 @@ wrap_request_context_handler! {
     }
 }
 
-impl RequestContextHandlerImpl {
-    pub(crate) fn build(handler: OsrRequestContextHandler) -> cef::RequestContextHandler {
-        Self::new(handler)
-    }
-}
+impl_build_new!(
+    pub(crate) RequestContextHandlerImpl => cef::RequestContextHandler;
+    handler: OsrRequestContextHandler
+);
 
 #[cfg(test)]
 mod tests {

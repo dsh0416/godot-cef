@@ -20,6 +20,20 @@ use crate::v8_handlers::{
     OsrIpcHandlerBuilder, cbor_bytes_to_v8_value,
 };
 
+fn send_browser_bool_message(frame: Option<&mut Frame>, route: &str, value: bool) {
+    let Some(frame) = frame else {
+        return;
+    };
+    let route = cef::CefStringUtf16::from(route);
+    let Some(mut process_message) = process_message_create(Some(&route)) else {
+        return;
+    };
+    if let Some(argument_list) = process_message.argument_list() {
+        argument_list.set_bool(0, value as _);
+    }
+    frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+}
+
 #[derive(Clone)]
 pub(crate) struct OsrRenderProcessHandler {
     string_listeners: IpcListenerSet,
@@ -116,36 +130,20 @@ wrap_render_process_handler! {
         fn on_focused_node_changed(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, node: Option<&mut Domnode>) {
             if let Some(node) = node
                 && node.is_editable() == 1 {
-                    // send to the browser process to activate IME
-                    let route = cef::CefStringUtf16::from(ROUTE_TRIGGER_IME);
-                    let process_message = process_message_create(Some(&route));
-                    if let Some(mut process_message) = process_message {
-                        if let Some(argument_list) = process_message.argument_list() {
-                            argument_list.set_bool(0, true as _);
-                        }
-
-                        if let Some(frame) = frame {
-                            frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-                            let report_script: cef::CefStringUtf16 = "if(window.__activateImeTracking)window.__activateImeTracking();".into();
-                            frame.execute_java_script(Some(&report_script), None, 0);
-                        }
+                    if let Some(frame) = frame {
+                        // send to the browser process to activate IME
+                        send_browser_bool_message(Some(frame), ROUTE_TRIGGER_IME, true);
+                        let report_script: cef::CefStringUtf16 = "if(window.__activateImeTracking)window.__activateImeTracking();".into();
+                        frame.execute_java_script(Some(&report_script), None, 0);
                     }
                     return;
                 }
 
-            // send to the browser process to deactivate IME
-            let route = cef::CefStringUtf16::from(ROUTE_TRIGGER_IME);
-            let process_message = process_message_create(Some(&route));
-            if let Some(mut process_message) = process_message {
-                if let Some(argument_list) = process_message.argument_list() {
-                    argument_list.set_bool(0, false as _);
-                }
-
-                if let Some(frame) = frame {
-                    frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-                    let deactivate_script: cef::CefStringUtf16 = "if(window.__deactivateImeTracking)window.__deactivateImeTracking();".into();
-                    frame.execute_java_script(Some(&deactivate_script), None, 0);
-                }
+            if let Some(frame) = frame {
+                // send to the browser process to deactivate IME
+                send_browser_bool_message(Some(frame), ROUTE_TRIGGER_IME, false);
+                let deactivate_script: cef::CefStringUtf16 = "if(window.__deactivateImeTracking)window.__deactivateImeTracking();".into();
+                frame.execute_java_script(Some(&deactivate_script), None, 0);
             }
         }
 

@@ -14,6 +14,47 @@ use crate::ipc_contract::{
     ROUTE_IPC_DATA_RENDERER_TO_GODOT, ROUTE_IPC_RENDERER_TO_GODOT,
 };
 
+fn set_v8_bool_retval(retval: Option<&mut Option<cef::V8Value>>, value: bool) {
+    if let Some(retval) = retval {
+        *retval = v8_value_create_bool(value as _);
+    }
+}
+
+fn v8_fail(retval: Option<&mut Option<cef::V8Value>>) -> i32 {
+    set_v8_bool_retval(retval, false);
+    0
+}
+
+fn v8_ok(retval: Option<&mut Option<cef::V8Value>>) -> i32 {
+    set_v8_bool_retval(retval, true);
+    1
+}
+
+fn send_process_message_to_browser<F>(
+    frame: Option<&Arc<Mutex<Frame>>>,
+    route: &str,
+    fill_args: F,
+) -> bool
+where
+    F: FnOnce(&mut cef::ListValue),
+{
+    let Some(frame) = frame else {
+        return false;
+    };
+    let Ok(frame) = frame.lock() else {
+        return false;
+    };
+    let route = CefStringUtf16::from(route);
+    let Some(mut process_message) = process_message_create(Some(&route)) else {
+        return false;
+    };
+    if let Some(mut argument_list) = process_message.argument_list() {
+        fill_args(&mut argument_list);
+    }
+    frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+    true
+}
+
 #[derive(Clone)]
 pub(crate) struct OsrIpcHandler {
     frame: Option<Arc<Mutex<Frame>>>,
@@ -49,40 +90,22 @@ wrap_v8_handler! {
                 && let Some(arg) = arguments.first()
                     && let Some(arg) = arg {
                         if arg.is_string() != 1 {
-                            if let Some(retval) = retval {
-                                *retval = v8_value_create_bool(false as _);
-                            }
-
-                            return 0;
+                            return v8_fail(retval);
                         }
 
-                        let route = CefStringUtf16::from(ROUTE_IPC_RENDERER_TO_GODOT);
                         let msg_str = CefStringUtf16::from(&arg.string_value());
-                        if let Some(frame) = self.handler.frame.as_ref() {
-                            let frame = frame.lock().unwrap();
-
-                            let process_message = process_message_create(Some(&route));
-                            if let Some(mut process_message) = process_message {
-                                if let Some(argument_list) = process_message.argument_list() {
-                                    argument_list.set_string(0, Some(&msg_str));
-                                }
-
-                                frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-
-                                if let Some(retval) = retval {
-                                    *retval = v8_value_create_bool(true as _);
-                                }
-
-                                return 1;
-                            }
+                        if send_process_message_to_browser(
+                            self.handler.frame.as_ref(),
+                            ROUTE_IPC_RENDERER_TO_GODOT,
+                            |argument_list| {
+                                argument_list.set_string(0, Some(&msg_str));
+                            },
+                        ) {
+                            return v8_ok(retval);
                         }
                     }
 
-            if let Some(retval) = retval {
-                *retval = v8_value_create_bool(false as _);
-            }
-
-            return 0;
+            v8_fail(retval)
         }
     }
 }
@@ -129,9 +152,7 @@ wrap_v8_handler! {
                 match v8_to_cbor_bytes(arg) {
                     Ok(encoded) => {
                         if encoded.len() > MAX_IPC_DATA_BYTES {
-                            if let Some(retval) = retval {
-                                *retval = v8_value_create_bool(false as _);
-                            }
+                            set_v8_bool_retval(retval, false);
                             if let Some(exception) = exception {
                                 let msg = format!(
                                     "IPC data payload exceeds maximum size of {} bytes",
@@ -139,47 +160,32 @@ wrap_v8_handler! {
                                 );
                                 *exception = CefStringUtf16::from(msg.as_str());
                             }
-                            return 0;
+                            return v8_fail(None);
                         }
 
                         if let Some(mut binary) = binary_value_create(Some(&encoded))
-                            && let Some(frame) = self.handler.frame.as_ref()
+                            && send_process_message_to_browser(
+                                self.handler.frame.as_ref(),
+                                ROUTE_IPC_DATA_RENDERER_TO_GODOT,
+                                |argument_list| {
+                                    argument_list.set_binary(0, Some(&mut binary));
+                                },
+                            )
                         {
-                            let frame = frame
-                                .lock()
-                                .expect("OsrIpcDataHandler: failed to lock frame mutex (poisoned)");
-                            let route = CefStringUtf16::from(ROUTE_IPC_DATA_RENDERER_TO_GODOT);
-                            if let Some(mut process_message) = process_message_create(Some(&route))
-                                && let Some(argument_list) = process_message.argument_list()
-                            {
-                                argument_list.set_binary(0, Some(&mut binary));
-                                frame.send_process_message(
-                                    ProcessId::BROWSER,
-                                    Some(&mut process_message),
-                                );
-                                if let Some(retval) = retval {
-                                    *retval = v8_value_create_bool(true as _);
-                                }
-                                return 1;
-                            }
+                            return v8_ok(retval);
                         }
                     }
                     Err(err) => {
-                        if let Some(retval) = retval {
-                            *retval = v8_value_create_bool(false as _);
-                        }
+                        set_v8_bool_retval(retval, false);
                         if let Some(exception) = exception {
                             *exception = CefStringUtf16::from(err.as_str());
                         }
-                        return 0;
+                        return v8_fail(None);
                     }
                 }
             }
 
-            if let Some(retval) = retval {
-                *retval = v8_value_create_bool(false as _);
-            }
-            0
+            v8_fail(retval)
         }
     }
 }
@@ -371,20 +377,14 @@ wrap_v8_handler! {
                 && let Some(arg) = arg
             {
                 if arg.is_array_buffer() != 1 {
-                    if let Some(retval) = retval {
-                        *retval = v8_value_create_bool(false as _);
-                    }
-                    return 0;
+                    return v8_fail(retval);
                 }
 
                 let data_ptr = arg.array_buffer_data();
                 let data_len = arg.array_buffer_byte_length();
 
                 if data_ptr.is_null() || data_len == 0 {
-                    if let Some(retval) = retval {
-                        *retval = v8_value_create_bool(false as _);
-                    }
-                    return 0;
+                    return v8_fail(retval);
                 }
 
                 let data: Vec<u8> = unsafe {
@@ -392,40 +392,21 @@ wrap_v8_handler! {
                 };
 
                 let Some(mut binary_value) = binary_value_create(Some(&data)) else {
-                    if let Some(retval) = retval {
-                        *retval = v8_value_create_bool(false as _);
-                    }
-                    return 0;
+                    return v8_fail(retval);
                 };
 
-                if let Some(frame) = self.handler.frame.as_ref() {
-                    let frame = frame
-                        .lock()
-                        .expect("OsrIpcHandler: failed to lock frame mutex (poisoned)");
-
-                    let route = CefStringUtf16::from(ROUTE_IPC_BINARY_RENDERER_TO_GODOT);
-                    let process_message = process_message_create(Some(&route));
-                    if let Some(mut process_message) = process_message {
-                        if let Some(argument_list) = process_message.argument_list() {
-                            argument_list.set_binary(0, Some(&mut binary_value));
-                        }
-
-                        frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-
-                        if let Some(retval) = retval {
-                            *retval = v8_value_create_bool(true as _);
-                        }
-
-                        return 1;
-                    }
+                if send_process_message_to_browser(
+                    self.handler.frame.as_ref(),
+                    ROUTE_IPC_BINARY_RENDERER_TO_GODOT,
+                    |argument_list| {
+                        argument_list.set_binary(0, Some(&mut binary_value));
+                    },
+                ) {
+                    return v8_ok(retval);
                 }
             }
 
-            if let Some(retval) = retval {
-                *retval = v8_value_create_bool(false as _);
-            }
-
-            return 0;
+            v8_fail(retval)
         }
     }
 }
@@ -631,42 +612,20 @@ wrap_v8_handler! {
                 let y = y_arg.int_value();
                 let height = height_arg.int_value();
 
-                if let Some(frame) = self.handler.frame.as_ref() {
-                    match frame.lock() {
-                        Ok(frame) => {
-                            let route = CefStringUtf16::from(ROUTE_IME_CARET_POSITION);
-                            let process_message = process_message_create(Some(&route));
-                            if let Some(mut process_message) = process_message {
-                                if let Some(argument_list) = process_message.argument_list() {
-                                    argument_list.set_int(0, x);
-                                    argument_list.set_int(1, y);
-                                    argument_list.set_int(2, height);
-                                }
-
-                                frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
-
-                                if let Some(retval) = retval {
-                                    *retval = v8_value_create_bool(true as _);
-                                }
-
-                                return 1;
-                            }
-                        }
-                        Err(_) => {
-                            if let Some(retval) = retval {
-                                *retval = v8_value_create_bool(false as _);
-                            }
-                            return 0;
-                        }
-                    }
+                if send_process_message_to_browser(
+                    self.handler.frame.as_ref(),
+                    ROUTE_IME_CARET_POSITION,
+                    |argument_list| {
+                        argument_list.set_int(0, x);
+                        argument_list.set_int(1, y);
+                        argument_list.set_int(2, height);
+                    },
+                ) {
+                    return v8_ok(retval);
                 }
             }
 
-            if let Some(retval) = retval {
-                *retval = v8_value_create_bool(false as _);
-            }
-
-            0
+            v8_fail(retval)
         }
     }
 }
