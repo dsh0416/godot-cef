@@ -363,10 +363,6 @@ impl CefTexture2D {
             self.runtime_enabled = true;
         }
 
-        if Engine::singleton().is_editor_hint() {
-            return;
-        }
-
         self.try_create_browser();
 
         let max_fps = self.get_max_fps();
