@@ -5,9 +5,7 @@ macro_rules! define_vulkan_hook {
         status_extension: $status_extension:ident,
         required_extensions: [$($required_extension:ident),+ $(,)?]
     ) => {
-        use ash::vk;
         use retour::GenericDetour;
-        use std::ffi::{CStr, c_char};
         use std::ffi::{c_void};
         use std::sync::OnceLock;
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,24 +19,24 @@ macro_rules! define_vulkan_hook {
 
         #[allow(non_camel_case_types)]
         type PFN_vkEnumerateDeviceExtensionProperties = unsafe extern "system" fn(
-            physical_device: vk::PhysicalDevice,
-            p_layer_name: *const c_char,
+            physical_device: ash::vk::PhysicalDevice,
+            p_layer_name: *const std::ffi::c_char,
             p_property_count: *mut u32,
-            p_properties: *mut vk::ExtensionProperties,
-        ) -> vk::Result;
+            p_properties: *mut ash::vk::ExtensionProperties,
+        ) -> ash::vk::Result;
 
         #[allow(non_camel_case_types)]
         type PFN_vkGetInstanceProcAddr = unsafe extern "system" fn(
-            instance: vk::Instance,
-            p_name: *const c_char,
-        ) -> vk::PFN_vkVoidFunction;
+            instance: ash::vk::Instance,
+            p_name: *const std::ffi::c_char,
+        ) -> ash::vk::PFN_vkVoidFunction;
 
         static ENUMERATE_EXTENSIONS_FN: OnceLock<PFN_vkEnumerateDeviceExtensionProperties> =
             OnceLock::new();
 
         fn device_supports_extension(
-            physical_device: vk::PhysicalDevice,
-            extension_name: &CStr,
+            physical_device: ash::vk::PhysicalDevice,
+            extension_name: &std::ffi::CStr,
         ) -> bool {
             let enumerate_fn = match ENUMERATE_EXTENSIONS_FN.get() {
                 Some(f) => *f,
@@ -54,12 +52,12 @@ macro_rules! define_vulkan_hook {
                     std::ptr::null_mut(),
                 )
             };
-            if result != vk::Result::SUCCESS || count == 0 {
+            if result != ash::vk::Result::SUCCESS || count == 0 {
                 return false;
             }
 
-            let mut properties: Vec<vk::ExtensionProperties> =
-                vec![vk::ExtensionProperties::default(); count as usize];
+            let mut properties: Vec<ash::vk::ExtensionProperties> =
+                vec![ash::vk::ExtensionProperties::default(); count as usize];
             let result = unsafe {
                 enumerate_fn(
                     physical_device,
@@ -68,12 +66,12 @@ macro_rules! define_vulkan_hook {
                     properties.as_mut_ptr(),
                 )
             };
-            if result != vk::Result::SUCCESS {
+            if result != ash::vk::Result::SUCCESS {
                 return false;
             }
 
             for prop in &properties {
-                let name = unsafe { CStr::from_ptr(prop.extension_name.as_ptr()) };
+                let name = unsafe { std::ffi::CStr::from_ptr(prop.extension_name.as_ptr()) };
                 if name == extension_name {
                     return true;
                 }
@@ -83,8 +81,8 @@ macro_rules! define_vulkan_hook {
         }
 
         fn extension_already_enabled(
-            create_info: &vk::DeviceCreateInfo,
-            extension_name: &CStr,
+            create_info: &ash::vk::DeviceCreateInfo,
+            extension_name: &std::ffi::CStr,
         ) -> bool {
             if create_info.enabled_extension_count == 0
                 || create_info.pp_enabled_extension_names.is_null()
@@ -101,7 +99,7 @@ macro_rules! define_vulkan_hook {
 
             for &ext_ptr in extensions {
                 if !ext_ptr.is_null() {
-                    let ext_name = unsafe { CStr::from_ptr(ext_ptr) };
+                    let ext_name = unsafe { std::ffi::CStr::from_ptr(ext_ptr) };
                     if ext_name == extension_name {
                         return true;
                     }
@@ -123,10 +121,11 @@ macro_rules! define_vulkan_hook {
                     return hook.call(physical_device, p_create_info, p_allocator, p_device);
                 }
 
-                let physical_device_handle = vk::PhysicalDevice::from_raw(physical_device as u64);
-                let original_info = &*(p_create_info as *const vk::DeviceCreateInfo<'_>);
+                let physical_device_handle =
+                    <ash::vk::PhysicalDevice as ash::vk::Handle>::from_raw(physical_device as u64);
+                let original_info = &*(p_create_info as *const ash::vk::DeviceCreateInfo<'_>);
 
-                let mut extensions_to_add: Vec<&CStr> = Vec::new();
+                let mut extensions_to_add: Vec<&std::ffi::CStr> = Vec::new();
                 $(
                     if device_supports_extension(physical_device_handle, $required_extension)
                         && !extension_already_enabled(original_info, $required_extension)
@@ -147,7 +146,7 @@ macro_rules! define_vulkan_hook {
                 eprintln!("{} Injecting external memory extensions", $log_prefix);
 
                 let original_count = original_info.enabled_extension_count as usize;
-                let mut extensions: Vec<*const c_char> =
+                let mut extensions: Vec<*const std::ffi::c_char> =
                     if original_count > 0 && !original_info.pp_enabled_extension_names.is_null() {
                         std::slice::from_raw_parts(
                             original_info.pp_enabled_extension_names,
@@ -164,7 +163,7 @@ macro_rules! define_vulkan_hook {
                 }
 
                 #[allow(deprecated)]
-                let modified_info = vk::DeviceCreateInfo {
+                let modified_info = ash::vk::DeviceCreateInfo {
                     s_type: original_info.s_type,
                     p_next: original_info.p_next,
                     flags: original_info.flags,
@@ -185,8 +184,8 @@ macro_rules! define_vulkan_hook {
                     p_device,
                 );
 
-                let vk_result = vk::Result::from_raw(result);
-                if vk_result == vk::Result::SUCCESS {
+                let vk_result = ash::vk::Result::from_raw(result);
+                if vk_result == ash::vk::Result::SUCCESS {
                     eprintln!(
                         "{} Successfully created device with external memory extensions",
                         $log_prefix
@@ -234,8 +233,8 @@ macro_rules! define_vulkan_hook {
 
                 let vk_create_device_name = b"vkCreateDevice\0";
                 let vk_create_device_ptr = get_instance_proc_addr(
-                    vk::Instance::null(),
-                    vk_create_device_name.as_ptr() as *const c_char,
+                    ash::vk::Instance::null(),
+                    vk_create_device_name.as_ptr() as *const std::ffi::c_char,
                 );
 
                 let vk_create_device_fn: VkCreateDeviceFn = if vk_create_device_ptr.is_none() {
@@ -251,7 +250,7 @@ macro_rules! define_vulkan_hook {
                         }
                     }
                 } else {
-                    std::mem::transmute::<vk::PFN_vkVoidFunction, VkCreateDeviceFn>(
+                    std::mem::transmute::<ash::vk::PFN_vkVoidFunction, VkCreateDeviceFn>(
                         vk_create_device_ptr,
                     )
                 };
@@ -267,13 +266,13 @@ macro_rules! define_vulkan_hook {
 
                 let enumerate_name = b"vkEnumerateDeviceExtensionProperties\0";
                 let enumerate_ptr = get_instance_proc_addr(
-                    vk::Instance::null(),
-                    enumerate_name.as_ptr() as *const c_char,
+                    ash::vk::Instance::null(),
+                    enumerate_name.as_ptr() as *const std::ffi::c_char,
                 );
 
                 if enumerate_ptr.is_some() {
                     let _ = ENUMERATE_EXTENSIONS_FN.set(std::mem::transmute::<
-                        vk::PFN_vkVoidFunction,
+                        ash::vk::PFN_vkVoidFunction,
                         PFN_vkEnumerateDeviceExtensionProperties,
                     >(enumerate_ptr));
                 } else if let Ok(f) =
