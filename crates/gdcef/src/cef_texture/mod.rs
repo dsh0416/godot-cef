@@ -662,11 +662,9 @@ impl CefTexture {
             0,
         );
 
-        #[cfg(target_os = "windows")]
-        let ops = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops));
-        #[cfg(not(target_os = "windows"))]
-        let ops =
-            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops as u32));
+        let ops = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
+            crate::cef_i32_to_raw!(allowed_ops),
+        ));
         self.with_app_mut(|app| {
             let Some(host) = app.host() else {
                 return;
@@ -686,11 +684,9 @@ impl CefTexture {
             0,
         );
 
-        #[cfg(target_os = "windows")]
-        let ops = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops));
-        #[cfg(not(target_os = "windows"))]
-        let ops =
-            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(allowed_ops as u32));
+        let ops = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
+            crate::cef_i32_to_raw!(allowed_ops),
+        ));
         self.with_app(|app| {
             if let Some(host) = app.host() {
                 host.drag_target_drag_over(Some(&mouse_event), ops);
@@ -729,11 +725,9 @@ impl CefTexture {
 
     #[func]
     pub fn drag_source_ended(&mut self, position: Vector2, operation: i32) {
-        #[cfg(target_os = "windows")]
-        let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(operation));
-        #[cfg(not(target_os = "windows"))]
-        let op =
-            cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(operation as u32));
+        let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
+            crate::cef_i32_to_raw!(operation),
+        ));
         self.with_app_mut(|app| {
             let Some(host) = app.host() else {
                 return;

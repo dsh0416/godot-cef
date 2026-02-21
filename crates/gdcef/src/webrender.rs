@@ -172,38 +172,17 @@ fn handle_popup_size(popup_state: &Arc<Mutex<cef_app::PopupState>>, rect: Option
 
 /// Helper to convert DragOperationsMask to u32 in a cross-platform way.
 fn drag_ops_to_u32(ops: DragOperationsMask) -> u32 {
-    #[cfg(target_os = "windows")]
-    {
-        ops.as_ref().0 as u32
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        ops.as_ref().0
-    }
+    crate::cef_raw_to_u32!(ops.as_ref().0)
 }
 
 /// Helper to convert MediaAccessPermissionTypes bitmask to u32 in a cross-platform way.
 fn media_permission_to_u32(permission: cef::MediaAccessPermissionTypes) -> u32 {
-    #[cfg(target_os = "windows")]
-    {
-        permission.get_raw() as u32
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        permission.get_raw()
-    }
+    crate::cef_raw_to_u32!(permission.get_raw())
 }
 
 /// Helper to convert PermissionRequestTypes bitmask to u32 in a cross-platform way.
 fn prompt_permission_to_u32(permission: cef::PermissionRequestTypes) -> u32 {
-    #[cfg(target_os = "windows")]
-    {
-        permission.get_raw() as u32
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        permission.get_raw()
-    }
+    crate::cef_raw_to_u32!(permission.get_raw())
 }
 
 fn cef_resource_type_to_adblock_request_type(resource_type: ResourceType) -> &'static str {
@@ -632,10 +611,7 @@ wrap_drag_handler! {
             if let Some(drag_data) = drag_data {
                 let drag_info = extract_drag_data_info(drag_data);
                 if let Ok(mut queues) = self.event_queues.lock() {
-                    #[cfg(target_os = "windows")]
-                    let mask: u32 = mask.as_ref().0 as u32;
-                    #[cfg(not(target_os = "windows"))]
-                    let mask: u32 = mask.as_ref().0;
+                    let mask: u32 = crate::cef_raw_to_u32!(mask.as_ref().0);
 
                     queues.drag_events.push_back(DragEvent::Entered {
                         drag_data: drag_info,
@@ -731,10 +707,7 @@ wrap_display_handler! {
         ) -> ::std::os::raw::c_int {
             let message_str = message.map(|m| m.to_string()).unwrap_or_default();
             let source_str = source.map(|s| s.to_string()).unwrap_or_default();
-            #[cfg(target_os = "windows")]
-            let level: u32 = level.get_raw() as u32;
-            #[cfg(not(target_os = "windows"))]
-            let level: u32 = level.get_raw();
+            let level: u32 = crate::cef_raw_to_u32!(level.get_raw());
 
             if let Ok(mut queues) = self.event_queues.lock() {
                 queues.console_messages.push_back(ConsoleMessageEvent {

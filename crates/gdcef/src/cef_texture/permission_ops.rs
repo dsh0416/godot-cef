@@ -133,12 +133,5 @@ pub(crate) fn resolve_permission_request(app: &App, request_id: i64, grant: bool
 }
 
 fn media_permission_none_mask() -> u32 {
-    #[cfg(target_os = "windows")]
-    {
-        cef::MediaAccessPermissionTypes::NONE.get_raw() as u32
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        cef::MediaAccessPermissionTypes::NONE.get_raw()
-    }
+    crate::cef_raw_to_u32!(cef::MediaAccessPermissionTypes::NONE.get_raw())
 }
