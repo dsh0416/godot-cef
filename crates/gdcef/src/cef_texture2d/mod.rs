@@ -171,10 +171,19 @@ impl CefTextureRuntime {
         logical_size: Vector2,
         dpi: f32,
     ) -> bool {
-        backend::handle_size_change(app, &mut self.last_size, &mut self.last_dpi, logical_size, dpi)
+        backend::handle_size_change(
+            app,
+            &mut self.last_size,
+            &mut self.last_dpi,
+            logical_size,
+            dpi,
+        )
     }
 
-    pub(crate) fn update_primary_texture(&mut self, log_prefix: &str) -> Option<Gd<godot::classes::Texture2Drd>> {
+    pub(crate) fn update_primary_texture(
+        &mut self,
+        log_prefix: &str,
+    ) -> Option<Gd<godot::classes::Texture2Drd>> {
         let Some(state) = &mut self.app.state else {
             return None;
         };

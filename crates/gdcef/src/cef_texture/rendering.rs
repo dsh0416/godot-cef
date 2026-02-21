@@ -15,7 +15,8 @@ impl CefTexture {
 
     pub(super) fn handle_max_fps_change(&mut self) {
         let max_fps = self.get_max_fps();
-        self.runtime.handle_max_fps_change_for_app(&self.app, max_fps);
+        self.runtime
+            .handle_max_fps_change_for_app(&self.app, max_fps);
     }
 
     pub(super) fn handle_size_change(&mut self) -> bool {
@@ -35,7 +36,8 @@ impl CefTexture {
             if should_bind_initial {
                 initial_texture = Some(state.render_mode.texture_2d());
             }
-            self.runtime.update_primary_texture_for_state(state, "CefTexture")
+            self.runtime
+                .update_primary_texture_for_state(state, "CefTexture")
         };
 
         if let Some(tex) = replacement {
