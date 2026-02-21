@@ -87,6 +87,8 @@ impl CefTexture {
                             accel_state.popup_rd_rid = Some(new_rid);
                             accel_state.popup_width = new_w;
                             accel_state.popup_height = new_h;
+                            // Ensure no stale resize request remains after completing popup resize.
+                            accel_state.needs_popup_texture = None;
                         }
                     });
                 }

@@ -85,7 +85,8 @@ pub struct CefTexture {
 impl ITextureRect for CefTexture {
     fn init(base: Base<TextureRect>) -> Self {
         let mut texture2d_helper = CefTexture2D::new_gd();
-        // CefTexture owns the active runtime; helper is settings-only.
+        // Runtime App state lives inside texture2d_helper; CefTexture owns its lifecycle and ticking,
+        // so ensure any existing runtime in the helper is shut down before this instance takes over.
         texture2d_helper.bind_mut().shutdown();
 
         Self {
