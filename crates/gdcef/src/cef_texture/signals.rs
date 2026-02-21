@@ -223,7 +223,9 @@ impl CefTexture {
     /// Uses `mem::take` to swap the entire `EventQueues` with an empty default,
     /// releasing the lock before any signal emission.
     pub(super) fn process_all_event_queues(&mut self) {
-        let Some(event_queues) = self.app.state.as_ref().map(|s| &s.event_queues) else {
+        let Some(event_queues) =
+            self.with_app(|app| app.state.as_ref().map(|s| s.event_queues.clone()))
+        else {
             return;
         };
 
@@ -380,8 +382,10 @@ impl CefTexture {
                             (*allowed_ops as i32).to_variant(),
                         ],
                     );
-                    self.app.drag_state.is_dragging_from_browser = true;
-                    self.app.drag_state.allowed_ops = *allowed_ops;
+                    self.with_app_mut(|app| {
+                        app.drag_state.is_dragging_from_browser = true;
+                        app.drag_state.allowed_ops = *allowed_ops;
+                    });
                 }
                 DragEvent::UpdateCursor { operation } => {
                     self.base_mut()
@@ -393,7 +397,9 @@ impl CefTexture {
                         "drag_entered",
                         &[drag_info.to_variant(), (*mask as i32).to_variant()],
                     );
-                    self.app.drag_state.is_drag_over = true;
+                    self.with_app_mut(|app| {
+                        app.drag_state.is_drag_over = true;
+                    });
                 }
             }
         }

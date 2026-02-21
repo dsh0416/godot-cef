@@ -66,7 +66,7 @@ impl CefTexture {
 
     /// Called when the IME proxy LineEdit text changes during composition.
     pub(super) fn on_ime_proxy_text_changed_impl(&mut self, new_text: GString) {
-        let Some(host) = self.app.host() else {
+        let Some(host) = self.with_app(|app| app.host()) else {
             return;
         };
 
@@ -124,7 +124,7 @@ impl CefTexture {
             proxy.grab_focus();
         }
 
-        if let Some(host) = self.app.host() {
+        if let Some(host) = self.with_app(|app| app.host()) {
             host.set_focus(true as _);
         }
 
@@ -159,7 +159,7 @@ impl CefTexture {
         let end = ime_selection.y.max(0) as u32;
 
         // Update the IME composition text
-        if let Some(host) = self.app.host() {
+        if let Some(host) = self.with_app(|app| app.host()) {
             input::ime_set_composition(&host, &ime_text, start, end);
         }
     }

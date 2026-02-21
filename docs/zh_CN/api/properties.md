@@ -1,9 +1,12 @@
 # 属性
 
 `CefTexture` 提供多项属性，用于配置与状态管理。
+在内部实现上，`CefTexture` 现在维护一个内部 `CefTexture2D` 辅助对象来复用
+设置/运行时相关能力，而交互相关能力（输入路由、IME 代理、弹出层与信号发射）
+仍由 `CefTexture` 负责。
 
-`CefTexture2D` 是一个仅渲染的 `Texture2D` 资源变体，与 `CefTexture`
-共享同一套浏览器/渲染后端。它可以直接赋值给 `Sprite2D.texture`
+`CefTexture2D` 是一个以渲染为主的 `Texture2D` 资源变体，也是运行时/设置能力
+的共享基础；它与 `CefTexture` 共享同一套浏览器/渲染后端。它可以直接赋值给 `Sprite2D.texture`
 以及 3D 材质纹理槽位。
 
 ## 节点属性
@@ -26,6 +29,9 @@
 | `texture_size` | `Vector2i` | `Vector2i(1024, 1024)` | 浏览器纹理逻辑尺寸（像素）。 |
 
 `CefTexture2D` 的 v1 版本刻意保持为仅渲染：不包含内置的 3D 表面输入映射/射线投射路由。
+
+`CefTexture2D` 也提供可选的底层 `forward_*` 输入辅助方法。
+这些方法不会自动进行节点坐标映射；调用方需要自行提供已映射的位置和缩放参数。
 
 ```gdscript
 var browser_tex := CefTexture2D.new()

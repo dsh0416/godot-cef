@@ -2,6 +2,49 @@
 
 `CefTexture` 提供一组方法，用于控制浏览器行为并与网页内容交互。
 
+## CefTexture2D 输入转发辅助方法
+
+`CefTexture2D` 仍以渲染/运行时为主，但也提供底层输入转发辅助方法，便于高级场景集成：
+
+- `forward_mouse_button_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_mouse_motion_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_pan_gesture_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_magnify_gesture_event(event)`
+- `forward_key_event(event, focus_on_editable_field)`
+- `forward_screen_touch_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_screen_drag_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_input_event(event, pixel_scale_factor, device_scale_factor, focus_on_editable_field)`
+
+这些方法刻意保持与节点类型无关：不会自动把事件坐标从 viewport/global
+空间转换为本地坐标。请在调用前自行完成坐标映射并传入明确的缩放参数。
+
+```gdscript
+# 示例：在 Sprite2D/3D 工作流中手动转发输入
+var browser_tex := CefTexture2D.new()
+browser_tex.texture_size = Vector2i(1024, 1024)
+
+func _unhandled_input(event: InputEvent) -> void:
+    var pixel_scale := 1.0
+    var device_scale := DisplayServer.screen_get_scale()
+    browser_tex.forward_input_event(event, pixel_scale, device_scale, false)
+```
+
+## CefTexture2D 运行时辅助方法
+
+`CefTexture2D` 还提供运行时/浏览器控制相关的辅助方法。`CefTexture` 内部会使用
+这些能力，高级用户也可以直接调用：
+
+- `eval(...)`
+- `go_back()`, `go_forward()`, `can_go_back()`, `can_go_forward()`
+- `reload()`, `reload_ignore_cache()`, `stop_loading()`, `is_loading()`
+- `set_zoom_level(...)`, `get_zoom_level()`
+- `set_audio_muted(...)`, `is_audio_muted()`
+- `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
+- `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
+
+当你直接使用 `CefTexture2D` 时，需要自行在场景中完成这些方法的集成（例如坐标
+映射与焦点状态管理）。
+
 ## 导航
 
 ### `go_back()`
