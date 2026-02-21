@@ -143,7 +143,7 @@ impl VulkanTextureImporter {
 
         // Try to find a separate queue for our copy operations
         // This avoids synchronization issues with Godot's main graphics queue
-        let (queue_family_index, queue_index, uses_separate_queue) =
+        let (mut queue_family_index, mut queue_index, mut uses_separate_queue) =
             Self::find_copy_queue(&lib, physical_device, fns);
 
         let mut queue: vk::Queue = unsafe { std::mem::zeroed() };
@@ -159,6 +159,9 @@ impl VulkanTextureImporter {
             unsafe {
                 (fns.get_device_queue)(device, 0, 0, &mut queue);
             }
+            queue_family_index = 0;
+            queue_index = 0;
+            uses_separate_queue = false;
         }
 
         if queue == vk::Queue::null() {
