@@ -1212,8 +1212,10 @@ fn push_permission_request(
                 request_id,
             });
     });
-    if !queued && let Ok(mut pending) = pending_permission_requests.lock() {
-        pending.remove(&request_id);
+    if !queued {
+        if let Ok(mut pending) = pending_permission_requests.lock() {
+            pending.remove(&request_id);
+        }
     }
 }
 
