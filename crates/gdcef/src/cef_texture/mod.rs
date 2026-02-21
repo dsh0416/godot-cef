@@ -6,10 +6,7 @@ mod permission_ops;
 mod rendering;
 mod signals;
 
-use cef::{
-    self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, ImplListValue, ImplProcessMessage,
-    do_message_loop_work,
-};
+use cef::{self, ImplBrowser, ImplBrowserHost, ImplDragData, ImplFrame, do_message_loop_work};
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
@@ -21,12 +18,8 @@ use godot::prelude::*;
 use std::collections::HashMap;
 
 use crate::browser::App;
-use crate::cef_texture2d::CefTextureRuntime;
+use crate::cef_texture2d::CefTexture2D;
 use crate::{cef_init, input};
-use cef_app::ipc_contract::{
-    ROUTE_IPC_BINARY_GODOT_TO_RENDERER, ROUTE_IPC_DATA_GODOT_TO_RENDERER,
-    ROUTE_IPC_GODOT_TO_RENDERER,
-};
 
 #[derive(GodotClass)]
 #[class(base=TextureRect)]
@@ -64,10 +57,14 @@ pub struct CefTexture {
     /// automatically updated from the browser's caret position.
     ime_position: Vector2i,
 
-    // Runtime settings and frame change tracking shared with CefTexture2D.
-    runtime: CefTextureRuntime,
+    // Internal CefTexture2D helper for shared settings behavior.
+    texture2d_helper: Gd<CefTexture2D>,
+    // Change detection state
+    last_size: Vector2,
+    last_dpi: f32,
     // UI-only change detection state
     last_cursor: cef_app::CursorType,
+    last_max_fps: i32,
     browser_create_deferred_pending: bool,
 
     // IME state
@@ -93,6 +90,10 @@ pub struct CefTexture {
 #[godot_api]
 impl ITextureRect for CefTexture {
     fn init(base: Base<TextureRect>) -> Self {
+        let mut texture2d_helper = CefTexture2D::new_gd();
+        // CefTexture owns the active runtime; helper is settings-only.
+        texture2d_helper.bind_mut().shutdown();
+
         Self {
             base,
             app: App::default(),
@@ -101,8 +102,11 @@ impl ITextureRect for CefTexture {
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
             popup_policy: crate::browser::popup_policy::BLOCK,
             ime_position: Vector2i::new(0, 0),
-            runtime: CefTextureRuntime::new(true),
+            texture2d_helper,
+            last_size: Vector2::ZERO,
+            last_dpi: 1.0,
             last_cursor: cef_app::CursorType::Arrow,
+            last_max_fps: 0,
             browser_create_deferred_pending: false,
             ime_active: false,
             ime_proxy: None,
@@ -125,6 +129,12 @@ impl ITextureRect for CefTexture {
             }
             ControlNotification::PROCESS => {
                 self.on_process();
+            }
+            ControlNotification::RESIZED => {
+                // React immediately to control size changes so CEF receives
+                // resize notifications even if process timing is delayed.
+                let _ = self.handle_size_change();
+                self.update_texture();
             }
             ControlNotification::PREDELETE => {
                 self.cleanup_instance();
@@ -154,11 +164,11 @@ impl ITextureRect for CefTexture {
 #[godot_api]
 impl CefTexture {
     fn sync_runtime_config(&mut self) {
-        self.runtime.set_url_state(self.url.clone());
-        self.runtime
-            .set_enable_accelerated_osr(self.enable_accelerated_osr);
-        self.runtime.set_background_color(self.background_color);
-        self.runtime.set_popup_policy_state(self.popup_policy);
+        let mut helper = self.texture2d_helper.bind_mut();
+        helper.set_url_property(self.url.clone());
+        helper.set_enable_accelerated_osr_property(self.enable_accelerated_osr);
+        helper.set_background_color_property(self.background_color);
+        helper.set_popup_policy(self.popup_policy);
     }
 
     fn event_position_to_local(&self, position: Vector2) -> Vector2 {
@@ -380,23 +390,17 @@ impl CefTexture {
     /// Executes JavaScript code in the browser's main frame.
     /// This is a fire-and-forget operation.
     pub fn eval(&mut self, code: GString) {
-        let Some(state) = self.app.state.as_ref() else {
-            godot::global::godot_warn!("[CefTexture] Cannot execute JS: no browser");
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[CefTexture] Cannot execute JS: no main frame");
-            return;
-        };
-
-        let code_str: cef::CefStringUtf16 = code.to_string().as_str().into();
-        frame.execute_java_script(Some(&code_str), None, 0);
+        self.texture2d_helper
+            .bind()
+            .eval_in_app(&self.app, code, "CefTexture");
     }
 
     #[func]
     fn set_url_property(&mut self, url: GString) {
         self.url = url.clone();
-        self.runtime.set_url_state(url.clone());
+        self.texture2d_helper
+            .bind_mut()
+            .set_url_property(url.clone());
 
         if let Some(state) = self.app.state.as_ref()
             && let Some(frame) = state.browser.main_frame()
@@ -409,142 +413,98 @@ impl CefTexture {
     #[func]
     /// Navigates back in the browser history.
     pub fn go_back(&mut self) {
-        if let Some(browser) = self.app.browser_mut() {
-            browser.go_back();
-        }
+        self.texture2d_helper.bind().go_back_in_app(&mut self.app);
     }
 
     #[func]
     /// Navigates forward in the browser history.
     pub fn go_forward(&mut self) {
-        if let Some(browser) = self.app.browser_mut() {
-            browser.go_forward();
-        }
+        self.texture2d_helper
+            .bind()
+            .go_forward_in_app(&mut self.app);
     }
 
     #[func]
     pub fn can_go_back(&self) -> bool {
-        self.app
-            .browser()
-            .map(|b| b.can_go_back() != 0)
-            .unwrap_or(false)
+        self.texture2d_helper.bind().can_go_back_in_app(&self.app)
     }
 
     #[func]
     pub fn can_go_forward(&self) -> bool {
-        self.app
-            .browser()
-            .map(|b| b.can_go_forward() != 0)
-            .unwrap_or(false)
+        self.texture2d_helper
+            .bind()
+            .can_go_forward_in_app(&self.app)
     }
 
     #[func]
     /// Reloads the current page.
     pub fn reload(&mut self) {
-        if let Some(browser) = self.app.browser_mut() {
-            browser.reload();
-        }
+        self.texture2d_helper.bind().reload_in_app(&mut self.app);
     }
 
     #[func]
     /// Reloads the current page, ignoring cached content.
     pub fn reload_ignore_cache(&mut self) {
-        if let Some(browser) = self.app.browser_mut() {
-            browser.reload_ignore_cache();
-        }
+        self.texture2d_helper
+            .bind()
+            .reload_ignore_cache_in_app(&mut self.app);
     }
 
     #[func]
     /// Stops the current page load.
     pub fn stop_loading(&mut self) {
-        if let Some(browser) = self.app.browser_mut() {
-            browser.stop_load();
-        }
+        self.texture2d_helper
+            .bind()
+            .stop_loading_in_app(&mut self.app);
     }
 
     #[func]
     /// Starts a new find-in-page search.
     pub fn find_text(&mut self, query: GString, forward: bool, match_case: bool) {
-        let Some(host) = self.app.host() else {
-            return;
-        };
-
-        let query_string = query.to_string();
-        if query_string.is_empty() {
-            host.stop_finding(true as _);
-            self.last_find_query = GString::new();
-            self.last_find_match_case = false;
-            return;
-        }
-
-        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
-        host.find(
-            Some(&query_cef),
-            forward as _,
-            match_case as _,
-            false as _, // new search
+        self.texture2d_helper.bind().find_text_in_app(
+            &self.app,
+            query,
+            forward,
+            match_case,
+            &mut self.last_find_query,
+            &mut self.last_find_match_case,
         );
-        self.last_find_query = query;
-        self.last_find_match_case = match_case;
     }
 
     #[func]
     /// Jumps to the next result for the last find query.
     pub fn find_next(&mut self) {
-        let Some(host) = self.app.host() else {
-            return;
-        };
-        if self.last_find_query.is_empty() {
-            return;
-        }
-
-        let query_string = self.last_find_query.to_string();
-        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
-        host.find(
-            Some(&query_cef),
-            true as _,
-            self.last_find_match_case as _,
-            true as _, // continue existing search
+        self.texture2d_helper.bind().find_next_in_app(
+            &self.app,
+            &self.last_find_query,
+            self.last_find_match_case,
         );
     }
 
     #[func]
     /// Jumps to the previous result for the last find query.
     pub fn find_previous(&mut self) {
-        let Some(host) = self.app.host() else {
-            return;
-        };
-        if self.last_find_query.is_empty() {
-            return;
-        }
-
-        let query_string = self.last_find_query.to_string();
-        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
-        host.find(
-            Some(&query_cef),
-            false as _,
-            self.last_find_match_case as _,
-            true as _, // continue existing search
+        self.texture2d_helper.bind().find_previous_in_app(
+            &self.app,
+            &self.last_find_query,
+            self.last_find_match_case,
         );
     }
 
     #[func]
     /// Stops active find-in-page highlighting and clears selection.
     pub fn stop_finding(&mut self) {
-        if let Some(host) = self.app.host() {
-            host.stop_finding(true as _);
-        }
-        self.last_find_query = GString::new();
-        self.last_find_match_case = false;
+        self.texture2d_helper.bind().stop_finding_in_app(
+            &self.app,
+            &mut self.last_find_query,
+            &mut self.last_find_match_case,
+        );
     }
 
     #[func]
     /// Returns true if the browser is currently loading a page.
     pub fn is_loading(&self) -> bool {
-        self.app
-            .browser()
-            .map(|b| b.is_loading() != 0)
-            .unwrap_or(false)
+        self.texture2d_helper.bind().is_loading_in_app(&self.app)
     }
 
     #[func]
@@ -556,22 +516,24 @@ impl CefTexture {
             let url_string = cef::CefStringUtf16::from(&frame_url).to_string();
             return GString::from(url_string.as_str());
         }
-        self.runtime.url_state()
+        self.texture2d_helper.bind().get_url_property()
     }
 
     #[func]
     /// Sets the zoom level. 0.0 is 100%.
     /// Positive values zoom in, negative values zoom out.
     pub fn set_zoom_level(&mut self, level: f64) {
-        if let Some(host) = self.app.host() {
-            host.set_zoom_level(level);
-        }
+        self.texture2d_helper
+            .bind()
+            .set_zoom_level_in_app(&self.app, level);
     }
 
     #[func]
     /// Returns the current zoom level.
     pub fn get_zoom_level(&self) -> f64 {
-        self.app.host().map(|h| h.zoom_level()).unwrap_or(0.0)
+        self.texture2d_helper
+            .bind()
+            .get_zoom_level_in_app(&self.app)
     }
 
     #[func]
@@ -587,24 +549,9 @@ impl CefTexture {
     /// Use this when you want structured IPC into the page, and `eval` when
     /// you truly need arbitrary JavaScript execution.
     pub fn send_ipc_message(&mut self, message: GString) {
-        let Some(state) = self.app.state.as_ref() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no browser");
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send IPC message: no main frame");
-            return;
-        };
-
-        let route = cef::CefStringUtf16::from(ROUTE_IPC_GODOT_TO_RENDERER);
-        let msg_str: cef::CefStringUtf16 = message.to_string().as_str().into();
-
-        if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
-            if let Some(argument_list) = process_message.argument_list() {
-                argument_list.set_string(0, Some(&msg_str));
-            }
-            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-        }
+        self.texture2d_helper
+            .bind()
+            .send_ipc_message_in_app(&self.app, message, "CefTexture");
     }
 
     #[func]
@@ -616,43 +563,9 @@ impl CefTexture {
     /// Uses native CEF process messaging with BinaryValue for zero-copy
     /// binary transfer without encoding overhead.
     pub fn send_ipc_binary_message(&mut self, data: PackedByteArray) {
-        let Some(state) = self.app.state.as_ref() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send binary IPC message: no browser");
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send binary IPC message: no main frame"
-            );
-            return;
-        };
-
-        let route = cef::CefStringUtf16::from(ROUTE_IPC_BINARY_GODOT_TO_RENDERER);
-        let bytes = data.to_vec();
-
-        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send binary IPC message: failed to create BinaryValue"
-            );
-            return;
-        };
-
-        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send binary IPC message: failed to create process message"
-            );
-            return;
-        };
-
-        let Some(argument_list) = process_message.argument_list() else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send binary IPC message: failed to get argument list"
-            );
-            return;
-        };
-
-        argument_list.set_binary(0, Some(&mut binary_value));
-        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+        self.texture2d_helper
+            .bind()
+            .send_ipc_binary_message_in_app(&self.app, data, "CefTexture");
     }
 
     #[func]
@@ -662,70 +575,25 @@ impl CefTexture {
     /// packed byte arrays. Unsupported Godot-specific types are tagged as
     /// metadata maps to keep transport failure-safe.
     pub fn send_ipc_data(&mut self, data: Variant) {
-        let Some(state) = self.app.state.as_ref() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send IPC data: no browser");
-            return;
-        };
-        let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[CefTexture] Cannot send IPC data: no main frame");
-            return;
-        };
-
-        let bytes = match crate::ipc_data::encode_variant_to_cbor_bytes(&data) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                godot::global::godot_warn!("[CefTexture] Cannot encode IPC data: {}", err);
-                return;
-            }
-        };
-
-        if bytes.len() > crate::ipc_data::max_ipc_data_bytes() {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send IPC data: payload too large ({} bytes)",
-                bytes.len()
-            );
-            return;
-        }
-
-        let route = cef::CefStringUtf16::from(ROUTE_IPC_DATA_GODOT_TO_RENDERER);
-        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send IPC data: failed to create BinaryValue"
-            );
-            return;
-        };
-        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send IPC data: failed to create process message"
-            );
-            return;
-        };
-        let Some(argument_list) = process_message.argument_list() else {
-            godot::global::godot_warn!(
-                "[CefTexture] Cannot send IPC data: failed to get argument list"
-            );
-            return;
-        };
-
-        argument_list.set_binary(0, Some(&mut binary_value));
-        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+        self.texture2d_helper
+            .bind()
+            .send_ipc_data_in_app(&self.app, data, "CefTexture");
     }
 
     #[func]
     /// Mutes or unmutes audio from this browser instance.
     pub fn set_audio_muted(&mut self, muted: bool) {
-        if let Some(host) = self.app.host() {
-            host.set_audio_muted(muted as i32);
-        }
+        self.texture2d_helper
+            .bind()
+            .set_audio_muted_in_app(&self.app, muted);
     }
 
     #[func]
     /// Returns true if audio is currently muted.
     pub fn is_audio_muted(&self) -> bool {
-        self.app
-            .host()
-            .map(|h| h.is_audio_muted() != 0)
-            .unwrap_or(false)
+        self.texture2d_helper
+            .bind()
+            .is_audio_muted_in_app(&self.app)
     }
 
     /// Creates an AudioStreamGenerator configured for this browser's audio.
@@ -954,8 +822,8 @@ impl CefTexture {
     #[func]
     fn set_popup_policy(&mut self, policy: i32) {
         self.popup_policy = policy;
-        self.runtime.set_popup_policy_state(policy);
-        self.runtime.apply_popup_policy_for_app(&self.app, policy);
+        self.texture2d_helper.bind_mut().set_popup_policy(policy);
+        backend::apply_popup_policy(&self.app, policy);
     }
 
     #[func]

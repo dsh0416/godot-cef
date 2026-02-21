@@ -2,6 +2,52 @@
 
 The `CefTexture` node provides comprehensive methods for controlling browser behavior and interacting with web content.
 
+## CefTexture2D Input Forwarding Helpers
+
+`CefTexture2D` stays render/runtime-focused, but it also exposes low-level input
+forwarding helpers for advanced integrations:
+
+- `forward_mouse_button_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_mouse_motion_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_pan_gesture_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_magnify_gesture_event(event)`
+- `forward_key_event(event, focus_on_editable_field)`
+- `forward_screen_touch_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_screen_drag_event(event, pixel_scale_factor, device_scale_factor)`
+- `forward_input_event(event, pixel_scale_factor, device_scale_factor, focus_on_editable_field)`
+
+These methods are intentionally node-agnostic: they do not transform event
+coordinates from viewport/global space. Pass already-mapped local coordinates
+and explicit scale factors from your scene setup.
+
+```gdscript
+# Example: manual forwarding for a Sprite2D/3D workflow
+var browser_tex := CefTexture2D.new()
+browser_tex.texture_size = Vector2i(1024, 1024)
+
+func _unhandled_input(event: InputEvent) -> void:
+    var pixel_scale := 1.0
+    var device_scale := DisplayServer.screen_get_scale()
+    browser_tex.forward_input_event(event, pixel_scale, device_scale, false)
+```
+
+## CefTexture2D Runtime Helpers
+
+`CefTexture2D` also exposes runtime/browser control helpers that `CefTexture`
+uses internally and advanced users can call directly:
+
+- `eval(...)`
+- `go_back()`, `go_forward()`, `can_go_back()`, `can_go_forward()`
+- `reload()`, `reload_ignore_cache()`, `stop_loading()`, `is_loading()`
+- `set_zoom_level(...)`, `get_zoom_level()`
+- `set_audio_muted(...)`, `is_audio_muted()`
+- `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
+- `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
+
+When using `CefTexture2D` directly, you are responsible for integrating these
+helpers with your scene/input flow (for example, mapping coordinates and focus
+state).
+
 ## Navigation
 
 ### `go_back()`

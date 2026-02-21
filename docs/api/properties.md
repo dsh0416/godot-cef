@@ -1,12 +1,12 @@
 # Properties
 
 The `CefTexture` node provides several properties for configuration and state management.
-Internally, `CefTexture` now shares the same runtime/settings core as `CefTexture2D`,
-while still owning interaction-specific features (input routing, IME proxy, popup
-overlay, and signal emission).
+Internally, `CefTexture` now keeps an internal `CefTexture2D` helper for shared
+settings/runtime-oriented operations, while still owning interaction-specific
+features (input routing, IME proxy, popup overlay, and signal emission).
 
-`CefTexture2D` is a render-only `Texture2D` resource variant that is now the
-primary home for browser runtime/settings state. It can be assigned directly to
+`CefTexture2D` is a render-first `Texture2D` resource variant and the shared
+foundation for runtime/settings behavior. It can be assigned directly to
 `Sprite2D.texture` and 3D material texture slots.
 
 ## Node Properties
@@ -40,6 +40,10 @@ the user), use a `CefTexture` node in the scene tree instead and connect to
 its signals (such as `loading_state_changed`). The node-based `CefTexture`
 can be assigned anywhere a `Texture2D` is accepted (e.g. `Sprite2D.texture`
 or material texture slots) whenever you require those events.
+
+`CefTexture2D` does provide optional low-level `forward_*` input helper methods.
+These helpers do not perform node-space coordinate mapping; callers must provide
+already-mapped positions and explicit scale factors.
 
 ```gdscript
 var browser_tex := CefTexture2D.new()

@@ -1,4 +1,4 @@
-use super::CefTexture;
+use super::{CefTexture, backend};
 use godot::classes::TextureRect;
 use godot::classes::control::MouseFilter;
 use godot::classes::texture_rect::ExpandMode;
@@ -10,20 +10,24 @@ use crate::{cursor, render};
 
 impl CefTexture {
     pub(super) fn get_max_fps(&self) -> i32 {
-        self.runtime.max_fps_setting()
+        backend::get_max_fps()
     }
 
     pub(super) fn handle_max_fps_change(&mut self) {
         let max_fps = self.get_max_fps();
-        self.runtime
-            .handle_max_fps_change_for_app(&self.app, max_fps);
+        backend::handle_max_fps_change(&self.app, &mut self.last_max_fps, max_fps);
     }
 
     pub(super) fn handle_size_change(&mut self) -> bool {
         let logical_size = self.base().get_size();
         let dpi = self.get_pixel_scale_factor();
-        self.runtime
-            .handle_size_change_for_app(&self.app, logical_size, dpi)
+        backend::handle_size_change(
+            &self.app,
+            &mut self.last_size,
+            &mut self.last_dpi,
+            logical_size,
+            dpi,
+        )
     }
 
     pub(super) fn update_texture(&mut self) {
@@ -36,8 +40,7 @@ impl CefTexture {
             if should_bind_initial {
                 initial_texture = Some(state.render_mode.texture_2d());
             }
-            self.runtime
-                .update_primary_texture_for_state(state, "CefTexture")
+            backend::update_primary_texture(state, "CefTexture")
         };
 
         if let Some(tex) = replacement {
@@ -187,7 +190,7 @@ impl CefTexture {
     }
 
     pub(super) fn request_external_begin_frame(&mut self) {
-        self.runtime.request_external_begin_frame_for_app(&self.app);
+        backend::request_external_begin_frame(&self.app);
     }
 
     pub(super) fn update_cursor(&mut self) {

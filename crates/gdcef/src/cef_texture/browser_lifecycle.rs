@@ -1,5 +1,6 @@
 use super::CefTexture;
 use crate::browser::LifecycleState;
+use crate::cef_texture::backend;
 use crate::error::CefError;
 use godot::prelude::*;
 
@@ -23,8 +24,7 @@ impl CefTexture {
 
     pub(super) fn cleanup_instance(&mut self) {
         self.base_mut().set_visible(false);
-        self.runtime
-            .cleanup_runtime_for_app(&mut self.app, self.popup_texture_2d_rd.as_mut());
+        backend::cleanup_runtime(&mut self.app, self.popup_texture_2d_rd.as_mut());
 
         self.ime_active = false;
         self.ime_proxy = None;
@@ -62,14 +62,18 @@ impl CefTexture {
         let dpi = self.get_pixel_scale_factor();
         let max_fps = self.get_max_fps();
         self.sync_runtime_config();
-        if let Err(err) = self.runtime.try_create_browser_for_app(
-            &mut self.app,
+        let params = backend::BackendCreateParams {
             logical_size,
             dpi,
             max_fps,
-            None,
-            "CefTexture",
-        ) {
+            url: self.url.to_string(),
+            enable_accelerated_osr: self.enable_accelerated_osr,
+            background_color: self.background_color,
+            popup_policy: self.popup_policy,
+            software_target_texture: None,
+            log_prefix: "CefTexture",
+        };
+        if let Err(err) = backend::try_create_browser(&mut self.app, &params) {
             self.app.mark_browser_closed();
             return Err(err);
         }
@@ -79,8 +83,8 @@ impl CefTexture {
             self.base_mut().set_texture(&texture);
         }
 
-        *self.runtime.last_size_mut() = logical_size;
-        *self.runtime.last_dpi_mut() = dpi;
+        self.last_size = logical_size;
+        self.last_dpi = dpi;
         Ok(())
     }
 }

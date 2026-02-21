@@ -1,14 +1,23 @@
-use cef::{ImplBrowser, ImplFrame};
+use cef::{ImplBrowser, ImplBrowserHost, ImplFrame, ImplListValue, ImplProcessMessage};
 use godot::classes::image::Format as ImageFormat;
 use godot::classes::notify::ObjectNotification;
-use godot::classes::{Engine, ITexture2D, Image, ImageTexture, RenderingServer, Texture2D};
+use godot::classes::{
+    Engine, ITexture2D, Image, ImageTexture, InputEvent, InputEventKey, InputEventMagnifyGesture,
+    InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, InputEventScreenDrag,
+    InputEventScreenTouch, RenderingServer, Texture2D,
+};
 use godot::prelude::*;
+use std::collections::HashMap;
 
-use crate::browser::{App, BrowserState, RenderMode};
+use crate::browser::{App, RenderMode};
 use crate::cef_init;
 use crate::cef_texture::backend;
-use crate::error::CefError;
+use crate::input;
 use crate::render;
+use cef_app::ipc_contract::{
+    ROUTE_IPC_BINARY_GODOT_TO_RENDERER, ROUTE_IPC_DATA_GODOT_TO_RENDERER,
+    ROUTE_IPC_GODOT_TO_RENDERER,
+};
 
 pub(crate) struct CefTextureRuntime {
     app: App,
@@ -37,6 +46,10 @@ impl CefTextureRuntime {
         }
     }
 
+    pub(crate) fn app(&self) -> &App {
+        &self.app
+    }
+
     pub(crate) fn app_mut(&mut self) -> &mut App {
         &mut self.app
     }
@@ -63,10 +76,6 @@ impl CefTextureRuntime {
         self.url = url;
     }
 
-    pub(crate) fn url_state(&self) -> GString {
-        self.url.clone()
-    }
-
     pub(crate) fn get_url_property(&self) -> GString {
         if let Some(state) = self.app.state.as_ref()
             && let Some(frame) = state.browser.main_frame()
@@ -83,24 +92,12 @@ impl CefTextureRuntime {
         backend::apply_popup_policy(&self.app, policy);
     }
 
-    pub(crate) fn set_popup_policy_state(&mut self, policy: i32) {
-        self.popup_policy = policy;
-    }
-
     pub(crate) fn set_enable_accelerated_osr(&mut self, enabled: bool) {
         self.enable_accelerated_osr = enabled;
     }
 
     pub(crate) fn set_background_color(&mut self, color: Color) {
         self.background_color = color;
-    }
-
-    pub(crate) fn last_size_mut(&mut self) -> &mut Vector2 {
-        &mut self.last_size
-    }
-
-    pub(crate) fn last_dpi_mut(&mut self) -> &mut f32 {
-        &mut self.last_dpi
     }
 
     pub(crate) fn shutdown(&mut self) {
@@ -147,32 +144,9 @@ impl CefTextureRuntime {
         backend::handle_max_fps_change(&self.app, &mut self.last_max_fps, max_fps);
     }
 
-    pub(crate) fn max_fps_setting(&self) -> i32 {
-        backend::get_max_fps()
-    }
-
-    pub(crate) fn handle_max_fps_change_for_app(&mut self, app: &App, max_fps: i32) {
-        backend::handle_max_fps_change(app, &mut self.last_max_fps, max_fps);
-    }
-
     pub(crate) fn handle_size_change(&mut self, logical_size: Vector2, dpi: f32) -> bool {
         backend::handle_size_change(
             &self.app,
-            &mut self.last_size,
-            &mut self.last_dpi,
-            logical_size,
-            dpi,
-        )
-    }
-
-    pub(crate) fn handle_size_change_for_app(
-        &mut self,
-        app: &App,
-        logical_size: Vector2,
-        dpi: f32,
-    ) -> bool {
-        backend::handle_size_change(
-            app,
             &mut self.last_size,
             &mut self.last_dpi,
             logical_size,
@@ -190,14 +164,6 @@ impl CefTextureRuntime {
         backend::update_primary_texture(state, log_prefix)
     }
 
-    pub(crate) fn update_primary_texture_for_state(
-        &self,
-        state: &mut BrowserState,
-        log_prefix: &str,
-    ) -> Option<Gd<godot::classes::Texture2Drd>> {
-        backend::update_primary_texture(state, log_prefix)
-    }
-
     pub(crate) fn message_loop_and_begin_frame(&self) {
         if self.app.state.is_some() {
             cef::do_message_loop_work();
@@ -205,50 +171,11 @@ impl CefTextureRuntime {
         backend::request_external_begin_frame(&self.app);
     }
 
-    pub(crate) fn request_external_begin_frame_for_app(&self, app: &App) {
-        backend::request_external_begin_frame(app);
-    }
-
     pub(crate) fn cleanup_runtime(
         &mut self,
         popup_texture_2d_rd: Option<&mut Gd<godot::classes::Texture2Drd>>,
     ) {
         backend::cleanup_runtime(&mut self.app, popup_texture_2d_rd);
-    }
-
-    pub(crate) fn cleanup_runtime_for_app(
-        &self,
-        app: &mut App,
-        popup_texture_2d_rd: Option<&mut Gd<godot::classes::Texture2Drd>>,
-    ) {
-        backend::cleanup_runtime(app, popup_texture_2d_rd);
-    }
-
-    pub(crate) fn apply_popup_policy_for_app(&self, app: &App, policy: i32) {
-        backend::apply_popup_policy(app, policy);
-    }
-
-    pub(crate) fn try_create_browser_for_app(
-        &self,
-        app: &mut App,
-        logical_size: Vector2,
-        dpi: f32,
-        max_fps: i32,
-        software_target_texture: Option<Gd<ImageTexture>>,
-        log_prefix: &'static str,
-    ) -> Result<(), CefError> {
-        let params = backend::BackendCreateParams {
-            logical_size,
-            dpi,
-            max_fps,
-            url: self.url.to_string(),
-            enable_accelerated_osr: self.enable_accelerated_osr,
-            background_color: self.background_color,
-            popup_policy: self.popup_policy,
-            software_target_texture,
-            log_prefix,
-        };
-        backend::try_create_browser(app, &params)
     }
 
     pub(crate) fn drain_event_queues(&self, log_prefix: &str) {
@@ -297,6 +224,10 @@ pub struct CefTexture2D {
     #[var(get = get_texture_size_property, set = set_texture_size_property)]
     texture_size: Vector2i,
 
+    last_find_query: GString,
+    last_find_match_case: bool,
+    touch_id_map: HashMap<i32, i32>,
+    next_touch_id: i32,
     frame_hook_callable: Option<Callable>,
     frame_hook_connected: bool,
 }
@@ -330,6 +261,10 @@ impl ITexture2D for CefTexture2D {
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
             popup_policy: crate::browser::popup_policy::BLOCK,
             texture_size,
+            last_find_query: GString::new(),
+            last_find_match_case: false,
+            touch_id_map: HashMap::new(),
+            next_touch_id: 0,
             frame_hook_callable: Some(frame_hook_callable),
             frame_hook_connected: true,
         }
@@ -367,6 +302,16 @@ impl ITexture2D for CefTexture2D {
 
 #[godot_api]
 impl CefTexture2D {
+    pub(crate) fn set_enable_accelerated_osr_property(&mut self, enabled: bool) {
+        self.enable_accelerated_osr = enabled;
+        self.runtime.set_enable_accelerated_osr(enabled);
+    }
+
+    pub(crate) fn set_background_color_property(&mut self, color: Color) {
+        self.background_color = color;
+        self.runtime.set_background_color(color);
+    }
+
     fn sync_runtime_config(&mut self) {
         self.runtime.set_url_state(self.url.clone());
         self.runtime
@@ -381,34 +326,34 @@ impl CefTexture2D {
     }
 
     #[func]
-    fn set_url_property(&mut self, url: GString) {
+    pub(crate) fn set_url_property(&mut self, url: GString) {
         self.url = url.clone();
         self.runtime.set_url(url);
     }
 
     #[func]
-    fn get_url_property(&self) -> GString {
+    pub(crate) fn get_url_property(&self) -> GString {
         self.runtime.get_url_property()
     }
 
     #[func]
-    fn get_popup_policy(&self) -> i32 {
+    pub(crate) fn get_popup_policy(&self) -> i32 {
         self.popup_policy
     }
 
     #[func]
-    fn set_popup_policy(&mut self, policy: i32) {
+    pub(crate) fn set_popup_policy(&mut self, policy: i32) {
         self.popup_policy = policy;
         self.runtime.set_popup_policy(policy);
     }
 
     #[func]
-    fn get_texture_size_property(&self) -> Vector2i {
+    pub(crate) fn get_texture_size_property(&self) -> Vector2i {
         self.texture_size
     }
 
     #[func]
-    fn set_texture_size_property(&mut self, size: Vector2i) {
+    pub(crate) fn set_texture_size_property(&mut self, size: Vector2i) {
         let clamped = Vector2i::new(size.x.max(1), size.y.max(1));
         if clamped == self.texture_size {
             return;
@@ -429,6 +374,689 @@ impl CefTexture2D {
     pub fn shutdown(&mut self) {
         self.runtime.shutdown();
         self.cleanup_instance();
+    }
+
+    #[func]
+    pub fn eval(&mut self, code: GString) {
+        let Some(state) = self.runtime.app().state.as_ref() else {
+            godot::global::godot_warn!("[CefTexture2D] Cannot execute JS: no browser");
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture2D] Cannot execute JS: no main frame");
+            return;
+        };
+        let code_str: cef::CefStringUtf16 = code.to_string().as_str().into();
+        frame.execute_java_script(Some(&code_str), None, 0);
+    }
+
+    #[func]
+    pub fn go_back(&mut self) {
+        if let Some(browser) = self.runtime.app_mut().browser_mut() {
+            browser.go_back();
+        }
+    }
+
+    #[func]
+    pub fn go_forward(&mut self) {
+        if let Some(browser) = self.runtime.app_mut().browser_mut() {
+            browser.go_forward();
+        }
+    }
+
+    #[func]
+    pub fn can_go_back(&self) -> bool {
+        self.runtime
+            .app()
+            .browser()
+            .map(|b| b.can_go_back() != 0)
+            .unwrap_or(false)
+    }
+
+    #[func]
+    pub fn can_go_forward(&self) -> bool {
+        self.runtime
+            .app()
+            .browser()
+            .map(|b| b.can_go_forward() != 0)
+            .unwrap_or(false)
+    }
+
+    #[func]
+    pub fn reload(&mut self) {
+        if let Some(browser) = self.runtime.app_mut().browser_mut() {
+            browser.reload();
+        }
+    }
+
+    #[func]
+    pub fn reload_ignore_cache(&mut self) {
+        if let Some(browser) = self.runtime.app_mut().browser_mut() {
+            browser.reload_ignore_cache();
+        }
+    }
+
+    #[func]
+    pub fn stop_loading(&mut self) {
+        if let Some(browser) = self.runtime.app_mut().browser_mut() {
+            browser.stop_load();
+        }
+    }
+
+    #[func]
+    pub fn is_loading(&self) -> bool {
+        self.runtime
+            .app()
+            .browser()
+            .map(|b| b.is_loading() != 0)
+            .unwrap_or(false)
+    }
+
+    #[func]
+    pub fn set_zoom_level(&mut self, level: f64) {
+        if let Some(host) = self.runtime.app().host() {
+            host.set_zoom_level(level);
+        }
+    }
+
+    #[func]
+    pub fn get_zoom_level(&self) -> f64 {
+        self.runtime
+            .app()
+            .host()
+            .map(|h| h.zoom_level())
+            .unwrap_or(0.0)
+    }
+
+    #[func]
+    pub fn set_audio_muted(&mut self, muted: bool) {
+        if let Some(host) = self.runtime.app().host() {
+            host.set_audio_muted(muted as i32);
+        }
+    }
+
+    #[func]
+    pub fn is_audio_muted(&self) -> bool {
+        self.runtime
+            .app()
+            .host()
+            .map(|h| h.is_audio_muted() != 0)
+            .unwrap_or(false)
+    }
+
+    #[func]
+    pub fn send_ipc_message(&mut self, message: GString) {
+        let Some(state) = self.runtime.app().state.as_ref() else {
+            godot::global::godot_warn!("[CefTexture2D] Cannot send IPC message: no browser");
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture2D] Cannot send IPC message: no main frame");
+            return;
+        };
+
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_GODOT_TO_RENDERER);
+        let msg_str: cef::CefStringUtf16 = message.to_string().as_str().into();
+
+        if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
+            if let Some(argument_list) = process_message.argument_list() {
+                argument_list.set_string(0, Some(&msg_str));
+            }
+            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+        }
+    }
+
+    #[func]
+    pub fn send_ipc_binary_message(&mut self, data: PackedByteArray) {
+        let Some(state) = self.runtime.app().state.as_ref() else {
+            godot::global::godot_warn!("[CefTexture2D] Cannot send binary IPC message: no browser");
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send binary IPC message: no main frame"
+            );
+            return;
+        };
+
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_BINARY_GODOT_TO_RENDERER);
+        let bytes = data.to_vec();
+        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send binary IPC message: failed to create BinaryValue"
+            );
+            return;
+        };
+        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send binary IPC message: failed to create process message"
+            );
+            return;
+        };
+        let Some(argument_list) = process_message.argument_list() else {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send binary IPC message: failed to get argument list"
+            );
+            return;
+        };
+        argument_list.set_binary(0, Some(&mut binary_value));
+        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+    }
+
+    #[func]
+    pub fn send_ipc_data(&mut self, data: Variant) {
+        let Some(state) = self.runtime.app().state.as_ref() else {
+            godot::global::godot_warn!("[CefTexture2D] Cannot send IPC data: no browser");
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[CefTexture2D] Cannot send IPC data: no main frame");
+            return;
+        };
+        let bytes = match crate::ipc_data::encode_variant_to_cbor_bytes(&data) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                godot::global::godot_warn!("[CefTexture2D] Cannot encode IPC data: {}", err);
+                return;
+            }
+        };
+        if bytes.len() > crate::ipc_data::max_ipc_data_bytes() {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send IPC data: payload too large ({} bytes)",
+                bytes.len()
+            );
+            return;
+        }
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_DATA_GODOT_TO_RENDERER);
+        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send IPC data: failed to create BinaryValue"
+            );
+            return;
+        };
+        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send IPC data: failed to create process message"
+            );
+            return;
+        };
+        let Some(argument_list) = process_message.argument_list() else {
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send IPC data: failed to get argument list"
+            );
+            return;
+        };
+        argument_list.set_binary(0, Some(&mut binary_value));
+        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+    }
+
+    #[func]
+    pub fn find_text(&mut self, query: GString, forward: bool, match_case: bool) {
+        let Some(host) = self.runtime.app().host() else {
+            return;
+        };
+        let query_string = query.to_string();
+        if query_string.is_empty() {
+            host.stop_finding(true as _);
+            self.last_find_query = GString::new();
+            self.last_find_match_case = false;
+            return;
+        }
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(
+            Some(&query_cef),
+            forward as _,
+            match_case as _,
+            false as _, // new search
+        );
+        self.last_find_query = query;
+        self.last_find_match_case = match_case;
+    }
+
+    #[func]
+    pub fn find_next(&mut self) {
+        let Some(host) = self.runtime.app().host() else {
+            return;
+        };
+        if self.last_find_query.is_empty() {
+            return;
+        }
+        let query_string = self.last_find_query.to_string();
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(
+            Some(&query_cef),
+            true as _,
+            self.last_find_match_case as _,
+            true as _, // continue existing search
+        );
+    }
+
+    #[func]
+    pub fn find_previous(&mut self) {
+        let Some(host) = self.runtime.app().host() else {
+            return;
+        };
+        if self.last_find_query.is_empty() {
+            return;
+        }
+        let query_string = self.last_find_query.to_string();
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(
+            Some(&query_cef),
+            false as _,
+            self.last_find_match_case as _,
+            true as _, // continue existing search
+        );
+    }
+
+    #[func]
+    pub fn stop_finding(&mut self) {
+        if let Some(host) = self.runtime.app().host() {
+            host.stop_finding(true as _);
+        }
+        self.last_find_query = GString::new();
+        self.last_find_match_case = false;
+    }
+
+    fn with_host<R>(&self, f: impl FnOnce(cef::BrowserHost) -> R) -> Option<R> {
+        self.runtime.app().host().map(f)
+    }
+
+    pub(crate) fn eval_in_app(&self, app: &App, code: GString, log_prefix: &str) {
+        let Some(state) = app.state.as_ref() else {
+            godot::global::godot_warn!("[{}] Cannot execute JS: no browser", log_prefix);
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[{}] Cannot execute JS: no main frame", log_prefix);
+            return;
+        };
+        let code_str: cef::CefStringUtf16 = code.to_string().as_str().into();
+        frame.execute_java_script(Some(&code_str), None, 0);
+    }
+
+    pub(crate) fn go_back_in_app(&self, app: &mut App) {
+        if let Some(browser) = app.browser_mut() {
+            browser.go_back();
+        }
+    }
+
+    pub(crate) fn go_forward_in_app(&self, app: &mut App) {
+        if let Some(browser) = app.browser_mut() {
+            browser.go_forward();
+        }
+    }
+
+    pub(crate) fn can_go_back_in_app(&self, app: &App) -> bool {
+        app.browser().map(|b| b.can_go_back() != 0).unwrap_or(false)
+    }
+
+    pub(crate) fn can_go_forward_in_app(&self, app: &App) -> bool {
+        app.browser()
+            .map(|b| b.can_go_forward() != 0)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn reload_in_app(&self, app: &mut App) {
+        if let Some(browser) = app.browser_mut() {
+            browser.reload();
+        }
+    }
+
+    pub(crate) fn reload_ignore_cache_in_app(&self, app: &mut App) {
+        if let Some(browser) = app.browser_mut() {
+            browser.reload_ignore_cache();
+        }
+    }
+
+    pub(crate) fn stop_loading_in_app(&self, app: &mut App) {
+        if let Some(browser) = app.browser_mut() {
+            browser.stop_load();
+        }
+    }
+
+    pub(crate) fn is_loading_in_app(&self, app: &App) -> bool {
+        app.browser().map(|b| b.is_loading() != 0).unwrap_or(false)
+    }
+
+    pub(crate) fn set_zoom_level_in_app(&self, app: &App, level: f64) {
+        if let Some(host) = app.host() {
+            host.set_zoom_level(level);
+        }
+    }
+
+    pub(crate) fn get_zoom_level_in_app(&self, app: &App) -> f64 {
+        app.host().map(|h| h.zoom_level()).unwrap_or(0.0)
+    }
+
+    pub(crate) fn set_audio_muted_in_app(&self, app: &App, muted: bool) {
+        if let Some(host) = app.host() {
+            host.set_audio_muted(muted as i32);
+        }
+    }
+
+    pub(crate) fn is_audio_muted_in_app(&self, app: &App) -> bool {
+        app.host().map(|h| h.is_audio_muted() != 0).unwrap_or(false)
+    }
+
+    pub(crate) fn send_ipc_message_in_app(&self, app: &App, message: GString, log_prefix: &str) {
+        let Some(state) = app.state.as_ref() else {
+            godot::global::godot_warn!("[{}] Cannot send IPC message: no browser", log_prefix);
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[{}] Cannot send IPC message: no main frame", log_prefix);
+            return;
+        };
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_GODOT_TO_RENDERER);
+        let msg_str: cef::CefStringUtf16 = message.to_string().as_str().into();
+        if let Some(mut process_message) = cef::process_message_create(Some(&route)) {
+            if let Some(argument_list) = process_message.argument_list() {
+                argument_list.set_string(0, Some(&msg_str));
+            }
+            frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+        }
+    }
+
+    pub(crate) fn send_ipc_binary_message_in_app(
+        &self,
+        app: &App,
+        data: PackedByteArray,
+        log_prefix: &str,
+    ) {
+        let Some(state) = app.state.as_ref() else {
+            godot::global::godot_warn!(
+                "[{}] Cannot send binary IPC message: no browser",
+                log_prefix
+            );
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!(
+                "[{}] Cannot send binary IPC message: no main frame",
+                log_prefix
+            );
+            return;
+        };
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_BINARY_GODOT_TO_RENDERER);
+        let bytes = data.to_vec();
+        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
+            godot::global::godot_warn!(
+                "[{}] Cannot send binary IPC message: failed to create BinaryValue",
+                log_prefix
+            );
+            return;
+        };
+        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
+            godot::global::godot_warn!(
+                "[{}] Cannot send binary IPC message: failed to create process message",
+                log_prefix
+            );
+            return;
+        };
+        let Some(argument_list) = process_message.argument_list() else {
+            godot::global::godot_warn!(
+                "[{}] Cannot send binary IPC message: failed to get argument list",
+                log_prefix
+            );
+            return;
+        };
+        argument_list.set_binary(0, Some(&mut binary_value));
+        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+    }
+
+    pub(crate) fn send_ipc_data_in_app(&self, app: &App, data: Variant, log_prefix: &str) {
+        let Some(state) = app.state.as_ref() else {
+            godot::global::godot_warn!("[{}] Cannot send IPC data: no browser", log_prefix);
+            return;
+        };
+        let Some(frame) = state.browser.main_frame() else {
+            godot::global::godot_warn!("[{}] Cannot send IPC data: no main frame", log_prefix);
+            return;
+        };
+        let bytes = match crate::ipc_data::encode_variant_to_cbor_bytes(&data) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                godot::global::godot_warn!("[{}] Cannot encode IPC data: {}", log_prefix, err);
+                return;
+            }
+        };
+        if bytes.len() > crate::ipc_data::max_ipc_data_bytes() {
+            godot::global::godot_warn!(
+                "[{}] Cannot send IPC data: payload too large ({} bytes)",
+                log_prefix,
+                bytes.len()
+            );
+            return;
+        }
+        let route = cef::CefStringUtf16::from(ROUTE_IPC_DATA_GODOT_TO_RENDERER);
+        let Some(mut binary_value) = cef::binary_value_create(Some(&bytes)) else {
+            godot::global::godot_warn!(
+                "[{}] Cannot send IPC data: failed to create BinaryValue",
+                log_prefix
+            );
+            return;
+        };
+        let Some(mut process_message) = cef::process_message_create(Some(&route)) else {
+            godot::global::godot_warn!(
+                "[{}] Cannot send IPC data: failed to create process message",
+                log_prefix
+            );
+            return;
+        };
+        let Some(argument_list) = process_message.argument_list() else {
+            godot::global::godot_warn!(
+                "[{}] Cannot send IPC data: failed to get argument list",
+                log_prefix
+            );
+            return;
+        };
+        argument_list.set_binary(0, Some(&mut binary_value));
+        frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+    }
+
+    pub(crate) fn find_text_in_app(
+        &self,
+        app: &App,
+        query: GString,
+        forward: bool,
+        match_case: bool,
+        last_find_query: &mut GString,
+        last_find_match_case: &mut bool,
+    ) {
+        let Some(host) = app.host() else {
+            return;
+        };
+        let query_string = query.to_string();
+        if query_string.is_empty() {
+            host.stop_finding(true as _);
+            *last_find_query = GString::new();
+            *last_find_match_case = false;
+            return;
+        }
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(Some(&query_cef), forward as _, match_case as _, false as _);
+        *last_find_query = query;
+        *last_find_match_case = match_case;
+    }
+
+    pub(crate) fn find_next_in_app(
+        &self,
+        app: &App,
+        last_find_query: &GString,
+        last_find_match_case: bool,
+    ) {
+        let Some(host) = app.host() else {
+            return;
+        };
+        if last_find_query.is_empty() {
+            return;
+        }
+        let query_string = last_find_query.to_string();
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(
+            Some(&query_cef),
+            true as _,
+            last_find_match_case as _,
+            true as _,
+        );
+    }
+
+    pub(crate) fn find_previous_in_app(
+        &self,
+        app: &App,
+        last_find_query: &GString,
+        last_find_match_case: bool,
+    ) {
+        let Some(host) = app.host() else {
+            return;
+        };
+        if last_find_query.is_empty() {
+            return;
+        }
+        let query_string = last_find_query.to_string();
+        let query_cef: cef::CefStringUtf16 = query_string.as_str().into();
+        host.find(
+            Some(&query_cef),
+            false as _,
+            last_find_match_case as _,
+            true as _,
+        );
+    }
+
+    pub(crate) fn stop_finding_in_app(
+        &self,
+        app: &App,
+        last_find_query: &mut GString,
+        last_find_match_case: &mut bool,
+    ) {
+        if let Some(host) = app.host() {
+            host.stop_finding(true as _);
+        }
+        *last_find_query = GString::new();
+        *last_find_match_case = false;
+    }
+
+    #[func]
+    pub fn forward_mouse_button_event(
+        &self,
+        event: Gd<InputEventMouseButton>,
+        pixel_scale_factor: f32,
+        device_scale_factor: f32,
+    ) {
+        let _ = self.with_host(|host| {
+            input::handle_mouse_button(&host, &event, pixel_scale_factor, device_scale_factor);
+        });
+    }
+
+    #[func]
+    pub fn forward_mouse_motion_event(
+        &self,
+        event: Gd<InputEventMouseMotion>,
+        pixel_scale_factor: f32,
+        device_scale_factor: f32,
+    ) {
+        let _ = self.with_host(|host| {
+            input::handle_mouse_motion(&host, &event, pixel_scale_factor, device_scale_factor);
+        });
+    }
+
+    #[func]
+    pub fn forward_pan_gesture_event(
+        &self,
+        event: Gd<InputEventPanGesture>,
+        pixel_scale_factor: f32,
+        device_scale_factor: f32,
+    ) {
+        let _ = self.with_host(|host| {
+            input::handle_pan_gesture(&host, &event, pixel_scale_factor, device_scale_factor);
+        });
+    }
+
+    #[func]
+    pub fn forward_magnify_gesture_event(&self, event: Gd<InputEventMagnifyGesture>) {
+        let _ = self.with_host(|host| {
+            input::handle_magnify_gesture(&host, &event);
+        });
+    }
+
+    #[func]
+    pub fn forward_key_event(&self, event: Gd<InputEventKey>, focus_on_editable_field: bool) {
+        let Some(host) = self.runtime.app().host() else {
+            return;
+        };
+        let frame = self
+            .runtime
+            .app()
+            .state
+            .as_ref()
+            .and_then(|state| state.browser.main_frame());
+        input::handle_key_event(&host, frame.as_ref(), &event, focus_on_editable_field);
+    }
+
+    #[func]
+    pub fn forward_screen_touch_event(
+        &mut self,
+        event: Gd<InputEventScreenTouch>,
+        pixel_scale_factor: f32,
+        device_scale_factor: f32,
+    ) {
+        let Some(host) = self.runtime.app().host() else {
+            return;
+        };
+        input::handle_screen_touch(
+            &host,
+            &event,
+            pixel_scale_factor,
+            device_scale_factor,
+            &mut self.touch_id_map,
+            &mut self.next_touch_id,
+        );
+    }
+
+    #[func]
+    pub fn forward_screen_drag_event(
+        &mut self,
+        event: Gd<InputEventScreenDrag>,
+        pixel_scale_factor: f32,
+        device_scale_factor: f32,
+    ) {
+        let Some(host) = self.runtime.app().host() else {
+            return;
+        };
+        input::handle_screen_drag(
+            &host,
+            &event,
+            pixel_scale_factor,
+            device_scale_factor,
+            &mut self.touch_id_map,
+            &mut self.next_touch_id,
+        );
+    }
+
+    #[func]
+    pub fn forward_input_event(
+        &mut self,
+        event: Gd<InputEvent>,
+        pixel_scale_factor: f32,
+        device_scale_factor: f32,
+        focus_on_editable_field: bool,
+    ) {
+        if let Ok(mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
+            self.forward_mouse_button_event(mouse_button, pixel_scale_factor, device_scale_factor);
+        } else if let Ok(mouse_motion) = event.clone().try_cast::<InputEventMouseMotion>() {
+            self.forward_mouse_motion_event(mouse_motion, pixel_scale_factor, device_scale_factor);
+        } else if let Ok(pan_gesture) = event.clone().try_cast::<InputEventPanGesture>() {
+            self.forward_pan_gesture_event(pan_gesture, pixel_scale_factor, device_scale_factor);
+        } else if let Ok(screen_touch) = event.clone().try_cast::<InputEventScreenTouch>() {
+            self.forward_screen_touch_event(screen_touch, pixel_scale_factor, device_scale_factor);
+        } else if let Ok(screen_drag) = event.clone().try_cast::<InputEventScreenDrag>() {
+            self.forward_screen_drag_event(screen_drag, pixel_scale_factor, device_scale_factor);
+        } else if let Ok(magnify_gesture) = event.clone().try_cast::<InputEventMagnifyGesture>() {
+            self.forward_magnify_gesture_event(magnify_gesture);
+        } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
+            self.forward_key_event(key_event, focus_on_editable_field);
+        }
     }
 
     fn disconnect_frame_hook(&mut self) {
