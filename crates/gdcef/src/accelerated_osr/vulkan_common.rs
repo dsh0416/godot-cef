@@ -75,6 +75,10 @@ macro_rules! impl_vulkan_common_methods {
                     ash::vk::PFN_vkResetCommandBuffer
                 ),
                 get_device_queue: load_device_fn!("vkGetDeviceQueue", ash::vk::PFN_vkGetDeviceQueue),
+                get_image_memory_requirements: load_device_fn!(
+                    "vkGetImageMemoryRequirements",
+                    ash::vk::PFN_vkGetImageMemoryRequirements
+                ),
                 $memory_field: load_device_fn!($memory_fn_name, $memory_fn_type),
             }
         }

@@ -102,6 +102,7 @@ struct VulkanFunctions {
     reset_fences: vk::PFN_vkResetFences,
     reset_command_buffer: vk::PFN_vkResetCommandBuffer,
     get_device_queue: vk::PFN_vkGetDeviceQueue,
+    get_image_memory_requirements: vk::PFN_vkGetImageMemoryRequirements,
     get_memory_fd_properties: PfnVkGetMemoryFdPropertiesKHR,
 }
 
@@ -277,7 +278,6 @@ impl VulkanTextureImporter {
     }
 
     pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
-        // Extract DMA-BUF parameters from all planes
         let plane_count = info.plane_count as usize;
         if plane_count == 0 {
             return Err("No planes in AcceleratedPaintInfo".into());
@@ -290,7 +290,6 @@ impl VulkanTextureImporter {
             return Err(format!("Invalid source dimensions: {}x{}", width, height));
         }
 
-        // Get inode from first plane
         let first_fd = info.planes.first().ok_or("Missing first plane")?.fd;
         let inode = Self::get_dmabuf_inode(first_fd).ok_or("Failed to get inode for DMA-BUF")?;
 
@@ -298,7 +297,6 @@ impl VulkanTextureImporter {
         let mut strides = Vec::new();
         let mut offsets = Vec::new();
 
-        // Check cache
         let needs_import = if let Some(cached) = self.cache.get(&inode) {
             cached.width != width || cached.height != height
         } else {
@@ -310,6 +308,11 @@ impl VulkanTextureImporter {
             strides.reserve(plane_count);
             offsets.reserve(plane_count);
 
+            // Verify all planes reference the same underlying DMA-BUF buffer.
+            // Multi-plane formats (e.g. NV12) on Linux typically pack all planes
+            // into one GBM BO so the inodes match. Truly disjoint per-plane
+            // buffers are not currently supported.
+            let first_inode = inode;
             for i in 0..plane_count {
                 let plane = info
                     .planes
@@ -318,10 +321,19 @@ impl VulkanTextureImporter {
                 if plane.fd < 0 {
                     return Err(format!("Invalid fd for plane {}: {}", i, plane.fd));
                 }
-                // Duplicate the fd to extend its lifetime beyond the callback
+                if i > 0 {
+                    if let Some(plane_inode) = Self::get_dmabuf_inode(plane.fd) {
+                        if plane_inode != first_inode {
+                            godot_error!(
+                                "[AcceleratedOSR/Vulkan] Plane {} has different inode ({}) than plane 0 ({}); \
+                                 disjoint multi-plane DMA-BUFs are not yet supported",
+                                i, plane_inode, first_inode
+                            );
+                        }
+                    }
+                }
                 let dup_fd = unsafe { libc::dup(plane.fd) };
                 if dup_fd < 0 {
-                    // Close any fds we already duplicated
                     for fd in &fds {
                         unsafe { libc::close(*fd) };
                     }
@@ -331,8 +343,18 @@ impl VulkanTextureImporter {
                 strides.push(plane.stride);
                 offsets.push(plane.offset);
             }
+
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] Importing DMA-BUF: {}x{}, planes={}, modifier=0x{:x}, format={:?}",
+                width, height, plane_count, info.modifier, info.format
+            );
+            for (i, plane) in info.planes.iter().take(plane_count).enumerate() {
+                godot_print!(
+                    "[AcceleratedOSR/Vulkan]   plane[{}]: fd={}, stride={}, offset={}, size={}",
+                    i, plane.fd, plane.stride, plane.offset, plane.size
+                );
+            }
         } else {
-            // If cached, we don't need to duplicate fds, but we capture metadata
             strides.reserve(plane_count);
             offsets.reserve(plane_count);
             for i in 0..plane_count {
@@ -343,10 +365,8 @@ impl VulkanTextureImporter {
             }
         }
 
-        // Convert CEF color format to Vulkan format
         let format = cef_format_to_vulkan(&info.format);
 
-        // Replace any existing pending copy (drop the old one, which closes its fds)
         self.pending_copy = Some(PendingLinuxCopy {
             inode,
             fds,
@@ -572,14 +592,20 @@ impl VulkanTextureImporter {
     ) -> Result<vk::DeviceMemory, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
 
-        // Use the first plane's fd for memory import
+        // All planes in a DMA-BUF typically share the same underlying buffer
+        // (same GBM BO), so we import via the first plane's fd.
         let fd = params.fds[0];
 
-        // Get or cache the memory type index (same for all DMA-BUF imports)
+        // Query the actual memory requirements from the driver instead of
+        // guessing width*height*4 which breaks for tiled/padded buffers.
+        let mut mem_reqs: vk::MemoryRequirements = unsafe { std::mem::zeroed() };
+        unsafe {
+            (fns.get_image_memory_requirements)(self.device, image, &mut mem_reqs);
+        }
+
         let memory_type_index = if let Some(cached) = self.cached_memory_type_index {
             cached
         } else {
-            // Query memory properties for this fd (only once)
             let mut fd_props = vk::MemoryFdPropertiesKHR::default();
             let result = unsafe {
                 (self.get_memory_fd_properties)(
@@ -593,26 +619,29 @@ impl VulkanTextureImporter {
                 return Err(format!("Failed to get memory fd properties: {:?}", result));
             }
 
-            let idx = find_memory_type_index(fd_props.memory_type_bits)
-                .ok_or("Failed to find suitable memory type")?;
+            // Intersect the fd-compatible types with the image's requirements
+            let compatible_bits = fd_props.memory_type_bits & mem_reqs.memory_type_bits;
+            let idx = find_memory_type_index(compatible_bits).ok_or_else(|| {
+                format!(
+                    "No compatible memory type (fd bits: 0x{:x}, image bits: 0x{:x})",
+                    fd_props.memory_type_bits, mem_reqs.memory_type_bits
+                )
+            })?;
             self.cached_memory_type_index = Some(idx);
             idx
         };
 
-        // Import the memory with the DMA-BUF fd
-        // Note: The fd ownership is transferred to Vulkan upon successful import
+        // fd ownership is transferred to Vulkan upon successful import
         let mut import_info = vk::ImportMemoryFdInfoKHR::default()
             .handle_type(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT)
             .fd(fd);
 
         let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().image(image);
 
-        let allocation_size = (params.width as u64) * (params.height as u64) * 4;
-
         let alloc_info = vk::MemoryAllocateInfo::default()
             .push_next(&mut import_info)
             .push_next(&mut dedicated_info)
-            .allocation_size(allocation_size)
+            .allocation_size(mem_reqs.size)
             .memory_type_index(memory_type_index);
 
         let mut memory = vk::DeviceMemory::null();
@@ -620,12 +649,14 @@ impl VulkanTextureImporter {
             (fns.allocate_memory)(self.device, &alloc_info, std::ptr::null(), &mut memory)
         };
         if result != vk::Result::SUCCESS {
-            return Err(format!("Failed to allocate/import memory: {:?}", result));
+            return Err(format!(
+                "Failed to allocate/import DMA-BUF memory: {:?} (size={}, type_idx={})",
+                result, mem_reqs.size, memory_type_index
+            ));
         }
 
         params.fds[0] = -1;
 
-        // Bind image to memory
         let result = unsafe { (fns.bind_image_memory)(self.device, image, memory, 0) };
         if result != vk::Result::SUCCESS {
             unsafe {

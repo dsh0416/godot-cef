@@ -85,6 +85,7 @@ struct VulkanFunctions {
     reset_fences: vk::PFN_vkResetFences,
     reset_command_buffer: vk::PFN_vkResetCommandBuffer,
     get_device_queue: vk::PFN_vkGetDeviceQueue,
+    get_image_memory_requirements: vk::PFN_vkGetImageMemoryRequirements,
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
 }
 
@@ -486,16 +487,19 @@ impl VulkanTextureImporter {
         &mut self,
         handle: HANDLE,
         image: vk::Image,
-        width: u32,
-        height: u32,
+        _width: u32,
+        _height: u32,
     ) -> Result<vk::DeviceMemory, String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
 
-        // Get or cache the memory type index (same for all D3D12 imports)
+        let mut mem_reqs: vk::MemoryRequirements = unsafe { std::mem::zeroed() };
+        unsafe {
+            (fns.get_image_memory_requirements)(self.device, image, &mut mem_reqs);
+        }
+
         let memory_type_index = if let Some(cached) = self.cached_memory_type_index {
             cached
         } else {
-            // Query memory properties for this handle (only once)
             let mut handle_props = vk::MemoryWin32HandlePropertiesKHR::default();
             let result = unsafe {
                 (self.get_memory_win32_handle_properties)(
@@ -512,25 +516,27 @@ impl VulkanTextureImporter {
                 ));
             }
 
-            let idx = find_memory_type_index(handle_props.memory_type_bits)
-                .ok_or("Failed to find suitable memory type")?;
+            let compatible_bits = handle_props.memory_type_bits & mem_reqs.memory_type_bits;
+            let idx = find_memory_type_index(compatible_bits).ok_or_else(|| {
+                format!(
+                    "No compatible memory type (handle bits: 0x{:x}, image bits: 0x{:x})",
+                    handle_props.memory_type_bits, mem_reqs.memory_type_bits
+                )
+            })?;
             self.cached_memory_type_index = Some(idx);
             idx
         };
 
-        // Import the memory with the Win32 handle
         let mut import_info = vk::ImportMemoryWin32HandleInfoKHR::default()
             .handle_type(vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE)
             .handle(handle.0 as isize);
 
         let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().image(image);
 
-        let allocation_size = (width as u64) * (height as u64) * 4;
-
         let alloc_info = vk::MemoryAllocateInfo::default()
             .push_next(&mut import_info)
             .push_next(&mut dedicated_info)
-            .allocation_size(allocation_size)
+            .allocation_size(mem_reqs.size)
             .memory_type_index(memory_type_index);
 
         let mut memory = vk::DeviceMemory::null();
@@ -538,10 +544,12 @@ impl VulkanTextureImporter {
             (fns.allocate_memory)(self.device, &alloc_info, std::ptr::null(), &mut memory)
         };
         if result != vk::Result::SUCCESS {
-            return Err(format!("Failed to allocate/import memory: {:?}", result));
+            return Err(format!(
+                "Failed to allocate/import memory: {:?} (size={}, type_idx={})",
+                result, mem_reqs.size, memory_type_index
+            ));
         }
 
-        // Bind image to memory
         let result = unsafe { (fns.bind_image_memory)(self.device, image, memory, 0) };
         if result != vk::Result::SUCCESS {
             unsafe {
