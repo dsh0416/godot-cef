@@ -171,8 +171,10 @@ pub(crate) fn find_memory_type_index(type_filter: u32) -> Option<u32> {
 /// Shared Vulkan image copy submission.
 ///
 /// Records barriers, image copy, and final transition into `cmd_buffer`,
-/// then submits with `fence`. Caller is responsible for resetting fence/cmd_buffer
-/// before calling and waiting on the fence afterwards.
+/// then resets `fence` and `cmd_buffer` as needed and submits the work.
+/// Caller is responsible for waiting on `fence` (or otherwise ensuring completion)
+/// before reading from `dst` or reusing related resources, and for any additional
+/// synchronization with other queues or external APIs.
 pub(crate) fn submit_vulkan_copy_async(
     ctx: &VulkanCopyContext,
     cmd_buffer: ash::vk::CommandBuffer,

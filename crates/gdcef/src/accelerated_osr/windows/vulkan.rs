@@ -625,6 +625,12 @@ impl Drop for VulkanTextureImporter {
 unsafe impl Send for VulkanTextureImporter {}
 unsafe impl Sync for VulkanTextureImporter {}
 
+/// Returns the GPU vendor and device IDs used by Godot's Vulkan rendering device on Windows.
+///
+/// This queries Godot's active `RenderingDevice` and uses the Vulkan backend to determine
+/// the PCI-style `(vendor_id, device_id)` pair for the GPU handling rendering. The lookup is
+/// performed via [`get_godot_gpu_device_ids_vulkan`] using the system Vulkan loader
+/// `vulkan-1.dll`. Returns `None` if the Vulkan device cannot be resolved.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     get_godot_gpu_device_ids_vulkan("vulkan-1.dll")
 }

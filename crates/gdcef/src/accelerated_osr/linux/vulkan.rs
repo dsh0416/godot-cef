@@ -725,6 +725,11 @@ fn cef_format_to_vulkan(format: &ColorType) -> vk::Format {
     }
 }
 
+/// Returns the GPU PCI vendor and device IDs used by Godot's Vulkan rendering backend on Linux.
+///
+/// This function dynamically queries the Vulkan implementation via `libvulkan.so.1`
+/// and returns a tuple of `(vendor_id, device_id)` if successful, or `None` if the
+/// information cannot be determined.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     get_godot_gpu_device_ids_vulkan("libvulkan.so.1")
 }
