@@ -176,9 +176,11 @@ wrap_render_process_handler! {
 
 fn register_v8_function(global: &V8Value, name: &str, handler: &mut V8Handler) {
     let key: CefStringUtf16 = name.into();
-    if let Some(mut func) = v8_value_create_function(Some(&key), Some(handler)) {
-        global.set_value_bykey(Some(&key), Some(&mut func), v8_prop_default());
-    }
+    let Some(mut func) = v8_value_create_function(Some(&key), Some(handler)) else {
+        eprintln!("[godot-cef] Failed to create V8 function for '{name}'");
+        return;
+    };
+    global.set_value_bykey(Some(&key), Some(&mut func), v8_prop_default());
 }
 
 fn register_v8_value(global: &V8Value, name: &str, value: &mut V8Value) {
