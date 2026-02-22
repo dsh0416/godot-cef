@@ -160,3 +160,237 @@ macro_rules! impl_vulkan_common_methods {
 }
 
 pub(crate) use impl_vulkan_common_methods;
+
+pub(crate) fn find_memory_type_index(type_filter: u32) -> Option<u32> {
+    if type_filter == 0 {
+        return None;
+    }
+    Some(type_filter.trailing_zeros())
+}
+
+/// Shared Vulkan image copy submission.
+///
+/// Records barriers, image copy, and final transition into `cmd_buffer`,
+/// then submits with `fence`. Caller is responsible for resetting fence/cmd_buffer
+/// before calling and waiting on the fence afterwards.
+pub(crate) fn submit_vulkan_copy_async(
+    fns: &VulkanCopyFunctions,
+    device: ash::vk::Device,
+    queue: ash::vk::Queue,
+    cmd_buffer: ash::vk::CommandBuffer,
+    fence: ash::vk::Fence,
+    src: ash::vk::Image,
+    dst: ash::vk::Image,
+    width: u32,
+    height: u32,
+    uses_separate_queue: bool,
+    queue_family_index: u32,
+) -> Result<(), String> {
+    use ash::vk;
+
+    let _ = unsafe { (fns.reset_fences)(device, 1, &fence) };
+    let _ = unsafe { (fns.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty()) };
+
+    let begin_info =
+        vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+    let _ = unsafe { (fns.begin_command_buffer)(cmd_buffer, &begin_info) };
+
+    let subresource_range = vk::ImageSubresourceRange {
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
+    };
+
+    let barriers = [
+        vk::ImageMemoryBarrier::default()
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(src)
+            .subresource_range(subresource_range)
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_access_mask(vk::AccessFlags::TRANSFER_READ),
+        vk::ImageMemoryBarrier::default()
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(dst)
+            .subresource_range(subresource_range)
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE),
+    ];
+
+    unsafe {
+        (fns.cmd_pipeline_barrier)(
+            cmd_buffer,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            2,
+            barriers.as_ptr(),
+        );
+    }
+
+    let subresource_layers = vk::ImageSubresourceLayers {
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        mip_level: 0,
+        base_array_layer: 0,
+        layer_count: 1,
+    };
+    let region = vk::ImageCopy {
+        src_subresource: subresource_layers,
+        src_offset: vk::Offset3D::default(),
+        dst_subresource: subresource_layers,
+        dst_offset: vk::Offset3D::default(),
+        extent: vk::Extent3D {
+            width,
+            height,
+            depth: 1,
+        },
+    };
+
+    unsafe {
+        (fns.cmd_copy_image)(
+            cmd_buffer,
+            src,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            dst,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            1,
+            &region,
+        );
+    }
+
+    let (src_family, dst_family) = if uses_separate_queue && queue_family_index != 0 {
+        (queue_family_index, 0u32)
+    } else {
+        (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
+    };
+
+    let final_barrier = vk::ImageMemoryBarrier::default()
+        .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+        .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+        .src_queue_family_index(src_family)
+        .dst_queue_family_index(dst_family)
+        .image(dst)
+        .subresource_range(subresource_range)
+        .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+        .dst_access_mask(vk::AccessFlags::SHADER_READ);
+
+    unsafe {
+        (fns.cmd_pipeline_barrier)(
+            cmd_buffer,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::DependencyFlags::empty(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            1,
+            &final_barrier,
+        );
+    }
+
+    let _ = unsafe { (fns.end_command_buffer)(cmd_buffer) };
+
+    let submit_info = vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
+    let result = unsafe { (fns.queue_submit)(queue, 1, &submit_info, fence) };
+    if result != vk::Result::SUCCESS {
+        return Err(format!("Failed to submit copy command: {:?}", result));
+    }
+
+    Ok(())
+}
+
+/// Subset of VulkanFunctions needed for the shared copy operation.
+pub(crate) struct VulkanCopyFunctions {
+    pub reset_fences: ash::vk::PFN_vkResetFences,
+    pub reset_command_buffer: ash::vk::PFN_vkResetCommandBuffer,
+    pub begin_command_buffer: ash::vk::PFN_vkBeginCommandBuffer,
+    pub end_command_buffer: ash::vk::PFN_vkEndCommandBuffer,
+    pub cmd_pipeline_barrier: ash::vk::PFN_vkCmdPipelineBarrier,
+    pub cmd_copy_image: ash::vk::PFN_vkCmdCopyImage,
+    pub queue_submit: ash::vk::PFN_vkQueueSubmit,
+}
+
+pub(crate) fn get_godot_gpu_device_ids_vulkan(vulkan_lib_name: &str) -> Option<(u32, u32)> {
+    use ash::vk;
+    use godot::classes::RenderingServer;
+    use godot::classes::rendering_device::DriverResource;
+    use godot::global::{godot_error, godot_print};
+    use godot::prelude::*;
+
+    let mut rd = RenderingServer::singleton().get_rendering_device()?;
+
+    let physical_device_ptr =
+        rd.get_driver_resource(DriverResource::PHYSICAL_DEVICE, Rid::Invalid, 0);
+    if physical_device_ptr == 0 {
+        godot_error!(
+            "[AcceleratedOSR/Vulkan] Failed to get Vulkan physical device for GPU ID query"
+        );
+        return None;
+    }
+    let physical_device: vk::PhysicalDevice = unsafe { std::mem::transmute(physical_device_ptr) };
+
+    let lib = match unsafe { libloading::Library::new(vulkan_lib_name) } {
+        Ok(lib) => lib,
+        Err(e) => {
+            godot_error!(
+                "[AcceleratedOSR/Vulkan] Failed to load {} for GPU ID query: {}",
+                vulkan_lib_name,
+                e
+            );
+            return None;
+        }
+    };
+
+    type GetPhysicalDeviceProperties2 = unsafe extern "system" fn(
+        physical_device: vk::PhysicalDevice,
+        p_properties: *mut vk::PhysicalDeviceProperties2<'_>,
+    );
+
+    let get_physical_device_properties2: GetPhysicalDeviceProperties2 = unsafe {
+        match lib.get(b"vkGetPhysicalDeviceProperties2\0") {
+            Ok(f) => *f,
+            Err(e) => {
+                godot_error!(
+                    "[AcceleratedOSR/Vulkan] Failed to get vkGetPhysicalDeviceProperties2: {}. \
+                     Vulkan 1.1+ is required for GPU ID query.",
+                    e
+                );
+                return None;
+            }
+        }
+    };
+
+    let mut props2 = vk::PhysicalDeviceProperties2::default();
+    unsafe {
+        get_physical_device_properties2(physical_device, &mut props2);
+    }
+
+    let vendor_id = props2.properties.vendor_id;
+    let device_id = props2.properties.device_id;
+    let device_name = unsafe {
+        std::ffi::CStr::from_ptr(props2.properties.device_name.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    godot_print!(
+        "[AcceleratedOSR/Vulkan] Godot GPU: vendor=0x{:04x}, device=0x{:04x}, name={}",
+        vendor_id,
+        device_id,
+        device_name
+    );
+
+    Some((vendor_id, device_id))
+}

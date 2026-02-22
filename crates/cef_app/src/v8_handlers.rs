@@ -30,6 +30,34 @@ fn v8_ok(retval: Option<&mut Option<cef::V8Value>>) -> i32 {
     1
 }
 
+macro_rules! define_frame_handler {
+    ($name:ident) => {
+        #[derive(Clone)]
+        pub(crate) struct $name {
+            frame: Option<Arc<Mutex<Frame>>>,
+        }
+        impl $name {
+            pub fn new(frame: Option<Arc<Mutex<Frame>>>) -> Self {
+                Self { frame }
+            }
+        }
+    };
+}
+
+macro_rules! impl_handler_build {
+    ($builder:ident, $handler:ty => $output:ty) => {
+        impl $builder {
+            pub(crate) fn build(handler: $handler) -> $output {
+                Self::new(handler)
+            }
+        }
+    };
+}
+
+pub(crate) fn v8_prop_default() -> cef::V8Propertyattribute {
+    cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0))
+}
+
 fn send_process_message_to_browser<F>(
     frame: Option<&Arc<Mutex<Frame>>>,
     route: &str,
@@ -55,22 +83,8 @@ where
     true
 }
 
-#[derive(Clone)]
-pub(crate) struct OsrIpcHandler {
-    frame: Option<Arc<Mutex<Frame>>>,
-}
-
-impl OsrIpcHandler {
-    pub fn new(frame: Option<Arc<Mutex<Frame>>>) -> Self {
-        Self { frame }
-    }
-}
-
-impl OsrIpcHandlerBuilder {
-    pub(crate) fn build(handler: OsrIpcHandler) -> V8Handler {
-        Self::new(handler)
-    }
-}
+define_frame_handler!(OsrIpcHandler);
+impl_handler_build!(OsrIpcHandlerBuilder, OsrIpcHandler => V8Handler);
 
 wrap_v8_handler! {
     pub(crate) struct OsrIpcHandlerBuilder {
@@ -110,27 +124,9 @@ wrap_v8_handler! {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct OsrIpcBinaryHandler {
-    frame: Option<Arc<Mutex<Frame>>>,
-}
-
-#[derive(Clone)]
-pub(crate) struct OsrIpcDataHandler {
-    frame: Option<Arc<Mutex<Frame>>>,
-}
-
-impl OsrIpcDataHandler {
-    pub fn new(frame: Option<Arc<Mutex<Frame>>>) -> Self {
-        Self { frame }
-    }
-}
-
-impl OsrIpcDataHandlerBuilder {
-    pub(crate) fn build(handler: OsrIpcDataHandler) -> V8Handler {
-        Self::new(handler)
-    }
-}
+define_frame_handler!(OsrIpcBinaryHandler);
+define_frame_handler!(OsrIpcDataHandler);
+impl_handler_build!(OsrIpcDataHandlerBuilder, OsrIpcDataHandler => V8Handler);
 
 wrap_v8_handler! {
     pub(crate) struct OsrIpcDataHandlerBuilder {
@@ -227,41 +223,21 @@ impl IpcListenerSet {
     pub fn build_api_object(&self) -> Option<V8Value> {
         let object = v8_value_create_object(None, None)?;
 
-        let mut add_handler = OsrListenerHandlerBuilder::build(OsrListenerHandler::new(
-            self.callbacks.clone(),
-            ListenerOperation::Add,
-        ));
-        let mut remove_handler = OsrListenerHandlerBuilder::build(OsrListenerHandler::new(
-            self.callbacks.clone(),
-            ListenerOperation::Remove,
-        ));
-        let mut has_handler = OsrListenerHandlerBuilder::build(OsrListenerHandler::new(
-            self.callbacks.clone(),
-            ListenerOperation::Has,
-        ));
+        const LISTENER_OPS: &[(&str, ListenerOperation)] = &[
+            ("addListener", ListenerOperation::Add),
+            ("removeListener", ListenerOperation::Remove),
+            ("hasListener", ListenerOperation::Has),
+        ];
 
-        let mut add_fn =
-            v8_value_create_function(Some(&"addListener".into()), Some(&mut add_handler))?;
-        let mut remove_fn =
-            v8_value_create_function(Some(&"removeListener".into()), Some(&mut remove_handler))?;
-        let mut has_fn =
-            v8_value_create_function(Some(&"hasListener".into()), Some(&mut has_handler))?;
-
-        object.set_value_bykey(
-            Some(&"addListener".into()),
-            Some(&mut add_fn),
-            cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)),
-        );
-        object.set_value_bykey(
-            Some(&"removeListener".into()),
-            Some(&mut remove_fn),
-            cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)),
-        );
-        object.set_value_bykey(
-            Some(&"hasListener".into()),
-            Some(&mut has_fn),
-            cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)),
-        );
+        for &(name, op) in LISTENER_OPS {
+            let mut handler = OsrListenerHandlerBuilder::build(OsrListenerHandler::new(
+                self.callbacks.clone(),
+                op,
+            ));
+            let key: CefStringUtf16 = name.into();
+            let mut func = v8_value_create_function(Some(&key), Some(&mut handler))?;
+            object.set_value_bykey(Some(&key), Some(&mut func), v8_prop_default());
+        }
 
         Some(object)
     }
@@ -286,11 +262,7 @@ impl OsrListenerHandler {
     }
 }
 
-impl OsrListenerHandlerBuilder {
-    pub(crate) fn build(handler: OsrListenerHandler) -> V8Handler {
-        Self::new(handler)
-    }
-}
+impl_handler_build!(OsrListenerHandlerBuilder, OsrListenerHandler => V8Handler);
 
 wrap_v8_handler! {
     pub(crate) struct OsrListenerHandlerBuilder {
@@ -346,17 +318,7 @@ wrap_v8_handler! {
     }
 }
 
-impl OsrIpcBinaryHandler {
-    pub fn new(frame: Option<Arc<Mutex<Frame>>>) -> Self {
-        Self { frame }
-    }
-}
-
-impl OsrIpcBinaryHandlerBuilder {
-    pub(crate) fn build(handler: OsrIpcBinaryHandler) -> V8Handler {
-        Self::new(handler)
-    }
-}
+impl_handler_build!(OsrIpcBinaryHandlerBuilder, OsrIpcBinaryHandler => V8Handler);
 
 wrap_v8_handler! {
     pub(crate) struct OsrIpcBinaryHandlerBuilder {
@@ -537,11 +499,7 @@ fn cbor_value_to_v8(value: &CborValue) -> Option<V8Value> {
                 // Preserve map shape even when a value type is unsupported.
                 let mut js_value =
                     cbor_value_to_v8(map_value).or_else(cef::v8_value_create_null)?;
-                object.set_value_bykey(
-                    Some(&key_cef),
-                    Some(&mut js_value),
-                    cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0)),
-                );
+                object.set_value_bykey(Some(&key_cef), Some(&mut js_value), v8_prop_default());
             }
             Some(object)
         }
@@ -571,22 +529,8 @@ fn cbor_map_key_to_js_property_name(key: &CborValue) -> String {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct OsrImeCaretHandler {
-    frame: Option<Arc<Mutex<Frame>>>,
-}
-
-impl OsrImeCaretHandler {
-    pub fn new(frame: Option<Arc<Mutex<Frame>>>) -> Self {
-        Self { frame }
-    }
-}
-
-impl OsrImeCaretHandlerBuilder {
-    pub(crate) fn build(handler: OsrImeCaretHandler) -> V8Handler {
-        Self::new(handler)
-    }
-}
+define_frame_handler!(OsrImeCaretHandler);
+impl_handler_build!(OsrImeCaretHandlerBuilder, OsrImeCaretHandler => V8Handler);
 
 wrap_v8_handler! {
     pub(crate) struct OsrImeCaretHandlerBuilder {

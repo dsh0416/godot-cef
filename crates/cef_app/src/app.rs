@@ -134,16 +134,7 @@ impl OsrApp {
 }
 
 pub struct OsrAppBuilder {
-    godot_backend: GodotRenderBackend,
-    enable_remote_debugging: bool,
-    remote_debugging_port: u16,
-    security_config: SecurityConfig,
-    gpu_device_ids: Option<GpuDeviceIds>,
-    user_agent: String,
-    proxy_server: String,
-    proxy_bypass_list: String,
-    cache_size_mb: i32,
-    custom_switches: Vec<String>,
+    inner: OsrApp,
 }
 
 impl Default for OsrAppBuilder {
@@ -155,81 +146,61 @@ impl Default for OsrAppBuilder {
 impl OsrAppBuilder {
     pub fn new() -> Self {
         Self {
-            godot_backend: GodotRenderBackend::Unknown,
-            enable_remote_debugging: false,
-            remote_debugging_port: 9229,
-            security_config: SecurityConfig::default(),
-            gpu_device_ids: None,
-            user_agent: String::new(),
-            proxy_server: String::new(),
-            proxy_bypass_list: String::new(),
-            cache_size_mb: 0,
-            custom_switches: Vec::new(),
+            inner: OsrApp::new(),
         }
     }
 
     pub fn godot_backend(mut self, godot_backend: GodotRenderBackend) -> Self {
-        self.godot_backend = godot_backend;
+        self.inner.godot_backend = godot_backend;
         self
     }
 
     pub fn remote_debugging(mut self, enable_remote_debugging: bool) -> Self {
-        self.enable_remote_debugging = enable_remote_debugging;
+        self.inner.enable_remote_debugging = enable_remote_debugging;
         self
     }
 
     pub fn remote_debugging_port(mut self, port: u16) -> Self {
-        self.remote_debugging_port = port;
+        self.inner.remote_debugging_port = port;
         self
     }
 
     pub fn security_config(mut self, security_config: SecurityConfig) -> Self {
-        self.security_config = security_config;
+        self.inner.security_config = security_config;
         self
     }
 
     pub fn gpu_device_ids(mut self, vendor_id: u32, device_id: u32) -> Self {
-        self.gpu_device_ids = Some(GpuDeviceIds::new(vendor_id, device_id));
+        self.inner.gpu_device_ids = Some(GpuDeviceIds::new(vendor_id, device_id));
         self
     }
 
     pub fn user_agent(mut self, user_agent: String) -> Self {
-        self.user_agent = user_agent;
+        self.inner.user_agent = user_agent;
         self
     }
 
     pub fn proxy_server(mut self, proxy_server: String) -> Self {
-        self.proxy_server = proxy_server;
+        self.inner.proxy_server = proxy_server;
         self
     }
 
     pub fn proxy_bypass_list(mut self, proxy_bypass_list: String) -> Self {
-        self.proxy_bypass_list = proxy_bypass_list;
+        self.inner.proxy_bypass_list = proxy_bypass_list;
         self
     }
 
     pub fn cache_size_mb(mut self, cache_size_mb: i32) -> Self {
-        self.cache_size_mb = cache_size_mb;
+        self.inner.cache_size_mb = cache_size_mb;
         self
     }
 
     pub fn custom_switches(mut self, custom_switches: Vec<String>) -> Self {
-        self.custom_switches = custom_switches;
+        self.inner.custom_switches = custom_switches;
         self
     }
 
     pub fn build(self) -> OsrApp {
-        OsrApp {
-            godot_backend: self.godot_backend,
-            enable_remote_debugging: self.enable_remote_debugging,
-            remote_debugging_port: self.remote_debugging_port,
-            security_config: self.security_config,
-            gpu_device_ids: self.gpu_device_ids,
-            user_agent: self.user_agent,
-            proxy_server: self.proxy_server,
-            proxy_bypass_list: self.proxy_bypass_list,
-            cache_size_mb: self.cache_size_mb,
-            custom_switches: self.custom_switches,
-        }
+        self.inner
     }
 }
