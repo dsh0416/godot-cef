@@ -44,6 +44,10 @@ uses internally and advanced users can call directly:
 - `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
 
+For API consistency, these core controls intentionally keep the same names as
+their `CefTexture` counterparts (including shared properties such as `url`,
+`enable_accelerated_osr`, `background_color`, and `popup_policy`).
+
 When using `CefTexture2D` directly, you are responsible for integrating these
 helpers with your scene/input flow (for example, mapping coordinates and focus
 state).
@@ -603,4 +607,3 @@ Returns `true` if the request was initiated, `false` if the browser is not ready
 # Ensure cookies are persisted before closing
 cef_texture.flush_cookies()
 ```
-

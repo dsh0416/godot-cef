@@ -8,11 +8,23 @@ impl CefTexture2D {
         self.runtime.app_mut()
     }
 
-    pub(crate) fn set_enable_accelerated_osr_property(&mut self, enabled: bool) {
+    #[func]
+    pub fn get_enable_accelerated_osr(&self) -> bool {
+        self.enable_accelerated_osr
+    }
+
+    #[func]
+    pub fn set_enable_accelerated_osr(&mut self, enabled: bool) {
         self.enable_accelerated_osr = enabled;
     }
 
-    pub(crate) fn set_background_color_property(&mut self, color: Color) {
+    #[func]
+    pub fn get_background_color(&self) -> Color {
+        self.background_color
+    }
+
+    #[func]
+    pub fn set_background_color(&mut self, color: Color) {
         self.background_color = color;
     }
 

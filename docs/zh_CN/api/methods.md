@@ -42,6 +42,9 @@ func _unhandled_input(event: InputEvent) -> void:
 - `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
 
+为保持 API 一致性，这些核心控制在命名上与 `CefTexture` 保持一致（也包括
+`url`、`enable_accelerated_osr`、`background_color`、`popup_policy` 等共享属性）。
+
 当你直接使用 `CefTexture2D` 时，需要自行在场景中完成这些方法的集成（例如坐标
 映射与焦点状态管理）。
 
@@ -505,4 +508,3 @@ cef_texture.clear_cookies()
 # 关闭前确保 Cookie 已持久化
 cef_texture.flush_cookies()
 ```
-

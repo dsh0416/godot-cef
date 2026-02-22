@@ -60,9 +60,17 @@ pub struct CefTexture2D {
     url: GString,
 
     #[export]
+    #[var(
+        get = get_enable_accelerated_osr,
+        set = set_enable_accelerated_osr
+    )]
     enable_accelerated_osr: bool,
 
     #[export]
+    #[var(
+        get = get_background_color,
+        set = set_background_color
+    )]
     background_color: Color,
 
     #[export(enum = (Block = 0, Redirect = 1, SignalOnly = 2))]
