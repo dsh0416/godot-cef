@@ -8,7 +8,7 @@ use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
 use super::duplicate_win32_handle;
 use crate::accelerated_osr::vulkan_common::{
-    VulkanCopyFunctions, find_memory_type_index, get_godot_gpu_device_ids_vulkan,
+    VulkanCopyContext, find_memory_type_index, get_godot_gpu_device_ids_vulkan,
     impl_vulkan_common_methods, submit_vulkan_copy_async,
 };
 
@@ -561,7 +561,11 @@ impl VulkanTextureImporter {
         height: u32,
     ) -> Result<(), String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-        let copy_fns = VulkanCopyFunctions {
+        let ctx = VulkanCopyContext {
+            device: self.device,
+            queue: self.queue,
+            uses_separate_queue: self.uses_separate_queue,
+            queue_family_index: self.queue_family_index,
             reset_fences: fns.reset_fences,
             reset_command_buffer: fns.reset_command_buffer,
             begin_command_buffer: fns.begin_command_buffer,
@@ -571,17 +575,13 @@ impl VulkanTextureImporter {
             queue_submit: fns.queue_submit,
         };
         submit_vulkan_copy_async(
-            &copy_fns,
-            self.device,
-            self.queue,
+            &ctx,
             self.command_buffers[self.current_frame],
             self.fences[self.current_frame],
             src,
             dst,
             width,
             height,
-            self.uses_separate_queue,
-            self.queue_family_index,
         )
     }
 

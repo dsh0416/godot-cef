@@ -174,26 +174,22 @@ pub(crate) fn find_memory_type_index(type_filter: u32) -> Option<u32> {
 /// then submits with `fence`. Caller is responsible for resetting fence/cmd_buffer
 /// before calling and waiting on the fence afterwards.
 pub(crate) fn submit_vulkan_copy_async(
-    fns: &VulkanCopyFunctions,
-    device: ash::vk::Device,
-    queue: ash::vk::Queue,
+    ctx: &VulkanCopyContext,
     cmd_buffer: ash::vk::CommandBuffer,
     fence: ash::vk::Fence,
     src: ash::vk::Image,
     dst: ash::vk::Image,
     width: u32,
     height: u32,
-    uses_separate_queue: bool,
-    queue_family_index: u32,
 ) -> Result<(), String> {
     use ash::vk;
 
-    let _ = unsafe { (fns.reset_fences)(device, 1, &fence) };
-    let _ = unsafe { (fns.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty()) };
+    let _ = unsafe { (ctx.reset_fences)(ctx.device, 1, &fence) };
+    let _ = unsafe { (ctx.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty()) };
 
     let begin_info =
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-    let _ = unsafe { (fns.begin_command_buffer)(cmd_buffer, &begin_info) };
+    let _ = unsafe { (ctx.begin_command_buffer)(cmd_buffer, &begin_info) };
 
     let subresource_range = vk::ImageSubresourceRange {
         aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -225,7 +221,7 @@ pub(crate) fn submit_vulkan_copy_async(
     ];
 
     unsafe {
-        (fns.cmd_pipeline_barrier)(
+        (ctx.cmd_pipeline_barrier)(
             cmd_buffer,
             vk::PipelineStageFlags::TOP_OF_PIPE,
             vk::PipelineStageFlags::TRANSFER,
@@ -258,7 +254,7 @@ pub(crate) fn submit_vulkan_copy_async(
     };
 
     unsafe {
-        (fns.cmd_copy_image)(
+        (ctx.cmd_copy_image)(
             cmd_buffer,
             src,
             vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -269,8 +265,8 @@ pub(crate) fn submit_vulkan_copy_async(
         );
     }
 
-    let (src_family, dst_family) = if uses_separate_queue && queue_family_index != 0 {
-        (queue_family_index, 0u32)
+    let (src_family, dst_family) = if ctx.uses_separate_queue && ctx.queue_family_index != 0 {
+        (ctx.queue_family_index, 0u32)
     } else {
         (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
     };
@@ -286,7 +282,7 @@ pub(crate) fn submit_vulkan_copy_async(
         .dst_access_mask(vk::AccessFlags::SHADER_READ);
 
     unsafe {
-        (fns.cmd_pipeline_barrier)(
+        (ctx.cmd_pipeline_barrier)(
             cmd_buffer,
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::FRAGMENT_SHADER,
@@ -300,10 +296,10 @@ pub(crate) fn submit_vulkan_copy_async(
         );
     }
 
-    let _ = unsafe { (fns.end_command_buffer)(cmd_buffer) };
+    let _ = unsafe { (ctx.end_command_buffer)(cmd_buffer) };
 
     let submit_info = vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
-    let result = unsafe { (fns.queue_submit)(queue, 1, &submit_info, fence) };
+    let result = unsafe { (ctx.queue_submit)(ctx.queue, 1, &submit_info, fence) };
     if result != vk::Result::SUCCESS {
         return Err(format!("Failed to submit copy command: {:?}", result));
     }
@@ -311,8 +307,14 @@ pub(crate) fn submit_vulkan_copy_async(
     Ok(())
 }
 
-/// Subset of VulkanFunctions needed for the shared copy operation.
-pub(crate) struct VulkanCopyFunctions {
+/// Bundles Vulkan function pointers and device-level handles needed for the
+/// shared image-copy submission so individual parameters stay manageable.
+pub(crate) struct VulkanCopyContext {
+    pub device: ash::vk::Device,
+    pub queue: ash::vk::Queue,
+    pub uses_separate_queue: bool,
+    pub queue_family_index: u32,
+    // Function pointers
     pub reset_fences: ash::vk::PFN_vkResetFences,
     pub reset_command_buffer: ash::vk::PFN_vkResetCommandBuffer,
     pub begin_command_buffer: ash::vk::PFN_vkBeginCommandBuffer,
