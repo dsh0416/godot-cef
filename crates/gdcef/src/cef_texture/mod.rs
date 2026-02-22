@@ -396,9 +396,7 @@ impl CefTexture {
     #[func]
     fn set_background_color(&mut self, color: Color) {
         self.background_color = color;
-        self.texture2d_helper
-            .bind_mut()
-            .set_background_color(color);
+        self.texture2d_helper.bind_mut().set_background_color(color);
     }
 
     #[func]
