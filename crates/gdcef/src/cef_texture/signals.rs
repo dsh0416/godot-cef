@@ -20,44 +20,35 @@ macro_rules! emit_signal_variants {
     }};
 }
 
-#[derive(GodotClass)]
-#[class(base=RefCounted)]
-pub struct DownloadRequestInfo {
-    base: Base<RefCounted>,
-
-    #[var]
-    pub id: u32,
-
-    #[var]
-    pub url: GString,
-
-    #[var]
-    pub original_url: GString,
-
-    #[var]
-    pub suggested_file_name: GString,
-
-    #[var]
-    pub mime_type: GString,
-
-    #[var]
-    pub total_bytes: i64,
-}
-
-#[godot_api]
-impl IRefCounted for DownloadRequestInfo {
-    fn init(base: Base<RefCounted>) -> Self {
-        Self {
-            base,
-            id: 0,
-            url: GString::new(),
-            original_url: GString::new(),
-            suggested_file_name: GString::new(),
-            mime_type: GString::new(),
-            total_bytes: -1,
+macro_rules! godot_dto {
+    ($name:ident { $($field:ident : $type:ty = $default:expr),* $(,)? }) => {
+        #[derive(GodotClass)]
+        #[class(base=RefCounted)]
+        pub struct $name {
+            base: Base<RefCounted>,
+            $(
+                #[var]
+                pub $field: $type,
+            )*
         }
-    }
+
+        #[godot_api]
+        impl IRefCounted for $name {
+            fn init(base: Base<RefCounted>) -> Self {
+                Self { base, $($field: $default,)* }
+            }
+        }
+    };
 }
+
+godot_dto!(DownloadRequestInfo {
+    id: u32 = 0,
+    url: GString = GString::new(),
+    original_url: GString = GString::new(),
+    suggested_file_name: GString = GString::new(),
+    mime_type: GString = GString::new(),
+    total_bytes: i64 = -1,
+});
 
 impl DownloadRequestInfo {
     fn from_event(event: &crate::browser::DownloadRequestEvent) -> Gd<Self> {
@@ -73,60 +64,18 @@ impl DownloadRequestInfo {
     }
 }
 
-#[derive(GodotClass)]
-#[class(base=RefCounted)]
-pub struct DownloadUpdateInfo {
-    base: Base<RefCounted>,
-
-    #[var]
-    pub id: u32,
-
-    #[var]
-    pub url: GString,
-
-    #[var]
-    pub full_path: GString,
-
-    #[var]
-    pub received_bytes: i64,
-
-    #[var]
-    pub total_bytes: i64,
-
-    #[var]
-    pub current_speed: i64,
-
-    #[var]
-    pub percent_complete: i32,
-
-    #[var]
-    pub is_in_progress: bool,
-
-    #[var]
-    pub is_complete: bool,
-
-    #[var]
-    pub is_canceled: bool,
-}
-
-#[godot_api]
-impl IRefCounted for DownloadUpdateInfo {
-    fn init(base: Base<RefCounted>) -> Self {
-        Self {
-            base,
-            id: 0,
-            url: GString::new(),
-            full_path: GString::new(),
-            received_bytes: 0,
-            total_bytes: -1,
-            current_speed: 0,
-            percent_complete: -1,
-            is_in_progress: false,
-            is_complete: false,
-            is_canceled: false,
-        }
-    }
-}
+godot_dto!(DownloadUpdateInfo {
+    id: u32 = 0,
+    url: GString = GString::new(),
+    full_path: GString = GString::new(),
+    received_bytes: i64 = 0,
+    total_bytes: i64 = -1,
+    current_speed: i64 = 0,
+    percent_complete: i32 = -1,
+    is_in_progress: bool = false,
+    is_complete: bool = false,
+    is_canceled: bool = false,
+});
 
 impl DownloadUpdateInfo {
     fn from_event(event: &crate::browser::DownloadUpdateEvent) -> Gd<Self> {
@@ -146,57 +95,16 @@ impl DownloadUpdateInfo {
     }
 }
 
-/// Cookie information exposed to GDScript as a `RefCounted` object.
-///
-/// Properties: `name`, `value`, `domain`, `path`, `secure`, `httponly`,
-/// `same_site`, `has_expires`.
-#[derive(GodotClass)]
-#[class(base=RefCounted)]
-pub struct CookieInfo {
-    base: Base<RefCounted>,
-
-    #[var]
-    pub name: GString,
-
-    #[var]
-    pub value: GString,
-
-    #[var]
-    pub domain: GString,
-
-    #[var]
-    pub path: GString,
-
-    #[var]
-    pub secure: bool,
-
-    #[var]
-    pub httponly: bool,
-
-    /// SameSite policy (0 = Unspecified, 1 = None, 2 = Lax, 3 = Strict).
-    #[var]
-    pub same_site: i32,
-
-    #[var]
-    pub has_expires: bool,
-}
-
-#[godot_api]
-impl IRefCounted for CookieInfo {
-    fn init(base: Base<RefCounted>) -> Self {
-        Self {
-            base,
-            name: GString::new(),
-            value: GString::new(),
-            domain: GString::new(),
-            path: GString::new(),
-            secure: false,
-            httponly: false,
-            same_site: 0,
-            has_expires: false,
-        }
-    }
-}
+godot_dto!(CookieInfo {
+    name: GString = GString::new(),
+    value: GString = GString::new(),
+    domain: GString = GString::new(),
+    path: GString = GString::new(),
+    secure: bool = false,
+    httponly: bool = false,
+    same_site: i32 = 0,
+    has_expires: bool = false,
+});
 
 impl CookieInfo {
     fn from_data(data: &crate::cookie::CookieData) -> Gd<Self> {

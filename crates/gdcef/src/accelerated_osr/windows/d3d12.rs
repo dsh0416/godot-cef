@@ -3,9 +3,7 @@ use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print, godot_warn};
 use godot::prelude::*;
 use std::ffi::c_void;
-use windows::Win32::Foundation::{
-    CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, LUID,
-};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, ID3D11Device, ID3D11Device1,
     ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
@@ -18,9 +16,7 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_RESOURCE_STATE_COPY_DEST, ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIAdapter, IDXGIFactory};
-use windows::Win32::System::Threading::{
-    CreateEventW, GetCurrentProcess, INFINITE, WaitForSingleObject,
-};
+use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
 use windows::core::Interface;
 
 pub struct PendingD3D12Copy {
@@ -41,23 +37,7 @@ struct ImportedD3D11Resource {
     duplicated_handle: HANDLE,
 }
 
-fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
-    let mut duplicated = HANDLE::default();
-    let current_process = unsafe { GetCurrentProcess() };
-    unsafe {
-        DuplicateHandle(
-            current_process,
-            handle,
-            current_process,
-            &mut duplicated,
-            0,
-            false,
-            DUPLICATE_SAME_ACCESS,
-        )
-        .map_err(|e| format!("DuplicateHandle failed: {:?}", e))?;
-    }
-    Ok(duplicated)
-}
+use super::duplicate_win32_handle;
 
 pub struct D3D12TextureImporter {
     device: std::mem::ManuallyDrop<ID3D12Device>,

@@ -12,7 +12,10 @@ use godot::prelude::*;
 use std::collections::HashMap;
 use std::os::fd::RawFd;
 
-use crate::accelerated_osr::vulkan_common::impl_vulkan_common_methods;
+use crate::accelerated_osr::vulkan_common::{
+    VulkanCopyContext, find_memory_type_index, get_godot_gpu_device_ids_vulkan,
+    impl_vulkan_common_methods, submit_vulkan_copy_async,
+};
 
 /// DRM format modifier indicating invalid/linear modifier
 const DRM_FORMAT_MOD_INVALID: u64 = 0x00ffffffffffffff;
@@ -590,7 +593,7 @@ impl VulkanTextureImporter {
                 return Err(format!("Failed to get memory fd properties: {:?}", result));
             }
 
-            let idx = Self::find_memory_type_index(fd_props.memory_type_bits)
+            let idx = find_memory_type_index(fd_props.memory_type_bits)
                 .ok_or("Failed to find suitable memory type")?;
             self.cached_memory_type_index = Some(idx);
             idx
@@ -634,13 +637,6 @@ impl VulkanTextureImporter {
         Ok(memory)
     }
 
-    fn find_memory_type_index(type_filter: u32) -> Option<u32> {
-        if type_filter == 0 {
-            return None;
-        }
-        Some(type_filter.trailing_zeros())
-    }
-
     fn submit_copy_async(
         &mut self,
         src: vk::Image,
@@ -649,149 +645,28 @@ impl VulkanTextureImporter {
         height: u32,
     ) -> Result<(), String> {
         let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
-
-        let fence = self.fence;
-        let cmd_buffer = self.command_buffer;
-
-        // Reset fence and command buffer
-        let _ = unsafe { (fns.reset_fences)(self.device, 1, &fence) };
-        let _ =
-            unsafe { (fns.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty()) };
-
-        // Begin command buffer
-        let begin_info = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-
-        let _ = unsafe { (fns.begin_command_buffer)(cmd_buffer, &begin_info) };
-
-        // Combined barrier: transition both src and dst in one call
-        // Source: UNDEFINED -> TRANSFER_SRC (external memory is ready from CEF)
-        // Dest: UNDEFINED -> TRANSFER_DST
-        let subresource_range = vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
+        let ctx = VulkanCopyContext {
+            device: self.device,
+            queue: self.queue,
+            uses_separate_queue: self.uses_separate_queue,
+            queue_family_index: self.queue_family_index,
+            reset_fences: fns.reset_fences,
+            reset_command_buffer: fns.reset_command_buffer,
+            begin_command_buffer: fns.begin_command_buffer,
+            end_command_buffer: fns.end_command_buffer,
+            cmd_pipeline_barrier: fns.cmd_pipeline_barrier,
+            cmd_copy_image: fns.cmd_copy_image,
+            queue_submit: fns.queue_submit,
         };
-
-        let barriers = [
-            vk::ImageMemoryBarrier::default()
-                .old_layout(vk::ImageLayout::UNDEFINED)
-                .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(src)
-                .subresource_range(subresource_range)
-                .src_access_mask(vk::AccessFlags::empty())
-                .dst_access_mask(vk::AccessFlags::TRANSFER_READ),
-            vk::ImageMemoryBarrier::default()
-                .old_layout(vk::ImageLayout::UNDEFINED)
-                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .image(dst)
-                .subresource_range(subresource_range)
-                .src_access_mask(vk::AccessFlags::empty())
-                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE),
-        ];
-
-        unsafe {
-            (fns.cmd_pipeline_barrier)(
-                cmd_buffer,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::empty(),
-                0,
-                std::ptr::null(),
-                0,
-                std::ptr::null(),
-                2,
-                barriers.as_ptr(),
-            );
-        }
-
-        // Copy image
-        let region = vk::ImageCopy {
-            src_subresource: vk::ImageSubresourceLayers {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-            src_offset: vk::Offset3D::default(),
-            dst_subresource: vk::ImageSubresourceLayers {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-            dst_offset: vk::Offset3D::default(),
-            extent: vk::Extent3D {
-                width,
-                height,
-                depth: 1,
-            },
-        };
-
-        unsafe {
-            (fns.cmd_copy_image)(
-                cmd_buffer,
-                src,
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-                dst,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                1,
-                &region,
-            );
-        }
-
-        // Transition destination to SHADER_READ_ONLY for sampling
-        // If using a different queue family, we need to release ownership
-        let (src_family, dst_family) = if self.uses_separate_queue && self.queue_family_index != 0 {
-            // Release ownership from our transfer queue to graphics queue (family 0)
-            (self.queue_family_index, 0u32)
-        } else {
-            (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
-        };
-
-        let final_barrier = vk::ImageMemoryBarrier::default()
-            .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-            .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .src_queue_family_index(src_family)
-            .dst_queue_family_index(dst_family)
-            .image(dst)
-            .subresource_range(subresource_range)
-            .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-            .dst_access_mask(vk::AccessFlags::SHADER_READ);
-
-        unsafe {
-            (fns.cmd_pipeline_barrier)(
-                cmd_buffer,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-                vk::DependencyFlags::empty(),
-                0,
-                std::ptr::null(),
-                0,
-                std::ptr::null(),
-                1,
-                &final_barrier,
-            );
-        }
-
-        let _ = unsafe { (fns.end_command_buffer)(cmd_buffer) };
-
-        // Submit (non-blocking - fence will be signaled when complete)
-        let submit_info =
-            vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
-
-        let result = unsafe { (fns.queue_submit)(self.queue, 1, &submit_info, fence) };
-        if result != vk::Result::SUCCESS {
-            return Err(format!("Failed to submit copy command: {:?}", result));
-        }
-
-        Ok(())
+        submit_vulkan_copy_async(
+            &ctx,
+            self.command_buffer,
+            self.fence,
+            src,
+            dst,
+            width,
+            height,
+        )
     }
 
     fn destroy_imported_image(&mut self, img: ImportedVulkanImage) {
@@ -850,70 +725,11 @@ fn cef_format_to_vulkan(format: &ColorType) -> vk::Format {
     }
 }
 
-/// Get the GPU vendor and device IDs from Godot's Vulkan physical device.
+/// Returns the GPU PCI vendor and device IDs used by Godot's Vulkan rendering backend on Linux.
+///
+/// This function dynamically queries the Vulkan implementation via `libvulkan.so.1`
+/// and returns a tuple of `(vendor_id, device_id)` if successful, or `None` if the
+/// information cannot be determined.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
-    let mut rd = RenderingServer::singleton().get_rendering_device()?;
-
-    let physical_device_ptr =
-        rd.get_driver_resource(DriverResource::PHYSICAL_DEVICE, Rid::Invalid, 0);
-    if physical_device_ptr == 0 {
-        godot_error!(
-            "[AcceleratedOSR/Vulkan] Failed to get Vulkan physical device for GPU ID query"
-        );
-        return None;
-    }
-    let physical_device: vk::PhysicalDevice = unsafe { std::mem::transmute(physical_device_ptr) };
-
-    let lib = match unsafe { libloading::Library::new("libvulkan.so.1") } {
-        Ok(lib) => lib,
-        Err(e) => {
-            godot_error!(
-                "[AcceleratedOSR/Vulkan] Failed to load libvulkan.so.1 for GPU ID query: {}",
-                e
-            );
-            return None;
-        }
-    };
-
-    type GetPhysicalDeviceProperties2 = unsafe extern "system" fn(
-        physical_device: vk::PhysicalDevice,
-        p_properties: *mut vk::PhysicalDeviceProperties2<'_>,
-    );
-
-    let get_physical_device_properties2: GetPhysicalDeviceProperties2 = unsafe {
-        match lib.get(b"vkGetPhysicalDeviceProperties2\0") {
-            Ok(f) => *f,
-            Err(e) => {
-                godot_error!(
-                    "[AcceleratedOSR/Vulkan] Failed to get vkGetPhysicalDeviceProperties2: {}. \
-                     Vulkan 1.1+ is required for GPU ID query.",
-                    e
-                );
-                return None;
-            }
-        }
-    };
-
-    let mut props2 = vk::PhysicalDeviceProperties2::default();
-
-    unsafe {
-        get_physical_device_properties2(physical_device, &mut props2);
-    }
-
-    let vendor_id = props2.properties.vendor_id;
-    let device_id = props2.properties.device_id;
-    let device_name = unsafe {
-        std::ffi::CStr::from_ptr(props2.properties.device_name.as_ptr())
-            .to_string_lossy()
-            .into_owned()
-    };
-
-    godot_print!(
-        "[AcceleratedOSR/Vulkan] Godot GPU: vendor=0x{:04x}, device=0x{:04x}, name={}",
-        vendor_id,
-        device_id,
-        device_name
-    );
-
-    Some((vendor_id, device_id))
+    get_godot_gpu_device_ids_vulkan("libvulkan.so.1")
 }

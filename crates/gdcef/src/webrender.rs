@@ -275,117 +275,125 @@ fn handle_update_drag_cursor(operation: DragOperationsMask, event_queues: &Event
     });
 }
 
-wrap_render_handler! {
-    pub struct SoftwareOsrHandler {
-        handler: cef_app::OsrRenderHandler,
-        event_queues: EventQueuesHandle,
-    }
-
-    impl RenderHandler {
-        fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
-            compute_view_rect(&self.handler.size, rect);
-        }
-
-        fn screen_info(
-            &self,
-            _browser: Option<&mut Browser>,
-            screen_info: Option<&mut ScreenInfo>,
-        ) -> ::std::os::raw::c_int {
-            compute_screen_info(screen_info)
-        }
-
-        fn screen_point(
-            &self,
-            _browser: Option<&mut Browser>,
-            view_x: ::std::os::raw::c_int,
-            view_y: ::std::os::raw::c_int,
-            screen_x: Option<&mut ::std::os::raw::c_int>,
-            screen_y: Option<&mut ::std::os::raw::c_int>,
-        ) -> ::std::os::raw::c_int {
-            compute_screen_point(view_x, view_y, screen_x, screen_y)
-        }
-
-        fn on_popup_show(
-            &self,
-            _browser: Option<&mut Browser>,
-            show: ::std::os::raw::c_int,
-        ) {
-            handle_popup_show(&self.handler.popup_state, show);
-        }
-
-        fn on_popup_size(
-            &self,
-            _browser: Option<&mut Browser>,
-            rect: Option<&Rect>,
-        ) {
-            handle_popup_size(&self.handler.popup_state, rect);
-        }
-
-        fn on_paint(
-            &self,
-            _browser: Option<&mut Browser>,
-            type_: PaintElementType,
-            _dirty_rects: Option<&[Rect]>,
-            buffer: *const u8,
-            width: ::std::os::raw::c_int,
-            height: ::std::os::raw::c_int,
-        ) {
-            if buffer.is_null() || width <= 0 || height <= 0 {
-                return;
+macro_rules! impl_common_render_handler {
+    ($struct_name:ident, handler: $handler_type:ty, $($extra_methods:tt)*) => {
+        wrap_render_handler! {
+            pub struct $struct_name {
+                handler: $handler_type,
+                event_queues: EventQueuesHandle,
             }
 
-            let width = width as u32;
-            let height = height as u32;
-            let buffer_size = (width * height * 4) as usize;
-            let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
-            let rgba_data = bgra_to_rgba(bgra_data);
-
-            if type_ == PaintElementType::VIEW {
-                if let Ok(mut frame_buffer) = self.handler.frame_buffer.lock() {
-                    frame_buffer.update(rgba_data, width, height);
+            impl RenderHandler {
+                fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
+                    compute_view_rect(&self.handler.size, rect);
                 }
-            } else if type_ == PaintElementType::POPUP
-                && let Ok(mut popup_state) = self.handler.popup_state.lock() {
-                    popup_state.update_buffer(rgba_data, width, height);
+
+                fn screen_info(
+                    &self,
+                    _browser: Option<&mut Browser>,
+                    screen_info: Option<&mut ScreenInfo>,
+                ) -> ::std::os::raw::c_int {
+                    compute_screen_info(screen_info)
                 }
-        }
 
-        fn on_ime_composition_range_changed(
-            &self,
-            _browser: Option<&mut Browser>,
-            _selected_range: Option<&Range>,
-            character_bounds: Option<&[Rect]>,
-        ) {
-            if let Some(bounds) = character_bounds.and_then(|b| b.last())
-                && let Ok(mut queues) = self.event_queues.lock() {
-                    queues.ime_composition_range = Some(ImeCompositionRange {
-                        caret_x: bounds.x,
-                        caret_y: bounds.y,
-                        caret_height: bounds.height,
-                    });
+                fn screen_point(
+                    &self,
+                    _browser: Option<&mut Browser>,
+                    view_x: ::std::os::raw::c_int,
+                    view_y: ::std::os::raw::c_int,
+                    screen_x: Option<&mut ::std::os::raw::c_int>,
+                    screen_y: Option<&mut ::std::os::raw::c_int>,
+                ) -> ::std::os::raw::c_int {
+                    compute_screen_point(view_x, view_y, screen_x, screen_y)
                 }
-        }
 
-        fn start_dragging(
-            &self,
-            _browser: Option<&mut Browser>,
-            drag_data: Option<&mut DragData>,
-            allowed_ops: DragOperationsMask,
-            x: ::std::os::raw::c_int,
-            y: ::std::os::raw::c_int,
-        ) -> ::std::os::raw::c_int {
-            handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues)
-        }
+                fn on_popup_show(
+                    &self,
+                    _browser: Option<&mut Browser>,
+                    show: ::std::os::raw::c_int,
+                ) {
+                    handle_popup_show(&self.handler.popup_state, show);
+                }
 
-        fn update_drag_cursor(
-            &self,
-            _browser: Option<&mut Browser>,
-            operation: DragOperationsMask,
-        ) {
-            handle_update_drag_cursor(operation, &self.event_queues);
+                fn on_popup_size(
+                    &self,
+                    _browser: Option<&mut Browser>,
+                    rect: Option<&Rect>,
+                ) {
+                    handle_popup_size(&self.handler.popup_state, rect);
+                }
+
+                fn on_ime_composition_range_changed(
+                    &self,
+                    _browser: Option<&mut Browser>,
+                    _selected_range: Option<&Range>,
+                    character_bounds: Option<&[Rect]>,
+                ) {
+                    if let Some(bounds) = character_bounds.and_then(|b| b.last())
+                        && let Ok(mut queues) = self.event_queues.lock() {
+                            queues.ime_composition_range = Some(ImeCompositionRange {
+                                caret_x: bounds.x,
+                                caret_y: bounds.y,
+                                caret_height: bounds.height,
+                            });
+                        }
+                }
+
+                fn start_dragging(
+                    &self,
+                    _browser: Option<&mut Browser>,
+                    drag_data: Option<&mut DragData>,
+                    allowed_ops: DragOperationsMask,
+                    x: ::std::os::raw::c_int,
+                    y: ::std::os::raw::c_int,
+                ) -> ::std::os::raw::c_int {
+                    handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues)
+                }
+
+                fn update_drag_cursor(
+                    &self,
+                    _browser: Option<&mut Browser>,
+                    operation: DragOperationsMask,
+                ) {
+                    handle_update_drag_cursor(operation, &self.event_queues);
+                }
+
+                $($extra_methods)*
+            }
         }
-    }
+    };
 }
+
+impl_common_render_handler!(SoftwareOsrHandler, handler: cef_app::OsrRenderHandler,
+    fn on_paint(
+        &self,
+        _browser: Option<&mut Browser>,
+        type_: PaintElementType,
+        _dirty_rects: Option<&[Rect]>,
+        buffer: *const u8,
+        width: ::std::os::raw::c_int,
+        height: ::std::os::raw::c_int,
+    ) {
+        if buffer.is_null() || width <= 0 || height <= 0 {
+            return;
+        }
+
+        let width = width as u32;
+        let height = height as u32;
+        let buffer_size = (width * height * 4) as usize;
+        let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
+        let rgba_data = bgra_to_rgba(bgra_data);
+
+        if type_ == PaintElementType::VIEW {
+            if let Ok(mut frame_buffer) = self.handler.frame_buffer.lock() {
+                frame_buffer.update(rgba_data, width, height);
+            }
+        } else if type_ == PaintElementType::POPUP
+            && let Ok(mut popup_state) = self.handler.popup_state.lock() {
+                popup_state.update_buffer(rgba_data, width, height);
+            }
+    }
+);
 
 impl_build_new!(
     pub SoftwareOsrHandler => cef::RenderHandler;
@@ -393,124 +401,43 @@ impl_build_new!(
     event_queues: EventQueuesHandle
 );
 
-wrap_render_handler! {
-    pub struct AcceleratedOsrHandler {
-        handler: PlatformAcceleratedRenderHandler,
-        event_queues: EventQueuesHandle,
+impl_common_render_handler!(AcceleratedOsrHandler, handler: PlatformAcceleratedRenderHandler,
+    fn on_accelerated_paint(
+        &self,
+        _browser: Option<&mut Browser>,
+        type_: PaintElementType,
+        _dirty_rects: Option<&[Rect]>,
+        info: Option<&AcceleratedPaintInfo>,
+    ) {
+        self.handler.on_accelerated_paint(type_, info);
     }
 
-    impl RenderHandler {
-        fn view_rect(&self, _browser: Option<&mut Browser>, rect: Option<&mut Rect>) {
-            compute_view_rect(&self.handler.size, rect);
-        }
+    fn on_paint(
+        &self,
+        _browser: Option<&mut Browser>,
+        type_: PaintElementType,
+        _dirty_rects: Option<&[Rect]>,
+        buffer: *const u8,
+        width: ::std::os::raw::c_int,
+        height: ::std::os::raw::c_int,
+    ) {
+        if type_ == PaintElementType::POPUP
+            && !buffer.is_null()
+            && width > 0
+            && height > 0
+        {
+            let width = width as u32;
+            let height = height as u32;
+            let buffer_size = (width * height * 4) as usize;
+            let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
+            let rgba_data = bgra_to_rgba(bgra_data);
 
-        fn screen_info(
-            &self,
-            _browser: Option<&mut Browser>,
-            screen_info: Option<&mut ScreenInfo>,
-        ) -> ::std::os::raw::c_int {
-            compute_screen_info(screen_info)
-        }
-
-        fn screen_point(
-            &self,
-            _browser: Option<&mut Browser>,
-            view_x: ::std::os::raw::c_int,
-            view_y: ::std::os::raw::c_int,
-            screen_x: Option<&mut ::std::os::raw::c_int>,
-            screen_y: Option<&mut ::std::os::raw::c_int>,
-        ) -> ::std::os::raw::c_int {
-            compute_screen_point(view_x, view_y, screen_x, screen_y)
-        }
-
-        fn on_popup_show(
-            &self,
-            _browser: Option<&mut Browser>,
-            show: ::std::os::raw::c_int,
-        ) {
-            handle_popup_show(&self.handler.popup_state, show);
-        }
-
-        fn on_popup_size(
-            &self,
-            _browser: Option<&mut Browser>,
-            rect: Option<&Rect>,
-        ) {
-            handle_popup_size(&self.handler.popup_state, rect);
-        }
-
-        fn on_accelerated_paint(
-            &self,
-            _browser: Option<&mut Browser>,
-            type_: PaintElementType,
-            _dirty_rects: Option<&[Rect]>,
-            info: Option<&AcceleratedPaintInfo>,
-        ) {
-            self.handler.on_accelerated_paint(type_, info);
-        }
-
-        fn on_paint(
-            &self,
-            _browser: Option<&mut Browser>,
-            type_: PaintElementType,
-            _dirty_rects: Option<&[Rect]>,
-            buffer: *const u8,
-            width: ::std::os::raw::c_int,
-            height: ::std::os::raw::c_int,
-        ) {
-            if type_ == PaintElementType::POPUP
-                && !buffer.is_null()
-                && width > 0
-                && height > 0
-            {
-                let width = width as u32;
-                let height = height as u32;
-                let buffer_size = (width * height * 4) as usize;
-                let bgra_data = unsafe { std::slice::from_raw_parts(buffer, buffer_size) };
-                let rgba_data = bgra_to_rgba(bgra_data);
-
-                if let Ok(mut popup_state) = self.handler.popup_state.lock() {
-                    popup_state.update_buffer(rgba_data, width, height);
-                }
+            if let Ok(mut popup_state) = self.handler.popup_state.lock() {
+                popup_state.update_buffer(rgba_data, width, height);
             }
         }
-
-        fn on_ime_composition_range_changed(
-            &self,
-            _browser: Option<&mut Browser>,
-            _selected_range: Option<&Range>,
-            character_bounds: Option<&[Rect]>,
-        ) {
-            if let Some(bounds) = character_bounds.and_then(|b| b.last())
-                && let Ok(mut queues) = self.event_queues.lock() {
-                    queues.ime_composition_range = Some(ImeCompositionRange {
-                        caret_x: bounds.x,
-                        caret_y: bounds.y,
-                        caret_height: bounds.height,
-                    });
-                }
-        }
-
-        fn start_dragging(
-            &self,
-            _browser: Option<&mut Browser>,
-            drag_data: Option<&mut DragData>,
-            allowed_ops: DragOperationsMask,
-            x: ::std::os::raw::c_int,
-            y: ::std::os::raw::c_int,
-        ) -> ::std::os::raw::c_int {
-            handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues)
-        }
-
-        fn update_drag_cursor(
-            &self,
-            _browser: Option<&mut Browser>,
-            operation: DragOperationsMask,
-        ) {
-            handle_update_drag_cursor(operation, &self.event_queues);
-        }
     }
-}
+);
 
 impl_build_new!(
     pub AcceleratedOsrHandler => cef::RenderHandler;
@@ -1217,101 +1144,96 @@ fn push_permission_request(
     }
 }
 
-fn map_media_permission_types(requested_permissions: u32) -> Vec<(u32, &'static str)> {
-    let mappings = [
-        (
-            media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE),
-            "microphone",
-        ),
-        (
-            media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE),
-            "camera",
-        ),
-        (
-            media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE),
-            "desktop_audio_capture",
-        ),
-        (
-            media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE),
-            "desktop_video_capture",
-        ),
-    ];
-
+fn map_permission_bits(
+    requested: u32,
+    mappings: &[(u32, &'static str)],
+    unknown_label: &'static str,
+) -> Vec<(u32, &'static str)> {
     let mut out = Vec::new();
     let mut known_mask = 0u32;
-    for (bit, label) in mappings {
+    for &(bit, label) in mappings {
         known_mask |= bit;
-        if requested_permissions & bit != 0 {
+        if requested & bit != 0 {
             out.push((bit, label));
         }
     }
-
-    let unknown = requested_permissions & !known_mask;
+    let unknown = requested & !known_mask;
     if unknown != 0 {
-        out.push((unknown, "unknown_media_permission"));
+        out.push((unknown, unknown_label));
     }
-
     if out.is_empty() {
-        out.push((requested_permissions, "unknown_media_permission"));
+        out.push((requested, unknown_label));
     }
-
     out
 }
 
+fn map_media_permission_types(requested_permissions: u32) -> Vec<(u32, &'static str)> {
+    map_permission_bits(
+        requested_permissions,
+        &[
+            (
+                media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE),
+                "microphone",
+            ),
+            (
+                media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE),
+                "camera",
+            ),
+            (
+                media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE),
+                "desktop_audio_capture",
+            ),
+            (
+                media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE),
+                "desktop_video_capture",
+            ),
+        ],
+        "unknown_media_permission",
+    )
+}
+
 fn map_prompt_permission_types(requested_permissions: u32) -> Vec<&'static str> {
-    let mappings = [
-        (
-            prompt_permission_to_u32(cef::PermissionRequestTypes::CAMERA_STREAM),
-            "camera",
-        ),
-        (
-            prompt_permission_to_u32(cef::PermissionRequestTypes::MIC_STREAM),
-            "microphone",
-        ),
-        (
-            prompt_permission_to_u32(cef::PermissionRequestTypes::GEOLOCATION),
-            "geolocation",
-        ),
-        (
-            prompt_permission_to_u32(cef::PermissionRequestTypes::CLIPBOARD),
-            "clipboard",
-        ),
-        (
-            prompt_permission_to_u32(cef::PermissionRequestTypes::NOTIFICATIONS),
-            "notifications",
-        ),
-        (
-            prompt_permission_to_u32(cef::PermissionRequestTypes::MIDI_SYSEX),
-            "midi_sysex",
-        ),
-        (
-            prompt_permission_to_u32(cef::PermissionRequestTypes::POINTER_LOCK),
-            "pointer_lock",
-        ),
-        (
-            prompt_permission_to_u32(cef::PermissionRequestTypes::KEYBOARD_LOCK),
-            "keyboard_lock",
-        ),
-    ];
-
-    let mut out = Vec::new();
-    let mut known_mask = 0u32;
-    for (bit, label) in mappings {
-        known_mask |= bit;
-        if requested_permissions & bit != 0 {
-            out.push(label);
-        }
-    }
-
-    if requested_permissions & !known_mask != 0 {
-        out.push("unknown_permission");
-    }
-
-    if out.is_empty() {
-        out.push("unknown_permission");
-    }
-
-    out
+    map_permission_bits(
+        requested_permissions,
+        &[
+            (
+                prompt_permission_to_u32(cef::PermissionRequestTypes::CAMERA_STREAM),
+                "camera",
+            ),
+            (
+                prompt_permission_to_u32(cef::PermissionRequestTypes::MIC_STREAM),
+                "microphone",
+            ),
+            (
+                prompt_permission_to_u32(cef::PermissionRequestTypes::GEOLOCATION),
+                "geolocation",
+            ),
+            (
+                prompt_permission_to_u32(cef::PermissionRequestTypes::CLIPBOARD),
+                "clipboard",
+            ),
+            (
+                prompt_permission_to_u32(cef::PermissionRequestTypes::NOTIFICATIONS),
+                "notifications",
+            ),
+            (
+                prompt_permission_to_u32(cef::PermissionRequestTypes::MIDI_SYSEX),
+                "midi_sysex",
+            ),
+            (
+                prompt_permission_to_u32(cef::PermissionRequestTypes::POINTER_LOCK),
+                "pointer_lock",
+            ),
+            (
+                prompt_permission_to_u32(cef::PermissionRequestTypes::KEYBOARD_LOCK),
+                "keyboard_lock",
+            ),
+        ],
+        "unknown_permission",
+    )
+    .into_iter()
+    .map(|(_, label)| label)
+    .collect()
 }
 
 #[cfg(test)]

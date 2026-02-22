@@ -5,6 +5,26 @@ use super::RenderBackend;
 use godot::classes::RenderingServer;
 use godot::global::{godot_print, godot_warn};
 use godot::prelude::*;
+use windows::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
+use windows::Win32::System::Threading::GetCurrentProcess;
+
+pub(super) fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
+    let mut duplicated = HANDLE::default();
+    let current_process = unsafe { GetCurrentProcess() };
+    unsafe {
+        DuplicateHandle(
+            current_process,
+            handle,
+            current_process,
+            &mut duplicated,
+            0,
+            false,
+            DUPLICATE_SAME_ACCESS,
+        )
+        .map_err(|e| format!("DuplicateHandle failed: {:?}", e))?;
+    }
+    Ok(duplicated)
+}
 
 use d3d12::D3D12TextureImporter;
 use vulkan::VulkanTextureImporter;
