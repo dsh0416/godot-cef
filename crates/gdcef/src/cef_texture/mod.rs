@@ -385,7 +385,7 @@ impl CefTexture {
         self.enable_accelerated_osr = enabled;
         self.texture2d_helper
             .bind_mut()
-            .set_enable_accelerated_osr_property(enabled);
+            .set_enable_accelerated_osr(enabled);
     }
 
     #[func]
@@ -396,9 +396,7 @@ impl CefTexture {
     #[func]
     fn set_background_color(&mut self, color: Color) {
         self.background_color = color;
-        self.texture2d_helper
-            .bind_mut()
-            .set_background_color_property(color);
+        self.texture2d_helper.bind_mut().set_background_color(color);
     }
 
     #[func]
