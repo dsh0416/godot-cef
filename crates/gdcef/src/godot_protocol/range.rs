@@ -86,7 +86,7 @@ pub(crate) fn parse_range_header(range_str: &str, file_size: u64) -> Option<Pars
         if ranges.is_empty() {
             None
         } else if ranges.len() == 1 {
-            Some(ParsedRanges::Single(ranges.into_iter().next().unwrap()))
+            ranges.into_iter().next().map(ParsedRanges::Single)
         } else if ranges.len() > MAX_MULTI_RANGES {
             None
         } else {

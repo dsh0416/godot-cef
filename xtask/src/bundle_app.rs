@@ -22,11 +22,11 @@ const HELPERS: &[&str] = &[
     "Godot CEF Helper",
 ];
 
-fn create_app_layout(app_path: &Path) -> PathBuf {
-    [EXEC_PATH, RESOURCES_PATH, FRAMEWORKS_PATH]
-        .iter()
-        .for_each(|p| fs::create_dir_all(app_path.join(p)).unwrap());
-    app_path.join("Contents")
+fn create_app_layout(app_path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    for path in [EXEC_PATH, RESOURCES_PATH, FRAMEWORKS_PATH] {
+        fs::create_dir_all(app_path.join(path))?;
+    }
+    Ok(app_path.join("Contents"))
 }
 
 fn create_app_info_plist(
@@ -46,7 +46,7 @@ fn create_app(
     is_helper: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let app_path = app_path.join(exec_name).with_extension("app");
-    let contents_path = create_app_layout(&app_path);
+    let contents_path = create_app_layout(&app_path)?;
     create_app_info_plist(&contents_path, exec_name, is_helper)?;
     fs::copy(bin, app_path.join(EXEC_PATH).join(exec_name))?;
     Ok(app_path)

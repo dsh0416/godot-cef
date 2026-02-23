@@ -66,7 +66,7 @@ pub struct NativeTextureImporter {
 
 impl NativeTextureImporter {
     pub fn new() -> Option<Self> {
-        let mut rs = RenderingServer::singleton().get_rendering_device().unwrap();
+        let mut rs = RenderingServer::singleton().get_rendering_device()?;
 
         let mtl_device_ptr =
             rs.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);

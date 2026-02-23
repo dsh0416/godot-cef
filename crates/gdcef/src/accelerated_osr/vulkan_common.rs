@@ -7,7 +7,7 @@ macro_rules! impl_vulkan_common_methods {
         fn load_vulkan_functions(
             lib: &libloading::Library,
             device: ash::vk::Device,
-        ) -> VulkanFunctions {
+        ) -> Result<VulkanFunctions, String> {
             type GetDeviceProcAddr = unsafe extern "system" fn(
                 ash::vk::Device,
                 *const std::ffi::c_char,
@@ -15,7 +15,7 @@ macro_rules! impl_vulkan_common_methods {
 
             let get_device_proc_addr: GetDeviceProcAddr = unsafe {
                 *lib.get(b"vkGetDeviceProcAddr\0")
-                    .expect("Failed to get vkGetDeviceProcAddr")
+                    .map_err(|e| format!("Failed to get vkGetDeviceProcAddr: {e}"))?
             };
 
             macro_rules! load_device_fn {
@@ -24,14 +24,14 @@ macro_rules! impl_vulkan_common_methods {
                         let ptr =
                             get_device_proc_addr(device, concat!($fn_name, "\0").as_ptr() as *const _);
                         if ptr.is_none() {
-                            panic!("Failed to load Vulkan function: {}", $fn_name);
+                            return Err(format!("Failed to load Vulkan function: {}", $fn_name));
                         }
                         std::mem::transmute::<ash::vk::PFN_vkVoidFunction, $fn_type>(ptr)
                     }
                 };
             }
 
-            VulkanFunctions {
+            Ok(VulkanFunctions {
                 destroy_image: load_device_fn!("vkDestroyImage", ash::vk::PFN_vkDestroyImage),
                 free_memory: load_device_fn!("vkFreeMemory", ash::vk::PFN_vkFreeMemory),
                 allocate_memory: load_device_fn!("vkAllocateMemory", ash::vk::PFN_vkAllocateMemory),
@@ -76,7 +76,7 @@ macro_rules! impl_vulkan_common_methods {
                 ),
                 get_device_queue: load_device_fn!("vkGetDeviceQueue", ash::vk::PFN_vkGetDeviceQueue),
                 $memory_field: load_device_fn!($memory_fn_name, $memory_fn_type),
-            }
+            })
         }
 
         fn find_copy_queue(

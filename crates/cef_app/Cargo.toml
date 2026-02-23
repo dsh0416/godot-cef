@@ -9,6 +9,9 @@ repository.workspace = true
 [lib]
 crate-type = ["rlib"]
 
+[lints]
+workspace = true
+
 [dependencies]
 cef = { workspace = true }
 ciborium = { workspace = true }

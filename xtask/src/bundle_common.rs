@@ -243,12 +243,9 @@ pub fn run_cargo_for_macos_targets(
 
 pub fn get_target_dir(release: bool, custom_target_dir: Option<&Path>) -> PathBuf {
     let profile = if release { "release" } else { "debug" };
-    let base = custom_target_dir.map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("xtask should be in workspace")
-            .join("target")
-    });
+    let base = custom_target_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root().join("target"));
     base.join(profile)
 }
 
@@ -274,12 +271,9 @@ pub fn get_target_dir_for_target(
     custom_target_dir: Option<&Path>,
 ) -> PathBuf {
     let profile = if release { "release" } else { "debug" };
-    let base = custom_target_dir.map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("xtask should be in workspace")
-            .join("target")
-    });
+    let base = custom_target_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root().join("target"));
     base.join(target).join(profile)
 }
 
@@ -317,11 +311,17 @@ pub fn run_lipo(
 }
 
 pub fn get_addon_bin_dir(platform_target: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("xtask should be in workspace")
+    workspace_root()
         .join("addons/godot_cef/bin")
         .join(platform_target)
+}
+
+fn workspace_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    match manifest_dir.parent() {
+        Some(parent) => parent.to_path_buf(),
+        None => manifest_dir,
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]

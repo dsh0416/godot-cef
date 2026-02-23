@@ -115,7 +115,10 @@ macro_rules! define_vulkan_hook {
             p_allocator: *const c_void,
             p_device: *mut c_void,
         ) -> i32 {
-            let hook = VK_CREATE_DEVICE_HOOK.get().expect("Hook not initialized");
+            let Some(hook) = VK_CREATE_DEVICE_HOOK.get() else {
+                eprintln!("{} Hook not initialized", $log_prefix);
+                return ash::vk::Result::ERROR_INITIALIZATION_FAILED.as_raw();
+            };
             unsafe {
                 if p_create_info.is_null() {
                     return hook.call(physical_device, p_create_info, p_allocator, p_device);

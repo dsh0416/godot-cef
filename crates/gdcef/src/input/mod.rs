@@ -133,7 +133,7 @@ pub fn handle_mouse_button(
                 MouseButton::LEFT => MouseButtonType::LEFT,
                 MouseButton::MIDDLE => MouseButtonType::MIDDLE,
                 MouseButton::RIGHT => MouseButtonType::RIGHT,
-                _ => unreachable!(),
+                _ => return,
             };
             let mouse_up = !event.is_pressed();
             let click_count = if event.is_double_click() { 2 } else { 1 };
