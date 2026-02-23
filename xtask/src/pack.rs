@@ -77,7 +77,10 @@ pub fn run(
     } else {
         let workspace_addon = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .expect("xtask should be in workspace")
+            .map_or_else(
+                || Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf(),
+                std::path::Path::to_path_buf,
+            )
             .join("addons/godot_cef");
         if workspace_addon.exists() {
             copy_addon_files(&workspace_addon, output_dir)?;

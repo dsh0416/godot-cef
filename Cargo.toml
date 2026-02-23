@@ -55,10 +55,22 @@ percent-encoding = "2"
 adblock = "0.12"
 ciborium = "0.2"
 
+[workspace.lints.rust]
+unconditional_panic = "deny"
+
+[workspace.lints.clippy]
+panic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+panic_in_result_fn = "deny"
+
 [profile.release]
 debug = "line-tables-only"
 lto = true
 codegen-units = 1
+panic = "abort"
 
 [profile.bench]
 debug = "line-tables-only"

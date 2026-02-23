@@ -9,6 +9,9 @@ repository.workspace = true
 [[bin]]
 name = "gdcef_helper"
 
+[lints]
+workspace = true
+
 [dependencies]
 cef = { workspace = true }
 cef-dll-sys = { workspace = true }

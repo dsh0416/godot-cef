@@ -9,9 +9,9 @@ const PLATFORM_TARGET: &str = "universal-apple-darwin";
 
 const RESOURCES_PATH: &str = "Resources";
 
-fn create_framework_layout(fmwk_path: &Path) -> PathBuf {
-    fs::create_dir_all(fmwk_path.join(RESOURCES_PATH)).unwrap();
-    fmwk_path.join(RESOURCES_PATH)
+fn create_framework_layout(fmwk_path: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    fs::create_dir_all(fmwk_path.join(RESOURCES_PATH))?;
+    Ok(fmwk_path.join(RESOURCES_PATH))
 }
 
 fn create_framework_info_plist(
@@ -33,7 +33,7 @@ fn create_framework(
         fs::remove_dir_all(&fmwk_path)?;
     }
 
-    let resources_path = create_framework_layout(&fmwk_path);
+    let resources_path = create_framework_layout(&fmwk_path)?;
     create_framework_info_plist(&resources_path, lib_name)?;
     fs::copy(bin, fmwk_path.join(lib_name))?;
     Ok(fmwk_path)

@@ -71,7 +71,8 @@ fn load_cef_framework() -> CefResult<()> {
     let framework_path = get_framework_path().map_err(|e| {
         CefError::FrameworkLoadFailed(format!("Failed to get CEF framework path: {}", e))
     })?;
-    cef_app::load_cef_framework_from_path(&framework_path);
+    cef_app::load_cef_framework_from_path(&framework_path)
+        .map_err(|e| CefError::FrameworkLoadFailed(format!("Failed to load CEF framework: {e}")))?;
     Ok(())
 }
 
@@ -85,7 +86,11 @@ fn load_cef_framework() -> CefResult<()> {
 #[cfg(target_os = "macos")]
 fn load_sandbox(args: &cef::MainArgs) {
     match get_framework_path() {
-        Ok(framework_path) => cef_app::load_sandbox_from_path(&framework_path, args),
+        Ok(framework_path) => {
+            if let Err(e) = cef_app::load_sandbox_from_path(&framework_path, args) {
+                godot::global::godot_warn!("Failed to load CEF sandbox: {}", e);
+            }
+        }
         Err(e) => godot::global::godot_warn!("Failed to load CEF sandbox: {}", e),
     }
 }

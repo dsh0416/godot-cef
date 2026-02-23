@@ -2,11 +2,11 @@
 use std::{io::Error, path::PathBuf};
 
 #[cfg(target_os = "macos")]
-fn get_framework_name() -> &'static str {
+fn get_framework_name() -> Result<&'static str, Error> {
     match std::env::consts::ARCH {
-        "aarch64" => "Chromium Embedded Framework (ARM64).framework",
-        "x86_64" => "Chromium Embedded Framework (X86_64).framework",
-        arch => panic!("Unsupported architecture: {}", arch),
+        "aarch64" => Ok("Chromium Embedded Framework (ARM64).framework"),
+        "x86_64" => Ok("Chromium Embedded Framework (X86_64).framework"),
+        arch => Err(Error::other(format!("Unsupported architecture: {}", arch))),
     }
 }
 
@@ -14,8 +14,9 @@ fn get_framework_name() -> &'static str {
 pub fn get_framework_path() -> Result<PathBuf, Error> {
     use process_path::get_executable_path;
 
-    let dylib_path = get_executable_path().unwrap();
-    let framework_name = get_framework_name();
+    let dylib_path = get_executable_path()
+        .ok_or_else(|| Error::other("Failed to resolve executable path"))?;
+    let framework_name = get_framework_name()?;
 
     match dylib_path.ends_with("Godot CEF") {
         true => {

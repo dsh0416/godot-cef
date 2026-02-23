@@ -21,6 +21,7 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 - **Remote Debugging** — Built-in Chrome DevTools support
 - **Typed IPC (CBOR)** — Send/receive typed primitives, arrays, and binary buffers (`Variant` / JS values) without manual JSON serialization
 - **Listener-based JS Bridge** — Multi-subscriber IPC listeners via `addListener/removeListener/hasListener`
+- **No-Panic Runtime Policy** — Panics in crate runtime code are treated as bugs and blocked by lint/CI policy
 
 ## Screenshots
 
@@ -195,6 +196,16 @@ You can validate bundled addon artifacts with:
 ```bash
 cargo xtask validate --addon addons/godot_cef
 ```
+
+## No-Panic Policy
+
+This project treats panics in crate runtime code as bugs. We do not use panic-based control flow.
+
+- Workspace lint policy denies `panic!`, `unwrap()`, `expect()`, `todo!()`, and `unimplemented!()`.
+- `cargo clippy --workspace --all-targets -- -D warnings` is used as a CI gate.
+- Release builds use `panic = "abort"` to prevent unwind-based panic behavior in production artifacts.
+
+If you find a runtime panic path, please open an issue or submit a fix.
 
 ## Comparison with Similar Projects
 

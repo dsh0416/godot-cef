@@ -88,9 +88,16 @@ struct VulkanFunctions {
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
 }
 
-static VULKAN_FNS: std::sync::OnceLock<VulkanFunctions> = std::sync::OnceLock::new();
+static VULKAN_FNS: std::sync::OnceLock<Result<VulkanFunctions, String>> = std::sync::OnceLock::new();
 
 impl VulkanTextureImporter {
+    fn vulkan_fns() -> Result<&'static VulkanFunctions, String> {
+        let fns = VULKAN_FNS
+            .get()
+            .ok_or_else(|| "Vulkan functions not loaded".to_string())?;
+        fns.as_ref().map_err(Clone::clone)
+    }
+
     pub fn new() -> Option<Self> {
         let mut rd = RenderingServer::singleton()
             .get_rendering_device()
@@ -117,7 +124,16 @@ impl VulkanTextureImporter {
         };
 
         // Load function pointers using the device
-        let fns = VULKAN_FNS.get_or_init(|| Self::load_vulkan_functions(&lib, device));
+        let fns = match VULKAN_FNS.get_or_init(|| Self::load_vulkan_functions(&lib, device)) {
+            Ok(fns) => fns,
+            Err(err) => {
+                godot_error!(
+                    "[AcceleratedOSR/Vulkan] Failed to load Vulkan device functions: {}",
+                    err
+                );
+                return None;
+            }
+        };
 
         // Get physical device from Godot to query queue families
         let physical_device_ptr =
@@ -313,7 +329,7 @@ impl VulkanTextureImporter {
         // Since we only have 2 frames, this effectively waits for the GPU to catch up if it's more than 1 frame behind.
         if self.frames_in_flight[self.current_frame] {
             // Use a timeout of 0 to check if the fence is signaled without blocking
-            let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+            let fns = Self::vulkan_fns()?;
             let result = unsafe {
                 (fns.wait_for_fences)(
                     self.device,
@@ -409,7 +425,7 @@ impl VulkanTextureImporter {
 
     pub fn wait_for_copy(&mut self) -> Result<(), String> {
         // Wait for all frames in flight
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let fns = Self::vulkan_fns()?;
 
         for i in 0..2 {
             if self.frames_in_flight[i] {
@@ -431,7 +447,7 @@ impl VulkanTextureImporter {
         width: u32,
         height: u32,
     ) -> Result<ImportedVulkanImage, String> {
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let fns = Self::vulkan_fns()?;
 
         // Create new image with external memory flag
         let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
@@ -489,7 +505,7 @@ impl VulkanTextureImporter {
         width: u32,
         height: u32,
     ) -> Result<vk::DeviceMemory, String> {
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let fns = Self::vulkan_fns()?;
 
         // Get or cache the memory type index (same for all D3D12 imports)
         let memory_type_index = if let Some(cached) = self.cached_memory_type_index {
@@ -560,7 +576,7 @@ impl VulkanTextureImporter {
         width: u32,
         height: u32,
     ) -> Result<(), String> {
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let fns = Self::vulkan_fns()?;
         let ctx = VulkanCopyContext {
             device: self.device,
             queue: self.queue,
@@ -586,7 +602,7 @@ impl VulkanTextureImporter {
     }
 
     fn destroy_imported_image(&mut self, img: ImportedVulkanImage) {
-        if let Some(fns) = VULKAN_FNS.get() {
+        if let Some(Ok(fns)) = VULKAN_FNS.get() {
             unsafe {
                 (fns.destroy_image)(self.device, img.image, std::ptr::null());
                 (fns.free_memory)(self.device, img.memory, std::ptr::null());
@@ -610,7 +626,7 @@ impl Drop for VulkanTextureImporter {
             }
         }
 
-        if let Some(fns) = VULKAN_FNS.get() {
+        if let Some(Ok(fns)) = VULKAN_FNS.get() {
             unsafe {
                 for fence in self.fences {
                     (fns.destroy_fence)(self.device, fence, std::ptr::null());

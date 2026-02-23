@@ -10,6 +10,9 @@ repository.workspace = true
 name = "gdcef"
 crate-type = ["cdylib"]
 
+[lints]
+workspace = true
+
 [dependencies]
 godot = { workspace = true }
 cef = { workspace = true }

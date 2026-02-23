@@ -105,9 +105,16 @@ struct VulkanFunctions {
     get_memory_fd_properties: PfnVkGetMemoryFdPropertiesKHR,
 }
 
-static VULKAN_FNS: std::sync::OnceLock<VulkanFunctions> = std::sync::OnceLock::new();
+static VULKAN_FNS: std::sync::OnceLock<Result<VulkanFunctions, String>> = std::sync::OnceLock::new();
 
 impl VulkanTextureImporter {
+    fn vulkan_fns() -> Result<&'static VulkanFunctions, String> {
+        let fns = VULKAN_FNS
+            .get()
+            .ok_or_else(|| "Vulkan functions not loaded".to_string())?;
+        fns.as_ref().map_err(Clone::clone)
+    }
+
     pub fn new() -> Option<Self> {
         let mut rd = RenderingServer::singleton()
             .get_rendering_device()
@@ -137,7 +144,16 @@ impl VulkanTextureImporter {
         };
 
         // Load function pointers using the device
-        let fns = VULKAN_FNS.get_or_init(|| Self::load_vulkan_functions(&lib, device));
+        let fns = match VULKAN_FNS.get_or_init(|| Self::load_vulkan_functions(&lib, device)) {
+            Ok(fns) => fns,
+            Err(err) => {
+                godot_error!(
+                    "[AcceleratedOSR/Vulkan] Failed to load Vulkan device functions: {}",
+                    err
+                );
+                return None;
+            }
+        };
 
         // Get physical device from Godot to query queue families
         let physical_device_ptr =
@@ -466,7 +482,7 @@ impl VulkanTextureImporter {
             return Ok(());
         }
 
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let fns = Self::vulkan_fns()?;
         let result =
             unsafe { (fns.wait_for_fences)(self.device, 1, &self.fence, vk::TRUE, u64::MAX) };
         if result != vk::Result::SUCCESS {
@@ -480,7 +496,7 @@ impl VulkanTextureImporter {
         &mut self,
         params: &mut DmaBufImportParams,
     ) -> Result<ImportedVulkanImage, String> {
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let fns = Self::vulkan_fns()?;
 
         // Create new image with external memory flag for DMA-BUF
         let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
@@ -570,7 +586,7 @@ impl VulkanTextureImporter {
         params: &mut DmaBufImportParams,
         image: vk::Image,
     ) -> Result<vk::DeviceMemory, String> {
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let fns = Self::vulkan_fns()?;
 
         // Use the first plane's fd for memory import
         let fd = params.fds[0];
@@ -644,7 +660,7 @@ impl VulkanTextureImporter {
         width: u32,
         height: u32,
     ) -> Result<(), String> {
-        let fns = VULKAN_FNS.get().ok_or("Vulkan functions not loaded")?;
+        let fns = Self::vulkan_fns()?;
         let ctx = VulkanCopyContext {
             device: self.device,
             queue: self.queue,
@@ -670,7 +686,7 @@ impl VulkanTextureImporter {
     }
 
     fn destroy_imported_image(&mut self, img: ImportedVulkanImage) {
-        if let Some(fns) = VULKAN_FNS.get() {
+        if let Some(Ok(fns)) = VULKAN_FNS.get() {
             unsafe {
                 (fns.destroy_image)(self.device, img.image, std::ptr::null());
                 (fns.free_memory)(self.device, img.memory, std::ptr::null());
@@ -697,7 +713,7 @@ impl Drop for VulkanTextureImporter {
             }
         }
 
-        if let Some(fns) = VULKAN_FNS.get() {
+        if let Some(Ok(fns)) = VULKAN_FNS.get() {
             unsafe {
                 (fns.destroy_fence)(self.device, self.fence, std::ptr::null());
                 (fns.destroy_command_pool)(self.device, self.command_pool, std::ptr::null());

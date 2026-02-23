@@ -24,19 +24,40 @@ mod utils;
 fn main() -> std::process::ExitCode {
     #[cfg(target_os = "macos")]
     {
-        let framework_path = utils::get_framework_path().expect("Failed to get CEF framework path");
-        cef_app::load_cef_framework_from_path(&framework_path);
+        let framework_path = match utils::get_framework_path() {
+            Ok(path) => path,
+            Err(err) => {
+                eprintln!("Failed to get CEF framework path: {err}");
+                return std::process::ExitCode::FAILURE;
+            }
+        };
+        if let Err(err) = cef_app::load_cef_framework_from_path(&framework_path) {
+            eprintln!("Failed to load CEF framework: {err}");
+            return std::process::ExitCode::FAILURE;
+        }
     }
 
     api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
 
     let args = Args::new();
-    let cmd = args.as_cmd_line().unwrap();
+    let Some(cmd) = args.as_cmd_line() else {
+        eprintln!("Failed to parse CEF command line args");
+        return std::process::ExitCode::FAILURE;
+    };
 
     #[cfg(target_os = "macos")]
     {
-        let framework_path = utils::get_framework_path().expect("Failed to get CEF framework path");
-        cef_app::load_sandbox_from_path(&framework_path, args.as_main_args());
+        let framework_path = match utils::get_framework_path() {
+            Ok(path) => path,
+            Err(err) => {
+                eprintln!("Failed to get CEF framework path: {err}");
+                return std::process::ExitCode::FAILURE;
+            }
+        };
+        if let Err(err) = cef_app::load_sandbox_from_path(&framework_path, args.as_main_args()) {
+            eprintln!("Failed to load CEF sandbox: {err}");
+            return std::process::ExitCode::FAILURE;
+        }
     }
 
     let switch = CefString::from("type");
@@ -49,13 +70,19 @@ fn main() -> std::process::ExitCode {
     );
 
     if is_browser_process {
-        assert!(ret == -1, "cannot execute browser process");
+        if ret != -1 {
+            eprintln!("cannot execute browser process");
+            return std::process::ExitCode::FAILURE;
+        }
     } else {
         let process_type = CefString::from(&cmd.switch_value(Some(&switch)));
         println!("launch process {process_type}");
-        assert!(ret >= 0, "cannot execute non-browser process");
+        if ret < 0 {
+            eprintln!("cannot execute non-browser process");
+            return std::process::ExitCode::FAILURE;
+        }
         // non-browser process does not initialize cef
-        return 0.into();
+        return std::process::ExitCode::SUCCESS;
     }
 
     std::process::ExitCode::SUCCESS

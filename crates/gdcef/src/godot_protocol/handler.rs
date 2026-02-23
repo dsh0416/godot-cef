@@ -277,13 +277,9 @@ wrap_resource_handler! {
                     state.status_code = 403;
                     state.mime_type = "text/plain".to_string();
                     state.response_content_type = "text/plain".to_string();
-                    state.error_message = Some("Forbidden: Invalid path".to_string());
-                    state.data = state
-                        .error_message
-                        .as_ref()
-                        .unwrap()
-                        .as_bytes()
-                        .to_vec();
+                    let message = "Forbidden: Invalid path".to_string();
+                    state.data = message.as_bytes().to_vec();
+                    state.error_message = Some(message);
 
                     if let Some(handle_request) = handle_request {
                         *handle_request = true as _;
@@ -297,13 +293,9 @@ wrap_resource_handler! {
                 state.status_code = 404;
                 state.mime_type = "text/plain".to_string();
                 state.response_content_type = "text/plain".to_string();
-                state.error_message = Some(format!("File not found: {}", godot_path));
-                state.data = state
-                    .error_message
-                    .as_ref()
-                    .unwrap()
-                    .as_bytes()
-                    .to_vec();
+                let message = format!("File not found: {}", godot_path);
+                state.data = message.as_bytes().to_vec();
+                state.error_message = Some(message);
 
                 if let Some(handle_request) = handle_request {
                     *handle_request = true as _;
@@ -387,13 +379,9 @@ wrap_resource_handler! {
                     state.status_code = 500;
                     state.mime_type = "text/plain".to_string();
                     state.response_content_type = "text/plain".to_string();
-                    state.error_message = Some(format!("Failed to open file: {}", godot_path));
-                    state.data = state
-                        .error_message
-                        .as_ref()
-                        .unwrap()
-                        .as_bytes()
-                        .to_vec();
+                    let message = format!("Failed to open file: {}", godot_path);
+                    state.data = message.as_bytes().to_vec();
+                    state.error_message = Some(message);
                 }
             }
 
@@ -470,7 +458,12 @@ wrap_resource_handler! {
 
             // Handle streaming multipart responses
             if state.multipart_stream.is_some() && state.file_path.is_some() {
-                let file_path = state.file_path.clone().unwrap();
+                let Some(file_path) = state.file_path.clone() else {
+                    if let Some(bytes_read) = bytes_read {
+                        *bytes_read = 0;
+                    }
+                    return false as _;
+                };
                 let mime_type = state.mime_type.clone();
                 let file_size = state.total_file_size;
 
@@ -480,8 +473,15 @@ wrap_resource_handler! {
                     ..
                 } = &mut *state;
 
+                let Some(stream_state) = multipart_stream.as_mut() else {
+                    if let Some(bytes_read) = bytes_read {
+                        *bytes_read = 0;
+                    }
+                    return false as _;
+                };
+
                 let written = read_multipart_streaming(
-                    multipart_stream.as_mut().unwrap(),
+                    stream_state,
                     &file_path,
                     &mime_type,
                     file_size,
@@ -540,7 +540,12 @@ wrap_resource_handler! {
             if state.multipart_stream.is_some() {
                 let mime_type = state.mime_type.clone();
                 let file_size = state.total_file_size;
-                let stream = state.multipart_stream.as_mut().unwrap();
+                let Some(stream) = state.multipart_stream.as_mut() else {
+                    if let Some(bytes_skipped) = bytes_skipped {
+                        *bytes_skipped = 0;
+                    }
+                    return false as _;
+                };
 
                 let skipped = skip_multipart_streaming(
                     stream,
