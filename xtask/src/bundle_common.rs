@@ -243,9 +243,9 @@ pub fn run_cargo_for_macos_targets(
 
 pub fn get_target_dir(release: bool, custom_target_dir: Option<&Path>) -> PathBuf {
     let profile = if release { "release" } else { "debug" };
-    let base = custom_target_dir.map(PathBuf::from).unwrap_or_else(|| {
-        workspace_root().join("target")
-    });
+    let base = custom_target_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root().join("target"));
     base.join(profile)
 }
 
@@ -271,9 +271,9 @@ pub fn get_target_dir_for_target(
     custom_target_dir: Option<&Path>,
 ) -> PathBuf {
     let profile = if release { "release" } else { "debug" };
-    let base = custom_target_dir.map(PathBuf::from).unwrap_or_else(|| {
-        workspace_root().join("target")
-    });
+    let base = custom_target_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root().join("target"));
     base.join(target).join(profile)
 }
 

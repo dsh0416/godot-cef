@@ -88,7 +88,8 @@ struct VulkanFunctions {
     get_memory_win32_handle_properties: PfnVkGetMemoryWin32HandlePropertiesKHR,
 }
 
-static VULKAN_FNS: std::sync::OnceLock<Result<VulkanFunctions, String>> = std::sync::OnceLock::new();
+static VULKAN_FNS: std::sync::OnceLock<Result<VulkanFunctions, String>> =
+    std::sync::OnceLock::new();
 
 impl VulkanTextureImporter {
     fn vulkan_fns() -> Result<&'static VulkanFunctions, String> {

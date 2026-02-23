@@ -14,8 +14,8 @@ fn get_framework_name() -> Result<&'static str, Error> {
 pub fn get_framework_path() -> Result<PathBuf, Error> {
     use process_path::get_executable_path;
 
-    let dylib_path = get_executable_path()
-        .ok_or_else(|| Error::other("Failed to resolve executable path"))?;
+    let dylib_path =
+        get_executable_path().ok_or_else(|| Error::other("Failed to resolve executable path"))?;
     let framework_name = get_framework_name()?;
 
     match dylib_path.ends_with("Godot CEF") {

@@ -69,8 +69,8 @@ pub fn load_sandbox_from_path(framework_path: &Path, args: &cef::MainArgs) -> Re
     // SAFETY: We're loading a known CEF library and calling its documented
     // initialization function. The library path has been validated.
     unsafe {
-        let lib = Library::new(path)
-            .map_err(|e| format!("Failed to load CEF sandbox library: {e}"))?;
+        let lib =
+            Library::new(path).map_err(|e| format!("Failed to load CEF sandbox library: {e}"))?;
         let func =
             lib.get::<unsafe extern "C" fn(
                 argc: std::os::raw::c_int,
