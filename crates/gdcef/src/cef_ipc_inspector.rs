@@ -1,9 +1,9 @@
 use godot::builtin::{VarArray, VarDictionary, Variant, VariantType};
-use godot::classes::{
-    Button, Control, Engine, IControl, Label, Node, OptionButton, Os, PackedScene,
-    PanelContainer, ScrollContainer, VBoxContainer,
-};
 use godot::classes::notify::ControlNotification;
+use godot::classes::{
+    Button, Control, Engine, IControl, Label, Node, OptionButton, Os, PackedScene, PanelContainer,
+    ScrollContainer, VBoxContainer,
+};
 use godot::global::godot_warn;
 use godot::prelude::*;
 use std::collections::HashMap;
@@ -195,7 +195,11 @@ impl CefIpcInspector {
         let packed = match try_load::<PackedScene>(UI_SCENE_PATH) {
             Ok(scene) => scene,
             Err(err) => {
-                godot_warn!("[CefIpcInspector] Failed to load UI scene {}: {}", UI_SCENE_PATH, err);
+                godot_warn!(
+                    "[CefIpcInspector] Failed to load UI scene {}: {}",
+                    UI_SCENE_PATH,
+                    err
+                );
                 return;
             }
         };
@@ -213,9 +217,11 @@ impl CefIpcInspector {
         self.title_label = ui_root.try_get_node_as("InspectorPanel/Margin/VBox/Header/TitleLabel");
         self.direction_filter =
             ui_root.try_get_node_as("InspectorPanel/Margin/VBox/Header/DirectionFilter");
-        self.clear_button = ui_root.try_get_node_as("InspectorPanel/Margin/VBox/Header/ClearButton");
+        self.clear_button =
+            ui_root.try_get_node_as("InspectorPanel/Margin/VBox/Header/ClearButton");
         self.scroll = ui_root.try_get_node_as("InspectorPanel/Margin/VBox/Scroll");
-        self.message_list = ui_root.try_get_node_as("InspectorPanel/Margin/VBox/Scroll/MessageList");
+        self.message_list =
+            ui_root.try_get_node_as("InspectorPanel/Margin/VBox/Scroll/MessageList");
         self.empty_label = ui_root.try_get_node_as("InspectorPanel/Margin/VBox/EmptyLabel");
 
         self.ui_root = Some(ui_root);
@@ -419,7 +425,8 @@ impl CefIpcInspector {
 
     fn default_expanded(body: &str) -> bool {
         let line_count = body.matches('\n').count() + 1;
-        body.chars().count() <= DEFAULT_EXPANDED_MAX_CHARS && line_count <= DEFAULT_EXPANDED_MAX_LINES
+        body.chars().count() <= DEFAULT_EXPANDED_MAX_CHARS
+            && line_count <= DEFAULT_EXPANDED_MAX_LINES
     }
 
     fn preview_text(body: &str) -> String {
