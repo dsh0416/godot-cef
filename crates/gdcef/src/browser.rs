@@ -258,7 +258,7 @@ fn unix_timestamp_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .ok()
         .and_then(|duration| duration.as_millis().try_into().ok())
-        .unwrap_or(i64::MAX)
+        .unwrap_or(0)
 }
 
 fn saturating_usize_to_i64(value: usize) -> i64 {
