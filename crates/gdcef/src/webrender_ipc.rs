@@ -69,13 +69,22 @@ pub(crate) fn on_process_message_received(
                     let copied = binary_value.data(Some(&mut buffer), 0);
                     if copied > 0 {
                         buffer.truncate(copied);
+
+                        // In release builds, avoid decoding CBOR on the IPC callback thread.
+                        // Only create the debug event (which may perform CBOR decoding) in
+                        // debug builds where the inspector is expected to be used.
+                        #[cfg(debug_assertions)]
                         let debug_event = crate::browser::DebugIpcEvent::data_from_cbor(
                             crate::browser::DebugIpcDirection::ToGodot,
                             &buffer,
                         );
+
                         if let Ok(mut queues) = ipc.event_queues.lock() {
                             queues.data_messages.push_back(buffer);
-                            queues.debug_ipc_events.push_back(debug_event);
+                            #[cfg(debug_assertions)]
+                            {
+                                queues.debug_ipc_events.push_back(debug_event);
+                            }
                         }
                     }
                 }
