@@ -287,6 +287,46 @@ fn binary_preview(bytes: &[u8]) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binary_preview_empty_payload() {
+        let result = binary_preview(&[]);
+        assert_eq!(result, "<empty binary payload>");
+    }
+
+    #[test]
+    fn binary_preview_truncates_long_payload() {
+        // 40 bytes > MAX_PREVIEW_BYTES (32), so output should be truncated.
+        let bytes: Vec<u8> = (0u8..40u8).collect();
+        let result = binary_preview(&bytes);
+
+        // Expected hex for the first 32 bytes, uppercase, space-separated.
+        let expected_hex = bytes[..32]
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let expected = format!("{} ...", expected_hex);
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn saturating_usize_to_i64_behaviour() {
+        // Normal small value converts exactly.
+        assert_eq!(saturating_usize_to_i64(42), 42i64);
+
+        // On platforms where usize is wider than 63 bits (e.g., 64-bit),
+        // very large values should saturate to i64::MAX.
+        if usize::BITS > 63 {
+            let large = usize::MAX;
+            assert_eq!(saturating_usize_to_i64(large), i64::MAX);
+        }
+    }
+}
 #[derive(Clone)]
 pub enum PendingPermissionDecision {
     Media {
