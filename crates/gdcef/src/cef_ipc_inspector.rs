@@ -241,19 +241,31 @@ impl CefIpcInspector {
 
     fn bind_ui_signals(&mut self) {
         if let Some(mut toggle) = self.toggle_button.clone() {
-            toggle.connect("pressed", &self.base().callable("_on_toggle_pressed"));
+            let callable = self.base().callable("_on_toggle_pressed");
+            if !toggle.is_connected("pressed", &callable) {
+                toggle.connect("pressed", &callable);
+            }
         }
 
         if let Some(mut clear) = self.clear_button.clone() {
-            clear.connect("pressed", &self.base().callable("_on_clear_pressed"));
+            let callable = self.base().callable("_on_clear_pressed");
+            if !clear.is_connected("pressed", &callable) {
+                clear.connect("pressed", &callable);
+            }
         }
 
         if let Some(mut filter) = self.direction_filter.clone() {
-            filter.connect("item_selected", &self.base().callable("_on_filter_changed"));
+            let callable = self.base().callable("_on_filter_changed");
+            if !filter.is_connected("item_selected", &callable) {
+                filter.connect("item_selected", &callable);
+            }
         }
 
         let callable = self.base().callable("_on_child_entered_tree");
-        self.base_mut().connect("child_entered_tree", &callable);
+        let mut base = self.base_mut();
+        if !base.is_connected("child_entered_tree", &callable) {
+            base.connect("child_entered_tree", &callable);
+        }
     }
 
     fn configure_filter(&mut self) {
