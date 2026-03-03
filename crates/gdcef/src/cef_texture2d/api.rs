@@ -208,7 +208,9 @@ impl CefTexture2D {
                 argument_list.set_string(0, Some(&msg_str));
             }
             frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+
             if let Ok(mut queues) = state.event_queues.lock() {
+                #[cfg(debug_assertions)]
                 queues.debug_ipc_events.push_back(crate::browser::DebugIpcEvent::text(
                     crate::browser::DebugIpcDirection::ToRenderer,
                     message_string,
@@ -251,6 +253,8 @@ impl CefTexture2D {
         argument_list.set_binary(0, Some(&mut binary_value));
         frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
         if let Ok(mut queues) = state.event_queues.lock() {
+
+            #[cfg(debug_assertions)]
             queues
                 .debug_ipc_events
                 .push_back(crate::browser::DebugIpcEvent::binary(
@@ -305,7 +309,9 @@ impl CefTexture2D {
         };
         argument_list.set_binary(0, Some(&mut binary_value));
         frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
+
         if let Ok(mut queues) = state.event_queues.lock() {
+            #[cfg(debug_assertions)]
             queues
                 .debug_ipc_events
                 .push_back(crate::browser::DebugIpcEvent::data_from_variant(

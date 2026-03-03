@@ -387,8 +387,11 @@ pub struct EventQueues {
     pub binary_messages: VecDeque<Vec<u8>>,
     /// Typed IPC data messages from the browser encoded as CBOR bytes.
     pub data_messages: VecDeque<Vec<u8>>,
+
+    #[cfg(debug_assertions)]
     /// Unified debug events for IPC traffic in both directions.
     pub debug_ipc_events: VecDeque<DebugIpcEvent>,
+
     /// URL change notifications.
     pub url_changes: VecDeque<String>,
     /// Title change notifications.
