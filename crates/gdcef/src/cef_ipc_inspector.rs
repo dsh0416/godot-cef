@@ -1,3 +1,4 @@
+use crate::utils::should_enable_ipc_inspector;
 use godot::builtin::{VarArray, VarDictionary, Variant, VariantType};
 use godot::classes::notify::ControlNotification;
 use godot::classes::{
@@ -7,7 +8,6 @@ use godot::classes::{
 use godot::global::godot_warn;
 use godot::prelude::*;
 use std::collections::HashMap;
-use crate::utils::should_enable_ipc_inspector;
 
 const UI_SCENE_PATH: &str = "res://addons/godot_cef/inspector/cef_ipc_inspector_ui.tscn";
 const UI_CONTENT_SCENE_PATH: &str =
@@ -237,7 +237,8 @@ impl CefIpcInspector {
 
         self.toggle_button = content_root.try_get_node_as("ToggleButton");
         self.panel = content_root.try_get_node_as("InspectorPanel");
-        self.title_label = content_root.try_get_node_as("InspectorPanel/Margin/VBox/Header/TitleLabel");
+        self.title_label =
+            content_root.try_get_node_as("InspectorPanel/Margin/VBox/Header/TitleLabel");
         self.direction_filter =
             content_root.try_get_node_as("InspectorPanel/Margin/VBox/Header/DirectionFilter");
         self.clear_button =
@@ -308,7 +309,11 @@ impl CefIpcInspector {
         }
 
         if let Some(mut toggle) = self.toggle_button.clone() {
-            toggle.set_text(if self.is_open { "Close" } else { "IPC Inspector" });
+            toggle.set_text(if self.is_open {
+                "Close"
+            } else {
+                "IPC Inspector"
+            });
         }
 
         self.update_title();

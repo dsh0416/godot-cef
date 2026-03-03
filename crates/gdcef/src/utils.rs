@@ -1,9 +1,9 @@
 use crate::error::{CefError, CefResult};
+use godot::classes::Engine;
+use godot::classes::Os;
 use godot::{classes::DisplayServer, obj::Singleton};
 use process_path::get_dylib_path;
 use std::path::PathBuf;
-use godot::classes::Os;
-use godot::classes::Engine;
 
 /// Returns the display scale factor for the primary screen.
 ///

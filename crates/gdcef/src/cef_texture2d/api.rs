@@ -211,14 +211,13 @@ impl CefTexture2D {
             }
             frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
 
-            if let Ok(mut queues) = state.event_queues.lock() {
-                if should_enable_ipc_inspector() {
+            if let Ok(mut queues) = state.event_queues.lock()
+                && should_enable_ipc_inspector() {
                 queues.debug_ipc_events.push_back(crate::browser::DebugIpcEvent::text(
                         crate::browser::DebugIpcDirection::ToRenderer,
                         message_string,
                     ));
                 }
-            }
         }
     }
 
@@ -255,9 +254,9 @@ impl CefTexture2D {
         };
         argument_list.set_binary(0, Some(&mut binary_value));
         frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
-        if let Ok(mut queues) = state.event_queues.lock() {
+        if let Ok(mut queues) = state.event_queues.lock()
 
-            if should_enable_ipc_inspector() {
+            && should_enable_ipc_inspector() {
                 queues
                     .debug_ipc_events
                     .push_back(crate::browser::DebugIpcEvent::binary(
@@ -265,7 +264,6 @@ impl CefTexture2D {
                         &bytes,
                     ));
             }
-        }
     }
 
     #[func]
@@ -314,8 +312,8 @@ impl CefTexture2D {
         argument_list.set_binary(0, Some(&mut binary_value));
         frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
 
-        if let Ok(mut queues) = state.event_queues.lock() {
-            if should_enable_ipc_inspector() {
+        if let Ok(mut queues) = state.event_queues.lock()
+            && should_enable_ipc_inspector() {
             queues
                 .debug_ipc_events
                 .push_back(crate::browser::DebugIpcEvent::data_from_variant(
@@ -324,7 +322,6 @@ impl CefTexture2D {
                     bytes.len(),
                 ));
             }
-        }
     }
 
     #[func]

@@ -1,9 +1,9 @@
+use crate::utils::should_enable_ipc_inspector;
 use cef::{CefStringUtf16, ImplBinaryValue, ImplListValue, ImplProcessMessage, ProcessMessage};
 use cef_app::ipc_contract::{
     ROUTE_IME_CARET_POSITION, ROUTE_IPC_BINARY_RENDERER_TO_GODOT, ROUTE_IPC_DATA_RENDERER_TO_GODOT,
     ROUTE_IPC_RENDERER_TO_GODOT, ROUTE_TRIGGER_IME,
 };
-use crate::utils::should_enable_ipc_inspector;
 
 use crate::browser::ImeCompositionRange;
 use crate::webrender::ClientIpcQueues;
