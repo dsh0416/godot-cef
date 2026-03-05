@@ -102,6 +102,7 @@ func _ready():
 - [**属性**](./properties.md) - 节点属性和配置
 - [**方法**](./methods.md) - 控制浏览器的可用方法
 - [**信号**](./signals.md) - CefTexture 节点发出的事件
+- [**IPC 检查器**](./ipc-inspector.md) - 用于查看 IPC 流量的调试工具
 - [**音频捕获**](./audio-capture.md) - 将浏览器音频接入 Godot 音频系统
 - [**输入法（IME）支持**](./ime-support.md) - 输入法（IME）集成
 - [**拖放**](./drag-and-drop.md) - 双向拖放支持
@@ -167,4 +168,3 @@ func _on_download_updated(info: DownloadUpdateInfo):
     elif info.is_in_progress:
         print("Progress: %d%%" % info.percent_complete)
 ```
-
