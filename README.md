@@ -180,7 +180,7 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
    export CEF_PATH="$HOME/.local/share/cef"
    ```
 
-   This should match the workspace `cef` / `cef-dll-sys` version in `Cargo.toml`.
+   This should match the resolved `cef` / `cef-dll-sys` crate version (including build metadata, e.g. `+146.0.10`), as recorded in `Cargo.lock` rather than the shortened manifest version shown in `Cargo.toml`.
 
 3. **Build**:
    ```bash
