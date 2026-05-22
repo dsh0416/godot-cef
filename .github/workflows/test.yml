@@ -99,7 +99,7 @@ jobs:
       - name: Download CEF binaries (Windows)
         if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: pwsh
-        run: mise exec -- export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
+        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH'
 
       - name: Run tests (Linux/macOS)
         shell: bash
@@ -200,7 +200,7 @@ jobs:
       - name: Download CEF binaries (Windows)
         if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: pwsh
-        run: mise exec -- export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
+        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH'
 
       - name: Run Clippy
         env:

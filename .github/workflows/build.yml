@@ -139,7 +139,7 @@ jobs:
       - name: Download CEF binaries
         if: steps.cef-cache.outputs.cache-hit != 'true'
         shell: pwsh
-        run: mise exec -- export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
+        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH'
 
       - name: Build and bundle for Windows
         env:
