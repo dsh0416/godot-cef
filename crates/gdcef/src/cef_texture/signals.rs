@@ -288,6 +288,11 @@ impl CefTexture {
                 } => {
                     let drag_info = DragDataInfo::from_internal(drag_data);
                     let position = Vector2::new(*x as f32, *y as f32);
+                    self.with_app_mut(|app| {
+                        app.drag_state.is_dragging_from_browser = true;
+                        app.drag_state.allowed_ops = *allowed_ops;
+                        app.drag_state.source_position = Some((*x, *y));
+                    });
                     emit_signal_variants!(
                         self,
                         "drag_started",
@@ -295,10 +300,6 @@ impl CefTexture {
                         position,
                         *allowed_ops as i32
                     );
-                    self.with_app_mut(|app| {
-                        app.drag_state.is_dragging_from_browser = true;
-                        app.drag_state.allowed_ops = *allowed_ops;
-                    });
                 }
                 DragEvent::UpdateCursor { operation } => {
                     emit_signal_variants!(self, "drag_cursor_updated", *operation as i32);

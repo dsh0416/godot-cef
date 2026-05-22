@@ -769,17 +769,33 @@ impl CefTexture {
             let Some(host) = app.host() else {
                 return;
             };
+            if !app.drag_state.is_dragging_from_browser {
+                return;
+            }
             host.drag_source_ended_at(position.x as i32, position.y as i32, op);
+            host.drag_source_system_drag_ended();
             app.drag_state.is_dragging_from_browser = false;
+            app.drag_state.source_position = None;
+            app.drag_state.allowed_ops = 0;
         });
     }
 
     #[func]
     pub fn drag_source_system_ended(&mut self) {
-        self.with_app(|app| {
-            if let Some(host) = app.host() {
-                host.drag_source_system_drag_ended();
+        self.with_app_mut(|app| {
+            let Some(host) = app.host() else {
+                return;
+            };
+            if !app.drag_state.is_dragging_from_browser {
+                return;
             }
+            let (x, y) = app.drag_state.source_position.unwrap_or((0, 0));
+            let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(0));
+            host.drag_source_ended_at(x, y, op);
+            host.drag_source_system_drag_ended();
+            app.drag_state.is_dragging_from_browser = false;
+            app.drag_state.source_position = None;
+            app.drag_state.allowed_ops = 0;
         });
     }
 

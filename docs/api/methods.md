@@ -442,7 +442,7 @@ func _drop_data(at_position: Vector2, data):
 
 ### `drag_source_ended(position: Vector2, operation: int)`
 
-Notifies CEF that a browser-initiated drag has ended. Call this when handling drops from the browser into your game.
+Notifies CEF that a browser-initiated drag ended with a drop result. This completes the browser drag operation, so do not call `drag_source_system_ended()` afterward.
 
 ```gdscript
 cef_texture.drag_source_ended(drop_position, DragOperation.COPY)
@@ -450,7 +450,7 @@ cef_texture.drag_source_ended(drop_position, DragOperation.COPY)
 
 ### `drag_source_system_ended()`
 
-Notifies CEF that the system drag operation has ended. Call this for cleanup after browser-initiated drags.
+Notifies CEF that a browser-initiated drag was cancelled or ended without a drop result. This completes the browser drag operation with `DragOperation.NONE`.
 
 ```gdscript
 cef_texture.drag_source_system_ended()

@@ -342,7 +342,7 @@ func _drop_data(at_position: Vector2, data):
 
 ### `drag_source_ended(position: Vector2, operation: int)`
 
-通知 CEF 浏览器发起的拖动已结束。在处理从浏览器拖放到游戏中时调用此方法。
+通知 CEF 浏览器发起的拖动已用放置结果结束。此方法会完成浏览器拖动操作，因此之后不要再调用 `drag_source_system_ended()`。
 
 ```gdscript
 cef_texture.drag_source_ended(drop_position, DragOperation.COPY)
@@ -350,7 +350,7 @@ cef_texture.drag_source_ended(drop_position, DragOperation.COPY)
 
 ### `drag_source_system_ended()`
 
-通知 CEF 系统拖动操作已结束。在浏览器发起的拖动后用于清理。
+通知 CEF 浏览器发起的拖动已取消，或没有放置结果就结束。此方法会以 `DragOperation.NONE` 完成浏览器拖动操作。
 
 ```gdscript
 cef_texture.drag_source_system_ended()

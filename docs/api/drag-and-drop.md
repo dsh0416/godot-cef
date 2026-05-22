@@ -172,11 +172,11 @@ func _on_drag_entered(drag_data: DragDataInfo, mask: int):
 
 ### Notifying CEF When Browser Drag Ends
 
-When a drag that started from the browser ends (either dropped somewhere or cancelled), you should notify CEF:
+When a drag that started from the browser ends, notify CEF exactly once:
 
 #### `drag_source_ended(position: Vector2, operation: int)`
 
-Call when a browser-initiated drag ends with a specific result.
+Call when a browser-initiated drag ends with a specific drop result. This completes the browser drag operation.
 
 ```gdscript
 func _on_drop_completed(drop_position: Vector2, was_accepted: bool):
@@ -187,7 +187,7 @@ func _on_drop_completed(drop_position: Vector2, was_accepted: bool):
 
 #### `drag_source_system_ended()`
 
-Call when the system drag operation ends (cleanup).
+Call when a browser-initiated drag is cancelled or ends without a drop result. This completes the browser drag operation with `DragOperation.NONE`.
 
 ```gdscript
 func _notification(what):
@@ -253,6 +253,7 @@ func _drop_data(at_position: Vector2, data):
     if data is DragDataInfo and data.is_link:
         _add_item_from_url(data.link_url)
         cef_texture.drag_source_ended(at_position, DragOperation.COPY)
+        browser_drag_data = null
 
 func _notification(what):
     if what == NOTIFICATION_DRAG_END:

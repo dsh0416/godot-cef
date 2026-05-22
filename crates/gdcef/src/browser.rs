@@ -465,6 +465,7 @@ pub struct DragState {
     pub is_drag_over: bool,
     pub is_dragging_from_browser: bool,
     pub allowed_ops: u32,
+    pub source_position: Option<(i32, i32)>,
 }
 
 /// Rendering mode for the CEF browser.
@@ -667,6 +668,7 @@ mod tests {
             app.drag_state.is_drag_over = true;
             app.drag_state.is_dragging_from_browser = true;
             app.drag_state.allowed_ops = u32::MAX;
+            app.drag_state.source_position = Some((10, 20));
 
             app.clear_runtime_state();
 
@@ -674,6 +676,7 @@ mod tests {
             assert!(!app.drag_state.is_drag_over);
             assert!(!app.drag_state.is_dragging_from_browser);
             assert_eq!(app.drag_state.allowed_ops, 0);
+            assert_eq!(app.drag_state.source_position, None);
         }
     }
 

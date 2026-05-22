@@ -172,11 +172,11 @@ func _on_drag_entered(drag_data: DragDataInfo, mask: int):
 
 ### 通知 CEF 浏览器拖动结束
 
-当从浏览器发起的拖动结束（被放下或取消）时，您应该通知 CEF：
+当从浏览器发起的拖动结束时，只通知 CEF 一次：
 
 #### `drag_source_ended(position: Vector2, operation: int)`
 
-当浏览器发起的拖动以特定结果结束时调用。
+当浏览器发起的拖动以特定放置结果结束时调用。此方法会完成浏览器拖动操作。
 
 ```gdscript
 func _on_drop_completed(drop_position: Vector2, was_accepted: bool):
@@ -187,7 +187,7 @@ func _on_drop_completed(drop_position: Vector2, was_accepted: bool):
 
 #### `drag_source_system_ended()`
 
-当系统拖动操作结束时调用（清理）。
+当浏览器发起的拖动被取消，或没有放置结果就结束时调用。此方法会以 `DragOperation.NONE` 完成浏览器拖动操作。
 
 ```gdscript
 func _notification(what):
@@ -253,6 +253,7 @@ func _drop_data(at_position: Vector2, data):
     if data is DragDataInfo and data.is_link:
         _add_item_from_url(data.link_url)
         cef_texture.drag_source_ended(at_position, DragOperation.COPY)
+        browser_drag_data = null
 
 func _notification(what):
     if what == NOTIFICATION_DRAG_END:
