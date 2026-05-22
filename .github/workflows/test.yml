@@ -168,6 +168,9 @@ jobs:
         with:
           cache: true
 
+      - name: Install Clippy component
+        run: mise exec -- rustup component add clippy
+
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
 
@@ -216,6 +219,9 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+
+      - name: Install Rustfmt component
+        run: mise exec -- rustup component add rustfmt
 
       - name: Check formatting
         run: mise exec -- cargo fmt --all -- --check
