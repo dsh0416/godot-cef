@@ -16,7 +16,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CEF_VERSION: "147.0.14"
   CEF_PATH: ${{ github.workspace }}/cef
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: "sccache"
@@ -34,10 +33,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          cache: true
+
+      - name: Install Rust targets
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -49,31 +51,20 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: macos-universal-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: macos-universal-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
           restore-keys: |
             macos-universal-cargo-
-
-      - name: Cache cargo bin
-        uses: actions/cache@v4
-        id: cargo-bin-cache
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-export-cef-dir-macos-v1
-
-      - name: Install CEF export tool
-        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
-        run: cargo install export-cef-dir
 
       - name: Cache CEF binaries (ARM64)
         uses: actions/cache@v4
         id: cef-cache-arm64
         with:
           path: ${{ env.CEF_PATH_ARM64 }}
-          key: cef-${{ env.CEF_VERSION }}-macos-arm64
+          key: cef-${{ hashFiles('mise.toml') }}-macos-arm64
 
       - name: Download CEF binaries (ARM64)
         if: steps.cef-cache-arm64.outputs.cache-hit != 'true'
-        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target aarch64-apple-darwin ${{ env.CEF_PATH_ARM64 }}
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target aarch64-apple-darwin "$CEF_PATH_ARM64"'
       
       - name: Copy CEF binaries (ARM64)
         run: |
@@ -85,14 +76,14 @@ jobs:
         id: cef-cache-x64
         with:
           path: ${{ env.CEF_PATH_X64 }}
-          key: cef-${{ env.CEF_VERSION }}-macos-x64
+          key: cef-${{ hashFiles('mise.toml') }}-macos-x64
 
       - name: Download CEF binaries (X64)
         if: steps.cef-cache-x64.outputs.cache-hit != 'true'
-        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force --target x86_64-apple-darwin ${{ env.CEF_PATH_X64 }}
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target x86_64-apple-darwin "$CEF_PATH_X64"'
 
       - name: Build and bundle for macOS (Universal)
-        run: cargo xtask bundle --release
+        run: mise exec -- cargo xtask bundle --release
 
       - name: Prepare artifacts
         run: |
@@ -115,10 +106,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
         with:
-          targets: x86_64-pc-windows-msvc
+          cache: true
+
+      - name: Install Rust target
+        run: rustup target add x86_64-pc-windows-msvc
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -130,34 +124,24 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: windows-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: windows-x86_64-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
           restore-keys: |
             windows-x86_64-cargo-
-
-      - name: Cache cargo bin
-        uses: actions/cache@v4
-        id: cargo-bin-cache
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-export-cef-dir-windows-v1
-
-      - name: Install CEF export tool
-        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
-        run: cargo install export-cef-dir
 
       - name: Cache CEF binaries
         uses: actions/cache@v4
         id: cef-cache
         with:
           path: ${{ env.CEF_PATH }}
-          key: cef-${{ env.CEF_VERSION }}-windows-x64
+          key: cef-${{ hashFiles('mise.toml') }}-windows-x64
 
       - name: Download CEF binaries
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
+        shell: bash
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
 
       - name: Build and bundle for Windows
-        run: cargo xtask bundle --release
+        run: mise exec -- cargo xtask bundle --release
 
       - name: Prepare artifacts
         shell: pwsh
@@ -220,10 +204,13 @@ jobs:
             libpango1.0-dev \
             libasound2-dev
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
         with:
-          targets: x86_64-unknown-linux-gnu
+          cache: true
+
+      - name: Install Rust target
+        run: rustup target add x86_64-unknown-linux-gnu
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -235,34 +222,23 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: linux-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: linux-x86_64-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
           restore-keys: |
             linux-x86_64-cargo-
-
-      - name: Cache cargo bin
-        uses: actions/cache@v4
-        id: cargo-bin-cache
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-export-cef-dir-linux-v1
-
-      - name: Install CEF export tool
-        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
-        run: cargo install export-cef-dir
 
       - name: Cache CEF binaries
         uses: actions/cache@v4
         id: cef-cache
         with:
           path: ${{ env.CEF_PATH }}
-          key: cef-${{ env.CEF_VERSION }}-linux-x64
+          key: cef-${{ hashFiles('mise.toml') }}-linux-x64
 
       - name: Download CEF binaries
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
 
       - name: Build and bundle for Linux
-        run: cargo xtask bundle --release
+        run: mise exec -- cargo xtask bundle --release
 
       - name: Prepare artifacts
         run: |
@@ -300,8 +276,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -314,7 +292,7 @@ jobs:
       - name: Pack Godot addon
         run: |
           # Use staging directory to avoid deleting source addon files
-          cargo xtask pack \
+          mise exec -- cargo xtask pack \
             --artifacts artifacts \
             --output dist/addons/godot_cef \
             --addon-src addons/godot_cef

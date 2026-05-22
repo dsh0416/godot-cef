@@ -4,10 +4,11 @@
 
 ## 版本基线
 
-当前构建基于 `Cargo.lock` 中解析到的 Rust `cef` / `cef-dll-sys` crate 版本：`148.1.0+147.0.14`。手动安装 CEF 二进制文件时，请把 build metadata 中的运行时版本传给 `export-cef-dir`：
+当前构建基于 `Cargo.lock` 中解析到的 Rust `cef` / `cef-dll-sys` crate 版本：`148.1.0+147.0.14`。匹配的 CEF 运行时版本已在 `mise.toml` 中固定为 `CEF_VERSION`；手动安装 CEF 二进制文件时请使用它：
 
 ```bash
-export-cef-dir --version "147.0.14" --force $HOME/.local/share/cef
+export CEF_PATH="$HOME/.local/share/cef"
+export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 ```
 
 这样可以确保下载的运行时文件与 Rust 绑定保持一致。

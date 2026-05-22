@@ -6,12 +6,16 @@ on:
     paths:
       - 'docs/**'
       - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'mise.toml'
       - '.github/workflows/deploy-docs.yml'
   pull_request:
     branches: [main]
     paths:
       - 'docs/**'
       - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'mise.toml'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
@@ -33,19 +37,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
         with:
-          node-version: '24'
+          cache: true
 
       - name: Install dependencies
-        run: pnpm install
+        run: mise exec -- pnpm install --frozen-lockfile
 
       - name: Build documentation
-        run: pnpm docs:build
+        run: mise exec -- pnpm docs:build
 
       - name: Add .nojekyll file
         run: touch docs/.vitepress/dist/.nojekyll

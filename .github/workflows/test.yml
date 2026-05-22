@@ -15,7 +15,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CEF_VERSION: "147.0.14"
   CEF_PATH: ${{ github.workspace }}/cef
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: "sccache"
@@ -64,10 +63,13 @@ jobs:
             libpango1.0-dev \
             libasound2-dev
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
         with:
-          targets: ${{ matrix.target }}
+          cache: true
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -79,31 +81,21 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
-
-      - name: Cache cargo bin
-        uses: actions/cache@v4
-        id: cargo-bin-cache
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-export-cef-dir-${{ runner.os }}-v1
-
-      - name: Install CEF export tool
-        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
-        run: cargo install export-cef-dir
 
       - name: Cache CEF binaries
         uses: actions/cache@v4
         id: cef-cache
         with:
           path: ${{ env.CEF_PATH }}
-          key: cef-${{ env.CEF_VERSION }}-${{ matrix.cef_cache_key }}
+          key: cef-${{ hashFiles('mise.toml') }}-${{ matrix.cef_cache_key }}
 
       - name: Download CEF binaries
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
+        shell: bash
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
 
       - name: Run tests (Linux/macOS)
         shell: bash
@@ -111,14 +103,14 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export DYLD_LIBRARY_PATH="${CEF_PATH}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-          cargo test --workspace --all-features
+          mise exec -- cargo test --workspace --all-features
       
       - name: Run tests (Windows)
         shell: pwsh
         if: runner.os == 'Windows'
         run: |
           $env:PATH = "${{ env.CEF_PATH }};$env:PATH"
-          cargo test --workspace --all-features
+          mise exec -- cargo test --workspace --all-features
 
   clippy:
     strategy:
@@ -163,10 +155,10 @@ jobs:
             libpango1.0-dev \
             libasound2-dev
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
         with:
-          components: clippy
+          cache: true
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -178,34 +170,24 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-
-      - name: Cache cargo bin
-        uses: actions/cache@v4
-        id: cargo-bin-cache
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-export-cef-dir-${{ runner.os }}-v1
-
-      - name: Install CEF export tool
-        if: steps.cargo-bin-cache.outputs.cache-hit != 'true'
-        run: cargo install export-cef-dir
 
       - name: Cache CEF binaries
         uses: actions/cache@v4
         id: cef-cache
         with:
           path: ${{ env.CEF_PATH }}
-          key: cef-${{ env.CEF_VERSION }}-${{ matrix.cef_cache_key }}
+          key: cef-${{ hashFiles('mise.toml') }}-${{ matrix.cef_cache_key }}
 
       - name: Download CEF binaries
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        run: export-cef-dir --version "${{ env.CEF_VERSION }}" --force ${{ env.CEF_PATH }}
+        shell: bash
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
 
       - name: Run Clippy
-        run: cargo clippy --workspace --all-features -- -D warnings
+        run: mise exec -- cargo clippy --workspace --all-features -- -D warnings
 
   fmt:
     runs-on: ubuntu-latest
@@ -215,10 +197,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
         with:
-          components: rustfmt
+          cache: true
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: mise exec -- cargo fmt --all -- --check

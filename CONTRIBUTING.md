@@ -35,29 +35,27 @@ Please be respectful and considerate in all interactions. We aim to maintain a w
 
 ### Prerequisites
 
-- **Rust (nightly)** — Install via [rustup](https://rustup.rs/)
+- **mise** — Install from [mise.jdx.dev](https://mise.jdx.dev/) and enable shell integration for your shell
+- **Project toolchain** — Installed from `mise.toml`
   ```bash
-  rustup default nightly
+  mise trust
+  mise install
   ```
 - **Godot Engine 4.5+** — Download from [godotengine.org](https://godotengine.org/)
 - **Platform-specific dependencies** (see below)
 
+The commands below assume mise shell integration is active. If your shell is not configured for mise activation yet, prefix commands with `mise exec --`.
+
 ### Installing CEF Binaries
 
-First, install the CEF export tool:
-
-```bash
-cargo install export-cef-dir
-```
-
-Then download CEF binaries for your platform:
+`mise install` installs the `export-cef-dir` tool and exposes the pinned `CEF_VERSION` from `mise.toml`. Download CEF binaries for your platform:
 
 #### Linux
 
 ```bash
-export-cef-dir --version "147.0.14" --force $HOME/.local/share/cef
 export CEF_PATH="$HOME/.local/share/cef"
-export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$CEF_PATH"
+export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
+export LD_LIBRARY_PATH="$CEF_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
 You'll also need system dependencies:
@@ -75,21 +73,21 @@ sudo apt-get install -y \
 
 ```bash
 # Native architecture
-export-cef-dir --version "147.0.14" --force $HOME/.local/share/cef
 export CEF_PATH="$HOME/.local/share/cef"
+export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 
 # For universal builds (optional)
-export-cef-dir --version "147.0.14" --target x86_64-apple-darwin --force $HOME/.local/share/cef_x86_64
 export CEF_PATH_X64="$HOME/.local/share/cef_x86_64"
-export-cef-dir --version "147.0.14" --target aarch64-apple-darwin --force $HOME/.local/share/cef_arm64
+export-cef-dir --version "$CEF_VERSION" --target x86_64-apple-darwin --force "$CEF_PATH_X64"
 export CEF_PATH_ARM64="$HOME/.local/share/cef_arm64"
+export-cef-dir --version "$CEF_VERSION" --target aarch64-apple-darwin --force "$CEF_PATH_ARM64"
 ```
 
 #### Windows (PowerShell)
 
 ```powershell
-export-cef-dir --version "147.0.14" --force $env:USERPROFILE/.local/share/cef
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef"
+export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 $env:PATH="$env:PATH;$env:CEF_PATH"
 ```
 

@@ -1,0 +1,14 @@
+# Install toolchain dependencies with:
+#   mise install
+
+[tools]
+# Nightly is required by retour-rs for feature(unboxed_closures, tuple_trait).
+rust = "nightly"
+node = "24"
+pnpm = "10.29.3"
+"cargo:export-cef-dir" = "147.1.0+147.0.10"
+
+[env]
+# Keep this in sync with the resolved cef / cef-dll-sys version in Cargo.lock,
+# using the CEF runtime build version after the '+'.
+CEF_VERSION = "147.0.14"

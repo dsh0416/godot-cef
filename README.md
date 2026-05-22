@@ -171,23 +171,30 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 
 ### Quick Build Steps
 
-1. **Install prerequisites**: Rust (nightly) and Godot 4.5+
+1. **Install prerequisites**: [mise](https://mise.jdx.dev/) and Godot 4.5+
 
-2. **Install CEF binaries**:
+2. **Install the project toolchain**:
    ```bash
-   cargo install export-cef-dir
-   export-cef-dir --version "147.0.14" --force $HOME/.local/share/cef
-   export CEF_PATH="$HOME/.local/share/cef"
+   mise trust
+   mise install
    ```
 
-   The `export-cef-dir` version is the CEF runtime build version from the resolved `cef` / `cef-dll-sys` crate in `Cargo.lock`. For example, crate version `148.1.0+147.0.14` uses CEF runtime `147.0.14`.
+   The commands below assume mise shell integration is active. If your shell is not configured for mise activation yet, prefix commands with `mise exec --`.
 
-3. **Build**:
+3. **Install CEF binaries**:
+   ```bash
+   export CEF_PATH="$HOME/.local/share/cef"
+   export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
+   ```
+
+   `CEF_VERSION` is pinned in `mise.toml` to the CEF runtime build version from the resolved `cef` / `cef-dll-sys` crate in `Cargo.lock`. For example, crate version `148.1.0+147.0.14` uses CEF runtime `147.0.14`.
+
+4. **Build**:
    ```bash
    cargo xtask bundle --release
    ```
 
-4. **Copy to Godot project**: Copy built artifacts from `target/release/` to your project's `addons/godot_cef/bin/<platform>/` folder.
+5. **Copy to Godot project**: Copy built artifacts from `target/release/` to your project's `addons/godot_cef/bin/<platform>/` folder.
 
 See the `addons/godot_cef/godot_cef.gdextension` file for the complete list of required files per platform.
 

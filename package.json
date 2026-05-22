@@ -11,7 +11,6 @@
   "keywords": [],
   "author": "",
   "license": "MIT",
-  "packageManager": "pnpm@10.29.3",
   "devDependencies": {
     "@nolebase/vitepress-plugin-enhanced-readabilities": "^2.18.2",
     "mermaid": "^11.15.0",
