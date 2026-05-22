@@ -91,10 +91,15 @@ jobs:
           path: ${{ env.CEF_PATH }}
           key: cef-${{ hashFiles('mise.toml') }}-${{ matrix.cef_cache_key }}
 
-      - name: Download CEF binaries
-        if: steps.cef-cache.outputs.cache-hit != 'true'
+      - name: Download CEF binaries (Linux/macOS)
+        if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         shell: bash
         run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
+
+      - name: Download CEF binaries (Windows)
+        if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: mise exec -- export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 
       - name: Run tests (Linux/macOS)
         shell: bash
@@ -184,10 +189,15 @@ jobs:
           path: ${{ env.CEF_PATH }}
           key: cef-${{ hashFiles('mise.toml') }}-${{ matrix.cef_cache_key }}
 
-      - name: Download CEF binaries
-        if: steps.cef-cache.outputs.cache-hit != 'true'
+      - name: Download CEF binaries (Linux/macOS)
+        if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         shell: bash
         run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
+
+      - name: Download CEF binaries (Windows)
+        if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: mise exec -- export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 
       - name: Run Clippy
         env:
