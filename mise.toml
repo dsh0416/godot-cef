@@ -3,7 +3,7 @@
 
 [tools]
 # Nightly is required by retour-rs for feature(unboxed_closures, tuple_trait).
-rust = "nightly"
+rust = { version = "nightly", components = "rustfmt,clippy" }
 node = "24"
 pnpm = "10.29.3"
 "cargo:export-cef-dir" = "147.1.0+147.0.10"
