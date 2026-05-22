@@ -18,7 +18,6 @@ env:
   CARGO_TERM_COLOR: always
   CEF_PATH: ${{ github.workspace }}/cef
   SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
 
 jobs:
   build-macos:
@@ -83,6 +82,8 @@ jobs:
         run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target x86_64-apple-darwin "$CEF_PATH_X64"'
 
       - name: Build and bundle for macOS (Universal)
+        env:
+          RUSTC_WRAPPER: sccache
         run: mise exec -- cargo xtask bundle --release
 
       - name: Prepare artifacts
@@ -141,6 +142,8 @@ jobs:
         run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
 
       - name: Build and bundle for Windows
+        env:
+          RUSTC_WRAPPER: sccache
         run: mise exec -- cargo xtask bundle --release
 
       - name: Prepare artifacts
@@ -238,6 +241,8 @@ jobs:
         run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
 
       - name: Build and bundle for Linux
+        env:
+          RUSTC_WRAPPER: sccache
         run: mise exec -- cargo xtask bundle --release
 
       - name: Prepare artifacts
@@ -290,6 +295,8 @@ jobs:
           path: artifacts
 
       - name: Pack Godot addon
+        env:
+          RUSTC_WRAPPER: sccache
         run: |
           # Use staging directory to avoid deleting source addon files
           mise exec -- cargo xtask pack \
