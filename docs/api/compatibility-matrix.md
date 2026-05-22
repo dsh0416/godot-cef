@@ -2,6 +2,16 @@
 
 This matrix summarizes the expected rendering mode behavior for each platform/backend combination.
 
+## Version Baseline
+
+Current builds are based on the Rust `cef` / `cef-dll-sys` crates resolved as `148.1.0+147.0.14` in `Cargo.lock`. When installing CEF binaries manually, pass the runtime build metadata version to `export-cef-dir`:
+
+```bash
+export-cef-dir --version "147.0.14" --force $HOME/.local/share/cef
+```
+
+This keeps the downloaded runtime files aligned with the Rust bindings.
+
 ## Runtime Rendering Matrix
 
 | Platform | Architecture | Godot Backend | Accelerated OSR | Default Outcome |

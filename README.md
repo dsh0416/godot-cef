@@ -176,11 +176,11 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 2. **Install CEF binaries**:
    ```bash
    cargo install export-cef-dir
-   export-cef-dir --version "146.5.0+146.0.10" --force $HOME/.local/share/cef
+   export-cef-dir --version "147.0.14" --force $HOME/.local/share/cef
    export CEF_PATH="$HOME/.local/share/cef"
    ```
 
-   This should match the resolved `cef` / `cef-dll-sys` crate version (including build metadata, e.g. `+146.0.10`), as recorded in `Cargo.lock` rather than the shortened manifest version shown in `Cargo.toml`.
+   The `export-cef-dir` version is the CEF runtime build version from the resolved `cef` / `cef-dll-sys` crate in `Cargo.lock`. For example, crate version `148.1.0+147.0.14` uses CEF runtime `147.0.14`.
 
 3. **Build**:
    ```bash

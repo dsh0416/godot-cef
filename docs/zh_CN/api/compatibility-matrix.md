@@ -2,6 +2,16 @@
 
 该矩阵用于总结不同平台与渲染后端下，Godot CEF 的预期渲染行为。
 
+## 版本基线
+
+当前构建基于 `Cargo.lock` 中解析到的 Rust `cef` / `cef-dll-sys` crate 版本：`148.1.0+147.0.14`。手动安装 CEF 二进制文件时，请把 build metadata 中的运行时版本传给 `export-cef-dir`：
+
+```bash
+export-cef-dir --version "147.0.14" --force $HOME/.local/share/cef
+```
+
+这样可以确保下载的运行时文件与 Rust 绑定保持一致。
+
 ## 运行时渲染矩阵
 
 | 平台 | 架构 | Godot 后端 | 加速 OSR | 默认结果 |
