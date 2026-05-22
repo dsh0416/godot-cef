@@ -202,14 +202,11 @@ impl CefTexture {
     fn emit_debug_ipc_signals(&mut self, events: &VecDeque<DebugIpcEvent>) {
         for event in events {
             let mut payload = godot::builtin::VarDictionary::new();
-            payload.set(
-                "direction",
-                GString::from(event.direction.as_str()).to_variant(),
-            );
-            payload.set("lane", GString::from(event.lane.as_str()).to_variant());
-            payload.set("body", GString::from(&event.body).to_variant());
-            payload.set("timestamp_unix_ms", event.timestamp_unix_ms.to_variant());
-            payload.set("body_size_bytes", event.body_size_bytes.to_variant());
+            payload.set("direction", &GString::from(event.direction.as_str()));
+            payload.set("lane", &GString::from(event.lane.as_str()));
+            payload.set("body", &GString::from(&event.body));
+            payload.set("timestamp_unix_ms", event.timestamp_unix_ms);
+            payload.set("body_size_bytes", event.body_size_bytes);
             self.base_mut()
                 .emit_signal("debug_ipc_message", &[payload.to_variant()]);
         }

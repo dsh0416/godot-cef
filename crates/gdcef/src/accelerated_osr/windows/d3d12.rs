@@ -56,7 +56,7 @@ pub struct D3D12TextureImporter {
 
 impl D3D12TextureImporter {
     pub fn new() -> Option<Self> {
-        let mut rd = RenderingServer::singleton()
+        let rd = RenderingServer::singleton()
             .get_rendering_device()
             .ok_or_else(|| {
                 godot_error!("[AcceleratedOSR/D3D12] Failed to get RenderingDevice");
@@ -303,7 +303,7 @@ impl D3D12TextureImporter {
 
         // Get destination D3D12 resource from Godot's RenderingDevice
         let dst_resource = {
-            let mut rd = RenderingServer::singleton()
+            let rd = RenderingServer::singleton()
                 .get_rendering_device()
                 .ok_or("Failed to get RenderingDevice")?;
 
@@ -448,7 +448,7 @@ impl Drop for D3D12TextureImporter {
 
 /// Get the GPU vendor and device IDs from Godot's D3D12 device.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
-    let mut rd = RenderingServer::singleton().get_rendering_device()?;
+    let rd = RenderingServer::singleton().get_rendering_device()?;
     let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
 
     if device_ptr == 0 {

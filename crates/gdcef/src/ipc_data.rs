@@ -104,7 +104,7 @@ fn cbor_value_to_variant(value: &CborValue) -> Result<Variant, String> {
                     CborValue::Text(text) => GString::from(text).to_variant(),
                     other => cbor_value_to_variant(other)?,
                 };
-                dict.set(key_variant, cbor_value_to_variant(val)?);
+                dict.set(&key_variant, &cbor_value_to_variant(val)?);
             }
             Ok(dict.to_variant())
         }
@@ -138,8 +138,8 @@ fn maybe_restore_special_map(entries: &[(CborValue, CborValue)]) -> Option<Varia
     }
     if let (Some(ty), Some(val)) = (ty, val) {
         let mut dict = VarDictionary::new();
-        dict.set(TYPE_KEY, GString::from(ty.as_str()).to_variant());
-        dict.set(VALUE_KEY, GString::from(val.as_str()).to_variant());
+        dict.set(TYPE_KEY, &GString::from(ty.as_str()).to_variant());
+        dict.set(VALUE_KEY, &GString::from(val.as_str()).to_variant());
         return Some(dict.to_variant());
     }
     None

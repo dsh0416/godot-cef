@@ -128,7 +128,7 @@ fn resolve_preload_script(script: &str, path: &str) -> Result<Option<String>, Ce
     }
 
     let gstring_path = GString::from(path);
-    let Some(file) = FileAccess::open(&gstring_path, ModeFlags::READ) else {
+    let Some(mut file) = FileAccess::open(&gstring_path, ModeFlags::READ) else {
         return Err(CefError::BrowserCreationFailed(format!(
             "failed to open preload_script_path '{}'",
             path

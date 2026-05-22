@@ -1,7 +1,7 @@
 use cef_app::SecurityConfig;
 use godot::classes::ProjectSettings;
-use godot::global::PropertyHint;
 use godot::prelude::*;
+use godot::register::info::PropertyHint;
 use std::path::PathBuf;
 
 const SETTING_DATA_PATH: &str = "godot_cef/storage/data_path";
@@ -171,10 +171,10 @@ fn register_string_setting(
     settings.set_as_basic(&name_gstring, true);
 
     let property_info = vdict! {
-        "name": name_gstring.clone(),
-        "type": VariantType::STRING.ord(),
-        "hint": hint.ord(),
-        "hint_string": hint_string,
+        "name" => &name_gstring,
+        "type" => VariantType::STRING.ord(),
+        "hint" => hint.ord(),
+        "hint_string" => hint_string,
     };
 
     settings.add_property_info(&property_info);
@@ -191,10 +191,10 @@ fn register_bool_setting(settings: &mut Gd<ProjectSettings>, name: &str, default
     settings.set_as_basic(&name_gstring, true);
 
     let property_info = vdict! {
-        "name": name_gstring.clone(),
-        "type": VariantType::BOOL.ord(),
-        "hint": PropertyHint::NONE.ord(),
-        "hint_string": "",
+        "name" => &name_gstring,
+        "type" => VariantType::BOOL.ord(),
+        "hint" => PropertyHint::NONE.ord(),
+        "hint_string" => "",
     };
 
     settings.add_property_info(&property_info);
@@ -217,10 +217,10 @@ fn register_int_setting(
     settings.set_as_basic(&name_gstring, true);
 
     let property_info = vdict! {
-        "name": name_gstring.clone(),
-        "type": VariantType::INT.ord(),
-        "hint": hint.ord(),
-        "hint_string": hint_string,
+        "name" => &name_gstring,
+        "type" => VariantType::INT.ord(),
+        "hint" => hint.ord(),
+        "hint_string" => hint_string,
     };
 
     settings.add_property_info(&property_info);

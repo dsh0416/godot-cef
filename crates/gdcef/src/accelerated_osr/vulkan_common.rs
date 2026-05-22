@@ -333,7 +333,7 @@ pub(crate) fn get_godot_gpu_device_ids_vulkan(vulkan_lib_name: &str) -> Option<(
     use godot::global::{godot_error, godot_print};
     use godot::prelude::*;
 
-    let mut rd = RenderingServer::singleton().get_rendering_device()?;
+    let rd = RenderingServer::singleton().get_rendering_device()?;
 
     let physical_device_ptr =
         rd.get_driver_resource(DriverResource::PHYSICAL_DEVICE, Rid::Invalid, 0);

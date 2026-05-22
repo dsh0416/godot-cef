@@ -284,7 +284,7 @@ impl GodotTextureImporter {
 
         // Get destination Metal texture from Godot's RenderingDevice
         let dst_texture_ptr = {
-            let mut rd = RenderingServer::singleton()
+            let rd = RenderingServer::singleton()
                 .get_rendering_device()
                 .ok_or("Failed to get RenderingDevice")?;
 
@@ -413,7 +413,7 @@ fn io_registry_search_property_u32(service: u32, key: &str) -> Option<u32> {
 
 /// Get the GPU vendor and device IDs from Godot's Metal device.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
-    let mut rd = RenderingServer::singleton().get_rendering_device()?;
+    let rd = RenderingServer::singleton().get_rendering_device()?;
     let mtl_device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
 
     if mtl_device_ptr == 0 {

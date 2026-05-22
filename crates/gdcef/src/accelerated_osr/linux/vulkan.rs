@@ -117,7 +117,7 @@ impl VulkanTextureImporter {
     }
 
     pub fn new() -> Option<Self> {
-        let mut rd = RenderingServer::singleton()
+        let rd = RenderingServer::singleton()
             .get_rendering_device()
             .ok_or_else(|| {
                 godot_error!("[AcceleratedOSR/Vulkan] Failed to get RenderingDevice");
@@ -441,7 +441,7 @@ impl VulkanTextureImporter {
 
         // Get destination Vulkan image from Godot's RenderingDevice
         let dst_image: vk::Image = {
-            let mut rd = RenderingServer::singleton()
+            let rd = RenderingServer::singleton()
                 .get_rendering_device()
                 .ok_or("Failed to get RenderingDevice")?;
 
