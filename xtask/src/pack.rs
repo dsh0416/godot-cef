@@ -8,7 +8,12 @@ use std::path::Path;
 const PLATFORMS: &[(&str, &str)] = &[
     ("universal-apple-darwin", "gdcef-universal-apple-darwin"),
     ("x86_64-pc-windows-msvc", "gdcef-x86_64-pc-windows-msvc"),
+    ("aarch64-pc-windows-msvc", "gdcef-aarch64-pc-windows-msvc"),
     ("x86_64-unknown-linux-gnu", "gdcef-x86_64-unknown-linux-gnu"),
+    (
+        "aarch64-unknown-linux-gnu",
+        "gdcef-aarch64-unknown-linux-gnu",
+    ),
 ];
 
 fn copy_platform_artifacts(

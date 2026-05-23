@@ -2,10 +2,7 @@
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(any(
-    all(target_os = "windows", target_arch = "x86_64"),
-    all(target_os = "linux", target_arch = "x86_64")
-))]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 mod vulkan_common;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -127,8 +124,7 @@ pub fn accelerated_osr_support_diagnostic() -> (bool, String) {
                 all(target_os = "linux", target_arch = "x86_64")
             )))]
             {
-                "Vulkan accelerated OSR currently requires x86_64 Windows/Linux extension injection"
-                    .to_string()
+                "Vulkan accelerated OSR currently requires x86_64 Windows/Linux hook-based extension injection; hooks are not supported on ARM64".to_string()
             }
         }
     };

@@ -1,7 +1,7 @@
 //! xtask - Build tasks for gdcef
 //!
 //! Usage:
-//!   cargo xtask bundle [--release]           # Bundle for current platform and deploy to addons/
+//!   cargo xtask bundle [--release] [--target <triple>] # Bundle for current platform and deploy to addons/
 //!   cargo xtask bundle-app [--release]       # Bundle helper app (macOS only)
 //!   cargo xtask bundle-framework [--release] # Bundle framework (macOS only)
 //!   cargo xtask pack <artifacts> <output>    # Pack CI artifacts into distributable addon
@@ -41,6 +41,10 @@ enum Commands {
         /// Custom target directory
         #[arg(long)]
         target_dir: Option<PathBuf>,
+
+        /// Rust target triple to build and bundle
+        #[arg(long)]
+        target: Option<String>,
     },
 
     /// Bundle the helper app for macOS
@@ -95,21 +99,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Bundle {
             release,
             target_dir,
+            target,
         } => {
             #[cfg(target_os = "macos")]
             {
+                let _ = target;
                 bundle_app::run(release, target_dir.as_deref())?;
                 bundle_framework::run(release, target_dir.as_deref())?;
             }
 
             #[cfg(target_os = "windows")]
             {
-                bundle_windows::run(release, target_dir.as_deref())?;
+                bundle_windows::run(release, target_dir.as_deref(), target.as_deref())?;
             }
 
             #[cfg(target_os = "linux")]
             {
-                bundle_linux::run(release, target_dir.as_deref())?;
+                bundle_linux::run(release, target_dir.as_deref(), target.as_deref())?;
             }
         }
         Commands::BundleApp {

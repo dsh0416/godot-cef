@@ -58,6 +58,16 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 export LD_LIBRARY_PATH="$CEF_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
+For Linux ARM64 cross builds, download the matching CEF runtime and build with
+the ARM64 Rust target:
+
+```bash
+export CEF_PATH="$HOME/.local/share/cef_aarch64"
+export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
+rustup target add aarch64-unknown-linux-gnu
+cargo xtask bundle --release --target aarch64-unknown-linux-gnu
+```
+
 You'll also need system dependencies:
 
 ```bash
@@ -67,6 +77,10 @@ sudo apt-get install -y \
     libdrm-dev libxkbcommon-dev libxcomposite-dev \
     libxdamage-dev libxrandr-dev libgbm-dev \
     libpango1.0-dev libasound2-dev
+
+# Additional tools for Linux ARM64 cross builds
+sudo apt-get install -y \
+    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
 ```
 
 #### macOS
@@ -89,6 +103,16 @@ export-cef-dir --version "$CEF_VERSION" --target aarch64-apple-darwin --force "$
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef"
 export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 $env:PATH="$env:PATH;$env:CEF_PATH"
+```
+
+For Windows ARM64 cross builds from an x64 Windows machine, use the ARM64 CEF
+runtime and Rust target:
+
+```powershell
+$env:CEF_PATH="$env:USERPROFILE/.local/share/cef_arm64"
+export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
+rustup target add aarch64-pc-windows-msvc
+cargo xtask bundle --release --target aarch64-pc-windows-msvc
 ```
 
 ### Building

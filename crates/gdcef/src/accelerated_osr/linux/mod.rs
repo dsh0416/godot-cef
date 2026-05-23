@@ -61,7 +61,7 @@ impl GodotTextureImporter {
 
 pub fn is_supported() -> bool {
     let render_backend = RenderBackend::detect();
-    render_backend == RenderBackend::Vulkan
+    render_backend.supports_accelerated_osr()
 }
 
 unsafe impl Send for GodotTextureImporter {}

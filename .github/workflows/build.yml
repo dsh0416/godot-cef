@@ -101,7 +101,17 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    name: Windows
+    name: Windows (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            cache_key: windows-x64
+            msvc_arch: x64
+          - target: aarch64-pc-windows-msvc
+            cache_key: windows-arm64
+            msvc_arch: amd64_arm64
 
     steps:
       - name: Checkout repository
@@ -113,7 +123,12 @@ jobs:
           cache: true
 
       - name: Install Rust target
-        run: rustup target add x86_64-pc-windows-msvc
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Select MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -125,63 +140,51 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: windows-x86_64-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
+          key: windows-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
           restore-keys: |
-            windows-x86_64-cargo-
+            windows-${{ matrix.target }}-cargo-
 
       - name: Cache CEF binaries
         uses: actions/cache@v4
         id: cef-cache
         with:
           path: ${{ env.CEF_PATH }}
-          key: cef-${{ hashFiles('mise.toml') }}-windows-x64
+          key: cef-${{ hashFiles('mise.toml') }}-${{ matrix.cache_key }}
 
       - name: Download CEF binaries
         if: steps.cef-cache.outputs.cache-hit != 'true'
         shell: pwsh
-        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH'
+        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force --target "${{ matrix.target }}" $env:CEF_PATH'
 
       - name: Build and bundle for Windows
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo xtask bundle --release
+        run: mise exec -- cargo xtask bundle --release --target ${{ matrix.target }}
 
       - name: Prepare artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts/x86_64-pc-windows-msvc
-          Copy-Item target/release/gdcef.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/gdcef_helper.exe artifacts/x86_64-pc-windows-msvc/
-          # Copy CEF assets
-          Copy-Item target/release/libcef.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/chrome_elf.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/libEGL.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/libGLESv2.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/d3dcompiler_47.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/dxcompiler.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/dxil.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/vk_swiftshader.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/vk_swiftshader_icd.json artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/vulkan-1.dll artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/icudtl.dat artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/resources.pak artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/chrome_100_percent.pak artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/chrome_200_percent.pak artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/v8_context_snapshot.bin artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/bootstrap.exe artifacts/x86_64-pc-windows-msvc/
-          Copy-Item target/release/bootstrapc.exe artifacts/x86_64-pc-windows-msvc/
-          Copy-Item -Recurse target/release/locales artifacts/x86_64-pc-windows-msvc/
+          New-Item -ItemType Directory -Force -Path artifacts/${{ matrix.target }}
+          Copy-Item -Recurse addons/godot_cef/bin/${{ matrix.target }}/* artifacts/${{ matrix.target }}/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gdcef-x86_64-pc-windows-msvc
-          path: artifacts/x86_64-pc-windows-msvc
+          name: gdcef-${{ matrix.target }}
+          path: artifacts/${{ matrix.target }}
           retention-days: 30
 
   build-linux:
     runs-on: ubuntu-latest
-    name: Linux
+    name: Linux (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            cache_key: linux-x64
+          - target: aarch64-unknown-linux-gnu
+            cache_key: linux-arm64
 
     steps:
       - name: Checkout repository
@@ -205,7 +208,10 @@ jobs:
             libxrandr-dev \
             libgbm-dev \
             libpango1.0-dev \
-            libasound2-dev
+            libasound2-dev \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu
 
       - name: Setup mise toolchain
         uses: jdx/mise-action@v2
@@ -213,7 +219,7 @@ jobs:
           cache: true
 
       - name: Install Rust target
-        run: rustup target add x86_64-unknown-linux-gnu
+        run: rustup target add ${{ matrix.target }}
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -225,51 +231,36 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: linux-x86_64-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
+          key: linux-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
           restore-keys: |
-            linux-x86_64-cargo-
+            linux-${{ matrix.target }}-cargo-
 
       - name: Cache CEF binaries
         uses: actions/cache@v4
         id: cef-cache
         with:
           path: ${{ env.CEF_PATH }}
-          key: cef-${{ hashFiles('mise.toml') }}-linux-x64
+          key: cef-${{ hashFiles('mise.toml') }}-${{ matrix.cache_key }}
 
       - name: Download CEF binaries
         if: steps.cef-cache.outputs.cache-hit != 'true'
-        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target "${{ matrix.target }}" "$CEF_PATH"'
 
       - name: Build and bundle for Linux
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo xtask bundle --release
+        run: mise exec -- cargo xtask bundle --release --target ${{ matrix.target }}
 
       - name: Prepare artifacts
         run: |
-          mkdir -p artifacts/x86_64-unknown-linux-gnu
-          cp target/release/libgdcef.so artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/gdcef_helper artifacts/x86_64-unknown-linux-gnu/
-          # Copy CEF assets
-          cp target/release/libcef.so artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/libEGL.so artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/libGLESv2.so artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/libvk_swiftshader.so artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/libvulkan.so.1 artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/vk_swiftshader_icd.json artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/icudtl.dat artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/resources.pak artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/chrome_100_percent.pak artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/chrome_200_percent.pak artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/v8_context_snapshot.bin artifacts/x86_64-unknown-linux-gnu/
-          cp target/release/chrome-sandbox artifacts/x86_64-unknown-linux-gnu/
-          cp -r target/release/locales artifacts/x86_64-unknown-linux-gnu/
+          mkdir -p artifacts/${{ matrix.target }}
+          cp -r addons/godot_cef/bin/${{ matrix.target }}/* artifacts/${{ matrix.target }}/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gdcef-x86_64-unknown-linux-gnu
-          path: artifacts/x86_64-unknown-linux-gnu
+          name: gdcef-${{ matrix.target }}
+          path: artifacts/${{ matrix.target }}
           retention-days: 30
 
   pack:

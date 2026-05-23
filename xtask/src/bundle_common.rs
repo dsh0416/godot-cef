@@ -202,7 +202,14 @@ pub fn required_paths_for_platform(
             &["gdcef.dll", "gdcef_helper.exe", "libcef.dll"],
             &["locales"],
         ),
+        "aarch64-pc-windows-msvc" => (
+            &["gdcef.dll", "gdcef_helper.exe", "libcef.dll"],
+            &["locales"],
+        ),
         "x86_64-unknown-linux-gnu" => (&["libgdcef.so", "gdcef_helper", "libcef.so"], &["locales"]),
+        "aarch64-unknown-linux-gnu" => {
+            (&["libgdcef.so", "gdcef_helper", "libcef.so"], &["locales"])
+        }
         _ => (&[], &[]),
     }
 }
@@ -264,7 +271,6 @@ pub fn get_cef_dir_x64() -> Option<PathBuf> {
     env::var("CEF_PATH_X64").ok().map(PathBuf::from)
 }
 
-#[cfg(target_os = "macos")]
 pub fn get_target_dir_for_target(
     release: bool,
     target: &str,

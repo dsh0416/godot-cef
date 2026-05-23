@@ -6,7 +6,9 @@ use std::path::Path;
 const PLATFORM_TARGETS: &[&str] = &[
     "universal-apple-darwin",
     "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
     "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
 ];
 
 pub fn run(addon_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {

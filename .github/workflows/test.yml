@@ -27,15 +27,28 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             cef_cache_key: macos-arm64
+            can_run_tests: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             cef_cache_key: windows-x64
+            can_run_tests: true
+            msvc_arch: x64
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            cef_cache_key: windows-arm64
+            can_run_tests: false
+            msvc_arch: amd64_arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             cef_cache_key: linux-x64
+            can_run_tests: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cef_cache_key: linux-arm64
+            can_run_tests: false
 
     runs-on: ${{ matrix.os }}
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.target }})
 
     steps:
       - name: Checkout repository
@@ -60,7 +73,9 @@ jobs:
             libxrandr-dev \
             libgbm-dev \
             libpango1.0-dev \
-            libasound2-dev
+            libasound2-dev \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu
 
       - name: Setup mise toolchain
         uses: jdx/mise-action@v2
@@ -69,6 +84,12 @@ jobs:
 
       - name: Install Rust target
         run: rustup target add ${{ matrix.target }}
+
+      - name: Select MSVC toolchain
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -94,31 +115,50 @@ jobs:
       - name: Download CEF binaries (Linux/macOS)
         if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         shell: bash
-        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target "${{ matrix.target }}" "$CEF_PATH"'
 
       - name: Download CEF binaries (Windows)
         if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: pwsh
-        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH'
+        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force --target "${{ matrix.target }}" $env:CEF_PATH'
 
       - name: Run tests (Linux/macOS)
         shell: bash
-        if: runner.os == 'Linux' || runner.os == 'macOS'
+        if: matrix.can_run_tests && (runner.os == 'Linux' || runner.os == 'macOS')
         env:
           RUSTC_WRAPPER: sccache
         run: |
           export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export DYLD_LIBRARY_PATH="${CEF_PATH}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-          mise exec -- cargo test --workspace --all-features
+          mise exec -- cargo test --workspace --all-features --target "${{ matrix.target }}"
+
+      - name: Check cross target (Linux/macOS)
+        shell: bash
+        if: ${{ !matrix.can_run_tests && runner.os != 'Windows' }}
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export DYLD_LIBRARY_PATH="${CEF_PATH}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+          mise exec -- cargo check --workspace --all-features --target "${{ matrix.target }}"
       
       - name: Run tests (Windows)
         shell: pwsh
-        if: runner.os == 'Windows'
+        if: matrix.can_run_tests && runner.os == 'Windows'
         env:
           RUSTC_WRAPPER: sccache
         run: |
           $env:PATH = "${{ env.CEF_PATH }};$env:PATH"
-          mise exec -- cargo test --workspace --all-features
+          mise exec -- cargo test --workspace --all-features --target "${{ matrix.target }}"
+
+      - name: Check cross target (Windows)
+        shell: pwsh
+        if: ${{ !matrix.can_run_tests && runner.os == 'Windows' }}
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          $env:PATH = "${{ env.CEF_PATH }};$env:PATH"
+          mise exec -- cargo check --workspace --all-features --target "${{ matrix.target }}"
 
   clippy:
     strategy:
@@ -126,17 +166,30 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            name: macOS
+            target: aarch64-apple-darwin
+            name: macOS ARM64
             cef_cache_key: macos-arm64
           - os: windows-latest
-            name: Windows
+            target: x86_64-pc-windows-msvc
+            name: Windows x64
             cef_cache_key: windows-x64
+            msvc_arch: x64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            name: Windows ARM64
+            cef_cache_key: windows-arm64
+            msvc_arch: amd64_arm64
           - os: ubuntu-latest
-            name: Linux
+            target: x86_64-unknown-linux-gnu
+            name: Linux x64
             cef_cache_key: linux-x64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            name: Linux ARM64
+            cef_cache_key: linux-arm64
 
     runs-on: ${{ matrix.os }}
-    name: Clippy (${{ matrix.os }})
+    name: Clippy (${{ matrix.name }})
 
     steps:
       - name: Checkout repository
@@ -161,7 +214,9 @@ jobs:
             libxrandr-dev \
             libgbm-dev \
             libpango1.0-dev \
-            libasound2-dev
+            libasound2-dev \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu
 
       - name: Setup mise toolchain
         uses: jdx/mise-action@v2
@@ -170,6 +225,15 @@ jobs:
 
       - name: Install Clippy component
         run: mise exec -- rustup component add clippy
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Select MSVC toolchain
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -181,9 +245,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Cache CEF binaries
         uses: actions/cache@v4
@@ -195,17 +259,17 @@ jobs:
       - name: Download CEF binaries (Linux/macOS)
         if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
         shell: bash
-        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"'
+        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target "${{ matrix.target }}" "$CEF_PATH"'
 
       - name: Download CEF binaries (Windows)
         if: steps.cef-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: pwsh
-        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH'
+        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force --target "${{ matrix.target }}" $env:CEF_PATH'
 
       - name: Run Clippy
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo clippy --workspace --all-features -- -D warnings
+        run: mise exec -- cargo clippy --workspace --all-features --target ${{ matrix.target }} -- -D warnings
 
   fmt:
     runs-on: ubuntu-latest

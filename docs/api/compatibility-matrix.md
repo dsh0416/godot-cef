@@ -19,14 +19,15 @@ This keeps the downloaded runtime files aligned with the Rust bindings.
 |----------|--------------|---------------|-----------------|-----------------|
 | Windows  | x86_64       | Direct3D12    | Yes             | Accelerated |
 | Windows  | x86_64       | Vulkan        | Yes (hook-based) | Accelerated |
+| Windows  | ARM64        | Direct3D12    | Yes             | Accelerated |
 | Windows  | any          | OpenGL        | No              | Software fallback |
-| Windows  | ARM64        | Vulkan        | No              | Software fallback |
+| Windows  | ARM64        | Vulkan        | No (hooks unsupported) | Software fallback |
 | macOS    | any          | Metal         | Yes             | Accelerated |
 | macOS    | any          | Vulkan        | No              | Software fallback |
 | macOS    | any          | OpenGL        | No              | Software fallback |
 | Linux    | x86_64       | Vulkan        | Yes (hook-based) | Accelerated |
 | Linux    | any          | OpenGL        | No              | Software fallback |
-| Linux    | ARM64        | Vulkan        | No              | Software fallback |
+| Linux    | ARM64        | Vulkan        | No (hooks unsupported) | Software fallback |
 
 ## Fallback Conditions
 
