@@ -820,6 +820,8 @@ impl VulkanTextureImporter {
         // Use the first plane's fd for memory import
         let fd = params.fds[0];
 
+        let memory_requirements = vk::MemoryRequirements::default();
+
         let mut fd_props = vk::MemoryFdPropertiesKHR::default();
         let result = unsafe {
             (self.get_memory_fd_properties)(
