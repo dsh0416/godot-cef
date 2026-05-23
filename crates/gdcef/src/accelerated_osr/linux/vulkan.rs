@@ -101,6 +101,7 @@ struct VulkanFunctions {
     allocate_memory: vk::PFN_vkAllocateMemory,
     bind_image_memory: vk::PFN_vkBindImageMemory,
     create_image: vk::PFN_vkCreateImage,
+    get_image_memory_requirements: vk::PFN_vkGetImageMemoryRequirements,
     create_command_pool: vk::PFN_vkCreateCommandPool,
     destroy_command_pool: vk::PFN_vkDestroyCommandPool,
     allocate_command_buffers: vk::PFN_vkAllocateCommandBuffers,
@@ -822,8 +823,6 @@ impl VulkanTextureImporter {
         // Use the first plane's fd for memory import
         let fd = params.fds[0];
 
-        let memory_requirements = vk::MemoryRequirements::default();
-
         let mut fd_props = vk::MemoryFdPropertiesKHR::default();
         let result = unsafe {
             (self.get_memory_fd_properties)(
@@ -836,6 +835,11 @@ impl VulkanTextureImporter {
         if result != vk::Result::SUCCESS {
             return Err(format!("Failed to get memory fd properties: {:?}", result));
         }
+
+        let mut memory_requirements = vk::MemoryRequirements::default();
+        unsafe {
+            (fns.get_image_memory_requirements)(self.device, image, &mut memory_requirements)
+        };
 
         let memory_type_bits = fd_props.memory_type_bits & memory_requirements.memory_type_bits;
         let memory_type_index = find_memory_type_index(memory_type_bits).ok_or_else(|| {
