@@ -71,6 +71,7 @@ struct VulkanFunctions {
     allocate_memory: vk::PFN_vkAllocateMemory,
     bind_image_memory: vk::PFN_vkBindImageMemory,
     create_image: vk::PFN_vkCreateImage,
+    get_image_memory_requirements: vk::PFN_vkGetImageMemoryRequirements,
     create_command_pool: vk::PFN_vkCreateCommandPool,
     destroy_command_pool: vk::PFN_vkDestroyCommandPool,
     allocate_command_buffers: vk::PFN_vkAllocateCommandBuffers,

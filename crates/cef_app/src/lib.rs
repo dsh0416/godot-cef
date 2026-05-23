@@ -66,6 +66,15 @@ wrap_app! {
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
             command_line.append_switch(Some(&"use-views".into()));
 
+            #[cfg(target_os = "linux")]
+            if self.app.godot_backend() == GodotRenderBackend::Vulkan {
+                command_line.append_switch_with_value(Some(&"ozone-platform".into()), Some(&"x11".into()));
+                command_line.append_switch_with_value(
+                    Some(&"enable-features".into()),
+                    Some(&"Vulkan,VulkanFromANGLE,DefaultANGLEVulkan".into()),
+                );
+            }
+
             // Only enable remote debugging in debug builds or when running from the editor
             // for security purposes. In production builds, this should be disabled.
             if self.app.enable_remote_debugging() {
