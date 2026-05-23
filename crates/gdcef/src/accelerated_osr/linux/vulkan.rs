@@ -635,18 +635,20 @@ impl VulkanTextureImporter {
             })
             .collect();
 
-        godot_print!(
-            "[AcceleratedOSR/Vulkan] Importing DMA-BUF: format={:?}, size={}x{}, \
-             modifier=0x{:x}, planes={}, strides={:?}, offsets={:?}, plane_layouts={:?}",
-            params.format,
-            params.width,
-            params.height,
-            params.modifier,
-            params.fds.len(),
-            params.strides,
-            params.offsets,
-            plane_layouts
-        );
+        if cfg!(debug_assertions) {
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] Importing DMA-BUF: format={:?}, size={}x{}, \
+                 modifier=0x{:x}, planes={}, strides={:?}, offsets={:?}, plane_layouts={:?}",
+                params.format,
+                params.width,
+                params.height,
+                params.modifier,
+                params.fds.len(),
+                params.strides,
+                params.offsets,
+                plane_layouts
+            );
+        }
 
         // Set up DRM format modifier info if we have a valid modifier
         let use_drm_modifier = params.modifier != DRM_FORMAT_MOD_INVALID;
@@ -845,16 +847,19 @@ impl VulkanTextureImporter {
             )
         })?;
 
-        godot_print!(
-            "[AcceleratedOSR/Vulkan] DMA-BUF memory import: \
-             fd_memory_type_bits=0x{:x}, image_memory_type_bits=0x{:x}, \
-             selected_memory_type={}, allocation_size={}, alignment={}",
-            fd_props.memory_type_bits,
-            memory_requirements.memory_type_bits,
-            memory_type_index,
-            memory_requirements.size,
-            memory_requirements.alignment
-        );
+        #[cfg(debug_assertions)]
+        {
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] DMA-BUF memory import: \
+                 fd_memory_type_bits=0x{:x}, image_memory_type_bits=0x{:x}, \
+                 selected_memory_type={}, allocation_size={}, alignment={}",
+                fd_props.memory_type_bits,
+                memory_requirements.memory_type_bits,
+                memory_type_index,
+                memory_requirements.size,
+                memory_requirements.alignment
+            );
+        }
 
         // Import the memory with the DMA-BUF fd
         // Note: The fd ownership is transferred to Vulkan upon successful import

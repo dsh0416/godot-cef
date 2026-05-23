@@ -45,9 +45,9 @@ Since Godot doesn't provide an API to request additional Vulkan extensions durin
 
 ### Linux NVIDIA Driver Requirement
 
-:::: warning
+::: warning
 On Linux systems using NVIDIA proprietary drivers, DMA-BUF accelerated rendering requires DRM kernel mode setting to be enabled with the `nvidia-drm.modeset=1` kernel parameter.
-::::
+:::
 
 Without `nvidia-drm.modeset=1`, the NVIDIA driver may not expose the DMA-BUF path needed for zero-copy texture sharing between CEF and Godot. Configure this kernel parameter through your distribution's bootloader or modprobe configuration, then reboot before using accelerated OSR.
 

@@ -45,9 +45,9 @@ CEF 中的 GPU 加速离屏渲染（OSR）需要在 CEF 渲染器进程和宿主
 
 ### Linux NVIDIA 驱动要求
 
-:::: warning
+::: warning
 在使用 NVIDIA 专有驱动的 Linux 系统上，DMA-BUF 加速渲染需要通过 `nvidia-drm.modeset=1` 内核参数启用 DRM 内核模式设置。
-::::
+:::
 
 如果没有 `nvidia-drm.modeset=1`，NVIDIA 驱动可能不会暴露 CEF 与 Godot 之间零拷贝纹理共享所需的 DMA-BUF 路径。请通过发行版的引导加载器或 modprobe 配置设置该内核参数，然后重启再使用加速 OSR。
 
