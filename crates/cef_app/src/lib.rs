@@ -68,7 +68,6 @@ wrap_app! {
 
             #[cfg(target_os = "linux")]
             if self.app.godot_backend() == GodotRenderBackend::Vulkan {
-                command_line.append_switch_with_value(Some(&"ozone-platform".into()), Some(&"x11".into()));
                 command_line.append_switch_with_value(
                     Some(&"enable-features".into()),
                     Some(&"Vulkan,VulkanFromANGLE,DefaultANGLEVulkan".into()),
