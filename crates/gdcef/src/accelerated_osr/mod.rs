@@ -63,22 +63,58 @@ impl RenderBackend {
     }
 
     pub fn supports_accelerated_osr(&self) -> bool {
+        self.accelerated_osr_support_diagnostic().0
+    }
+
+    pub fn accelerated_osr_support_diagnostic(&self) -> (bool, String) {
         match self {
-            #[cfg(target_os = "macos")]
-            RenderBackend::Metal => true,
-            #[cfg(target_os = "windows")]
-            RenderBackend::D3D12 => true,
-            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-            RenderBackend::Vulkan => true,
-            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-            RenderBackend::Vulkan => true,
-            _ => false,
+            RenderBackend::Metal if cfg!(target_os = "macos") => (
+                true,
+                "Metal backend supports accelerated OSR on macOS".to_string(),
+            ),
+            RenderBackend::D3D12 if cfg!(target_os = "windows") => (
+                true,
+                "D3D12 backend supports accelerated OSR on Windows".to_string(),
+            ),
+            RenderBackend::Vulkan if cfg!(all(target_os = "windows", target_arch = "x86_64")) => (
+                true,
+                "Vulkan backend supports accelerated OSR on x86_64 Windows".to_string(),
+            ),
+            RenderBackend::Vulkan if cfg!(all(target_os = "linux", target_arch = "x86_64")) => (
+                true,
+                "Vulkan backend supports accelerated OSR on x86_64 Linux".to_string(),
+            ),
+            RenderBackend::OpenGL => (
+                false,
+                "OpenGL backend is not supported for accelerated OSR".to_string(),
+            ),
+            RenderBackend::Unknown => (
+                false,
+                "Unknown rendering backend reported by Godot".to_string(),
+            ),
+            RenderBackend::Metal => (
+                false,
+                "Metal backend is only supported on macOS".to_string(),
+            ),
+            RenderBackend::D3D12 => (
+                false,
+                "D3D12 backend is only supported on Windows".to_string(),
+            ),
+            RenderBackend::Vulkan => (
+                false,
+                "Vulkan accelerated OSR currently requires x86_64 Windows/Linux hook-based extension injection; hooks are not supported on ARM64".to_string(),
+            ),
         }
     }
 }
 
 pub fn accelerated_osr_support_diagnostic() -> (bool, String) {
     let backend = RenderBackend::detect();
+    let (backend_supported, backend_reason) = backend.accelerated_osr_support_diagnostic();
+    if !backend_supported {
+        return (false, backend_reason);
+    }
+
     #[cfg(target_os = "linux")]
     if backend == RenderBackend::Vulkan {
         return linux::vulkan_support_diagnostic();
@@ -86,55 +122,16 @@ pub fn accelerated_osr_support_diagnostic() -> (bool, String) {
 
     let supported = is_accelerated_osr_supported();
     if supported {
-        return (
-            true,
-            format!("backend {:?} supports accelerated OSR", backend),
-        );
+        return (true, backend_reason);
     }
 
-    let reason = match backend {
-        RenderBackend::OpenGL => "OpenGL backend is not supported for accelerated OSR".to_string(),
-        RenderBackend::Unknown => "Unknown rendering backend reported by Godot".to_string(),
-        RenderBackend::Metal => {
-            #[cfg(target_os = "macos")]
-            {
-                "Metal backend detected but platform texture importer is unavailable".to_string()
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                "Metal backend is only supported on macOS".to_string()
-            }
-        }
-        RenderBackend::D3D12 => {
-            #[cfg(target_os = "windows")]
-            {
-                "D3D12 backend detected but platform texture importer is unavailable".to_string()
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                "D3D12 backend is only supported on Windows".to_string()
-            }
-        }
-        RenderBackend::Vulkan => {
-            #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-            {
-                "Vulkan backend detected but platform texture importer is unavailable".to_string()
-            }
-            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-            {
-                "Vulkan backend detected but platform texture importer is unavailable".to_string()
-            }
-            #[cfg(not(any(
-                all(target_os = "windows", target_arch = "x86_64"),
-                all(target_os = "linux", target_arch = "x86_64")
-            )))]
-            {
-                "Vulkan accelerated OSR currently requires x86_64 Windows/Linux hook-based extension injection; hooks are not supported on ARM64".to_string()
-            }
-        }
-    };
-
-    (false, reason)
+    (
+        false,
+        format!(
+            "{} but platform texture importer is unavailable",
+            backend_reason
+        ),
+    )
 }
 
 pub struct AcceleratedRenderState {
