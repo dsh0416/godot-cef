@@ -68,6 +68,10 @@ rustup target add aarch64-unknown-linux-gnu
 cargo xtask bundle --release --target aarch64-unknown-linux-gnu
 ```
 
+The repository config allows unresolved symbols from `libcef.so` during Linux
+ARM64 cross linking, because those CEF system dependencies are provided by the
+target ARM64 Linux runtime rather than the x64 build host.
+
 You'll also need system dependencies:
 
 ```bash
