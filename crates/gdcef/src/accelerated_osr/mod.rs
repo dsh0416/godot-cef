@@ -79,6 +79,11 @@ impl RenderBackend {
 
 pub fn accelerated_osr_support_diagnostic() -> (bool, String) {
     let backend = RenderBackend::detect();
+    #[cfg(target_os = "linux")]
+    if backend == RenderBackend::Vulkan {
+        return linux::vulkan_support_diagnostic();
+    }
+
     let supported = is_accelerated_osr_supported();
     if supported {
         return (
