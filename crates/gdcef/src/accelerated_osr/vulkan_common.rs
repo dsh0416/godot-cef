@@ -205,12 +205,29 @@ pub(crate) fn submit_vulkan_copy_async(
         layer_count: 1,
     };
 
+    let source_from_external_queue = ctx.src_external_queue_family != vk::QUEUE_FAMILY_IGNORED;
+    let src_old_layout = if source_from_external_queue {
+        vk::ImageLayout::GENERAL
+    } else {
+        vk::ImageLayout::UNDEFINED
+    };
+    let src_src_queue_family = if source_from_external_queue {
+        ctx.src_external_queue_family
+    } else {
+        vk::QUEUE_FAMILY_IGNORED
+    };
+    let src_dst_queue_family = if source_from_external_queue {
+        ctx.queue_family_index
+    } else {
+        vk::QUEUE_FAMILY_IGNORED
+    };
+
     let barriers = [
         vk::ImageMemoryBarrier::default()
-            .old_layout(vk::ImageLayout::UNDEFINED)
+            .old_layout(src_old_layout)
             .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
-            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .src_queue_family_index(src_src_queue_family)
+            .dst_queue_family_index(src_dst_queue_family)
             .image(src)
             .subresource_range(subresource_range)
             .src_access_mask(vk::AccessFlags::empty())
@@ -271,6 +288,33 @@ pub(crate) fn submit_vulkan_copy_async(
         );
     }
 
+    if source_from_external_queue {
+        let source_release_barrier = vk::ImageMemoryBarrier::default()
+            .old_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+            .new_layout(vk::ImageLayout::GENERAL)
+            .src_queue_family_index(ctx.queue_family_index)
+            .dst_queue_family_index(ctx.src_external_queue_family)
+            .image(src)
+            .subresource_range(subresource_range)
+            .src_access_mask(vk::AccessFlags::TRANSFER_READ)
+            .dst_access_mask(vk::AccessFlags::empty());
+
+        unsafe {
+            (ctx.cmd_pipeline_barrier)(
+                cmd_buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                vk::DependencyFlags::empty(),
+                0,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                1,
+                &source_release_barrier,
+            );
+        }
+    }
+
     let (src_family, dst_family) = if ctx.uses_separate_queue && ctx.queue_family_index != 0 {
         (ctx.queue_family_index, 0u32)
     } else {
@@ -320,6 +364,7 @@ pub(crate) struct VulkanCopyContext {
     pub queue: ash::vk::Queue,
     pub uses_separate_queue: bool,
     pub queue_family_index: u32,
+    pub src_external_queue_family: u32,
     // Function pointers
     pub reset_fences: ash::vk::PFN_vkResetFences,
     pub reset_command_buffer: ash::vk::PFN_vkResetCommandBuffer,

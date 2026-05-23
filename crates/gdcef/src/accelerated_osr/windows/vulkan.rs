@@ -584,6 +584,7 @@ impl VulkanTextureImporter {
             queue: self.queue,
             uses_separate_queue: self.uses_separate_queue,
             queue_family_index: self.queue_family_index,
+            src_external_queue_family: vk::QUEUE_FAMILY_IGNORED,
             reset_fences: fns.reset_fences,
             reset_command_buffer: fns.reset_command_buffer,
             begin_command_buffer: fns.begin_command_buffer,

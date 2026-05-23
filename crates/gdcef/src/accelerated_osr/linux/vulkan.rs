@@ -10,6 +10,7 @@ use godot::classes::rendering_device::DriverResource;
 use godot::global::{godot_error, godot_print};
 use godot::prelude::*;
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::os::fd::RawFd;
 use std::sync::Mutex;
 
@@ -76,6 +77,7 @@ pub struct VulkanTextureImporter {
     queue: vk::Queue,
     queue_family_index: u32,
     uses_separate_queue: bool,
+    src_external_queue_family: u32,
     get_memory_fd_properties: PfnVkGetMemoryFdPropertiesKHR,
     get_physical_device_image_format_properties2:
         Option<PfnVkGetPhysicalDeviceImageFormatProperties2>,
@@ -191,6 +193,23 @@ impl VulkanTextureImporter {
             );
         }
 
+        let src_external_queue_family = if Self::device_supports_extension(
+            &lib,
+            physical_device,
+            c"VK_EXT_queue_family_foreign",
+        ) {
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] Using VK_QUEUE_FAMILY_FOREIGN_EXT for DMA-BUF acquire/release"
+            );
+            vk::QUEUE_FAMILY_FOREIGN_EXT
+        } else {
+            godot_print!(
+                "[AcceleratedOSR/Vulkan] VK_EXT_queue_family_foreign unavailable; \
+                 using VK_QUEUE_FAMILY_EXTERNAL for DMA-BUF acquire/release"
+            );
+            vk::QUEUE_FAMILY_EXTERNAL
+        };
+
         // Try to find a separate queue for our copy operations
         // This avoids synchronization issues with Godot's main graphics queue
         let (mut queue_family_index, mut queue_index, mut uses_separate_queue) =
@@ -295,6 +314,7 @@ impl VulkanTextureImporter {
             queue,
             queue_family_index,
             uses_separate_queue,
+            src_external_queue_family,
             fence,
             get_memory_fd_properties: fns.get_memory_fd_properties,
             get_physical_device_image_format_properties2,
@@ -310,6 +330,62 @@ impl VulkanTextureImporter {
         memory_fn_name: "vkGetMemoryFdPropertiesKHR",
         memory_fn_type: PfnVkGetMemoryFdPropertiesKHR
     );
+
+    fn device_supports_extension(
+        lib: &libloading::Library,
+        physical_device: vk::PhysicalDevice,
+        extension_name: &CStr,
+    ) -> bool {
+        if physical_device == vk::PhysicalDevice::null() {
+            return false;
+        }
+
+        type GetPhysicalDeviceExtensionProperties = unsafe extern "system" fn(
+            physical_device: vk::PhysicalDevice,
+            p_layer_name: *const std::ffi::c_char,
+            p_property_count: *mut u32,
+            p_properties: *mut vk::ExtensionProperties,
+        )
+            -> vk::Result;
+
+        let enumerate_extensions: GetPhysicalDeviceExtensionProperties = unsafe {
+            match lib.get(b"vkEnumerateDeviceExtensionProperties\0") {
+                Ok(f) => *f,
+                Err(_) => return false,
+            }
+        };
+
+        let mut count = 0;
+        let result = unsafe {
+            enumerate_extensions(
+                physical_device,
+                std::ptr::null(),
+                &mut count,
+                std::ptr::null_mut(),
+            )
+        };
+        if result != vk::Result::SUCCESS || count == 0 {
+            return false;
+        }
+
+        let mut properties = vec![vk::ExtensionProperties::default(); count as usize];
+        let result = unsafe {
+            enumerate_extensions(
+                physical_device,
+                std::ptr::null(),
+                &mut count,
+                properties.as_mut_ptr(),
+            )
+        };
+        if result != vk::Result::SUCCESS {
+            return false;
+        }
+
+        properties.iter().any(|prop| {
+            let name = unsafe { CStr::from_ptr(prop.extension_name.as_ptr()) };
+            name == extension_name
+        })
+    }
 
     fn get_dmabuf_inode(fd: RawFd) -> Option<u64> {
         let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
@@ -530,19 +606,48 @@ impl VulkanTextureImporter {
         let mut external_memory_info = vk::ExternalMemoryImageCreateInfo::default()
             .handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
 
-        // Build plane layouts for DRM format modifier
+        // Build plane layouts for DRM format modifier. Some drivers reject or
+        // silently mishandle zero-sized plane layouts, so provide conservative
+        // byte sizes from CEF's stride/offset metadata.
         let plane_layouts: Vec<vk::SubresourceLayout> = params
             .fds
             .iter()
             .enumerate()
-            .map(|(i, _)| vk::SubresourceLayout {
-                offset: params.offsets.get(i).copied().unwrap_or(0),
-                size: 0, // Calculated by driver
-                row_pitch: params.strides.get(i).copied().unwrap_or(0) as u64,
-                array_pitch: 0,
-                depth_pitch: 0,
+            .map(|(i, _)| {
+                let offset = params.offsets.get(i).copied().unwrap_or(0);
+                let row_pitch = params.strides.get(i).copied().unwrap_or(0) as u64;
+                let next_offset = params
+                    .offsets
+                    .iter()
+                    .copied()
+                    .filter(|candidate| *candidate > offset)
+                    .min();
+                let size = next_offset
+                    .map(|next| next.saturating_sub(offset))
+                    .unwrap_or_else(|| row_pitch.saturating_mul(params.height as u64));
+
+                vk::SubresourceLayout {
+                    offset,
+                    size,
+                    row_pitch,
+                    array_pitch: 0,
+                    depth_pitch: 0,
+                }
             })
             .collect();
+
+        godot_print!(
+            "[AcceleratedOSR/Vulkan] Importing DMA-BUF: format={:?}, size={}x{}, \
+             modifier=0x{:x}, planes={}, strides={:?}, offsets={:?}, plane_layouts={:?}",
+            params.format,
+            params.width,
+            params.height,
+            params.modifier,
+            params.fds.len(),
+            params.strides,
+            params.offsets,
+            plane_layouts
+        );
 
         // Set up DRM format modifier info if we have a valid modifier
         let use_drm_modifier = params.modifier != DRM_FORMAT_MOD_INVALID;
@@ -741,6 +846,17 @@ impl VulkanTextureImporter {
             )
         })?;
 
+        godot_print!(
+            "[AcceleratedOSR/Vulkan] DMA-BUF memory import: \
+             fd_memory_type_bits=0x{:x}, image_memory_type_bits=0x{:x}, \
+             selected_memory_type={}, allocation_size={}, alignment={}",
+            fd_props.memory_type_bits,
+            memory_requirements.memory_type_bits,
+            memory_type_index,
+            memory_requirements.size,
+            memory_requirements.alignment
+        );
+
         // Import the memory with the DMA-BUF fd
         // Note: The fd ownership is transferred to Vulkan upon successful import
         let mut import_info = vk::ImportMemoryFdInfoKHR::default()
@@ -800,6 +916,7 @@ impl VulkanTextureImporter {
             queue: self.queue,
             uses_separate_queue: self.uses_separate_queue,
             queue_family_index: self.queue_family_index,
+            src_external_queue_family: self.src_external_queue_family,
             reset_fences: fns.reset_fences,
             reset_command_buffer: fns.reset_command_buffer,
             begin_command_buffer: fns.begin_command_buffer,
