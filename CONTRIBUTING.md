@@ -133,17 +133,21 @@ cargo xtask bundle --release
 
 ```
 godot-cef/
-├── gdcef/              # Main GDExtension library
-│   └── src/
-│       ├── cef_texture/        # CefTexture node implementation
-│       ├── accelerated_osr/    # GPU-accelerated rendering
-│       ├── vulkan_hook/        # Vulkan extension injection
-│       └── ...
-├── gdcef_helper/       # CEF subprocess helper
-├── cef_app/            # CEF application/browser configuration
-├── xtask/              # Build system and bundling tasks
-├── addons/             # Godot addon files
-└── docs/               # Documentation (VitePress)
+├── crates/
+│   ├── gdcef/              # Main GDExtension library
+│   │   └── src/
+│   │       ├── cef_texture/        # CefTexture node implementation
+│   │       ├── cef_texture2d/      # CefTexture2D implementation
+│   │       ├── accelerated_osr/    # GPU-accelerated rendering
+│   │       ├── godot_protocol/     # res:// and user:// scheme handlers
+│   │       └── vulkan_hook/        # Vulkan extension injection
+│   ├── gdcef_helper/       # CEF subprocess helper
+│   ├── cef_app/            # CEF application/browser configuration
+│   └── software_render/    # CPU popup compositing helpers
+├── xtask/                  # Build, bundle, pack, and validation tasks
+├── benches/                # Criterion benchmarks
+├── addons/godot_cef/       # Godot addon files and bundled bin/ outputs
+└── docs/                   # Documentation site (VitePress)
 ```
 
 ## Making Changes
@@ -247,11 +251,30 @@ cargo clippy --workspace --all-features -- -D warnings
 
 ```bash
 # Run all tests
+export LD_LIBRARY_PATH="$CEF_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"   # Linux
+export DYLD_LIBRARY_PATH="$CEF_PATH${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" # macOS
 cargo test --workspace --all-features
 
 # Run specific test
 cargo test test_name
+
+# Validate version/toolchain pins
+cargo xtask validate-versions
+
+# Validate a packaged addon layout
+cargo xtask validate --addon dist/addons/godot_cef
 ```
+
+On Windows, add the CEF runtime directory to `PATH` before running tests:
+
+```powershell
+$env:PATH="$env:CEF_PATH;$env:PATH"
+cargo test --workspace --all-features
+```
+
+Use `cargo xtask validate-versions` after bumping Rust crate versions, CEF
+runtime pins, the docs package version, or `mise.toml`. It checks that
+`Cargo.toml`, `Cargo.lock`, `package.json`, and `mise.toml` agree.
 
 ### Writing Tests
 
@@ -267,6 +290,10 @@ For visual/rendering changes:
 2. Copy artifacts to a Godot project
 3. Test with different rendering backends
 4. Verify on multiple platforms if possible
+
+For release or packaging changes, also run `cargo xtask pack` with the
+platform artifacts you changed and then `cargo xtask validate --addon` against
+the staged addon directory.
 
 ### Lifecycle Cleanup Checklist
 
@@ -324,6 +351,9 @@ pnpm docs:build
 ```
 
 Documentation files are in the `docs/` directory.
+
+When updating public API docs, keep the English and `zh_CN` pages in sync or
+note the translation follow-up clearly in the pull request.
 
 ## Questions?
 

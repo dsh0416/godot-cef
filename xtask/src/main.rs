@@ -6,6 +6,7 @@
 //!   cargo xtask bundle-framework [--release] # Bundle framework (macOS only)
 //!   cargo xtask pack <artifacts> <output>    # Pack CI artifacts into distributable addon
 //!   cargo xtask validate --addon <path>      # Validate addon artifact completeness
+//!   cargo xtask validate-versions            # Validate workspace/toolchain version pins
 
 #[cfg(target_os = "macos")]
 mod bundle_app;
@@ -17,7 +18,9 @@ mod bundle_linux;
 #[cfg(target_os = "windows")]
 mod bundle_windows;
 mod pack;
+mod platform;
 mod validate;
+mod validate_versions;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -90,6 +93,9 @@ enum Commands {
         #[arg(long)]
         addon: PathBuf,
     },
+
+    /// Validate version and toolchain pins across workspace files
+    ValidateVersions,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -157,6 +163,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Validate { addon } => {
             validate::run(&addon)?;
+        }
+        Commands::ValidateVersions => {
+            validate_versions::run()?;
         }
     }
 

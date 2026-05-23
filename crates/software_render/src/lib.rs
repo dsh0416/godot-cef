@@ -44,3 +44,163 @@ pub fn composite_popup(dst: &mut DestBuffer, popup: &PopupBuffer) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pixel(value: u8) -> [u8; 4] {
+        [value, value, value, 255]
+    }
+
+    fn write_pixel(buffer: &mut [u8], width: u32, x: u32, y: u32, value: [u8; 4]) {
+        let index = ((y * width + x) * 4) as usize;
+        buffer[index..index + 4].copy_from_slice(&value);
+    }
+
+    fn read_pixel(buffer: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+        let index = ((y * width + x) * 4) as usize;
+        [
+            buffer[index],
+            buffer[index + 1],
+            buffer[index + 2],
+            buffer[index + 3],
+        ]
+    }
+
+    #[test]
+    fn composites_popup_inside_destination() {
+        let mut dst_data = vec![0; 4 * 4 * 4];
+        let mut popup_data = vec![0; 2 * 2 * 4];
+        write_pixel(&mut popup_data, 2, 0, 0, pixel(1));
+        write_pixel(&mut popup_data, 2, 1, 0, pixel(2));
+        write_pixel(&mut popup_data, 2, 0, 1, pixel(3));
+        write_pixel(&mut popup_data, 2, 1, 1, pixel(4));
+
+        composite_popup(
+            &mut DestBuffer {
+                data: &mut dst_data,
+                width: 4,
+                height: 4,
+            },
+            &PopupBuffer {
+                data: &popup_data,
+                width: 2,
+                height: 2,
+                x: 1,
+                y: 1,
+            },
+        );
+
+        assert_eq!(read_pixel(&dst_data, 4, 1, 1), pixel(1));
+        assert_eq!(read_pixel(&dst_data, 4, 2, 1), pixel(2));
+        assert_eq!(read_pixel(&dst_data, 4, 1, 2), pixel(3));
+        assert_eq!(read_pixel(&dst_data, 4, 2, 2), pixel(4));
+        assert_eq!(read_pixel(&dst_data, 4, 0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn clips_negative_popup_offsets() {
+        let mut dst_data = vec![0; 2 * 2 * 4];
+        let mut popup_data = vec![0; 3 * 3 * 4];
+        for y in 0..3 {
+            for x in 0..3 {
+                write_pixel(&mut popup_data, 3, x, y, pixel((y * 3 + x) as u8));
+            }
+        }
+
+        composite_popup(
+            &mut DestBuffer {
+                data: &mut dst_data,
+                width: 2,
+                height: 2,
+            },
+            &PopupBuffer {
+                data: &popup_data,
+                width: 3,
+                height: 3,
+                x: -1,
+                y: -1,
+            },
+        );
+
+        assert_eq!(read_pixel(&dst_data, 2, 0, 0), pixel(4));
+        assert_eq!(read_pixel(&dst_data, 2, 1, 0), pixel(5));
+        assert_eq!(read_pixel(&dst_data, 2, 0, 1), pixel(7));
+        assert_eq!(read_pixel(&dst_data, 2, 1, 1), pixel(8));
+    }
+
+    #[test]
+    fn clips_popup_at_destination_edge() {
+        let mut dst_data = vec![0; 2 * 2 * 4];
+        let popup_data = vec![9; 2 * 2 * 4];
+
+        composite_popup(
+            &mut DestBuffer {
+                data: &mut dst_data,
+                width: 2,
+                height: 2,
+            },
+            &PopupBuffer {
+                data: &popup_data,
+                width: 2,
+                height: 2,
+                x: 1,
+                y: 1,
+            },
+        );
+
+        assert_eq!(read_pixel(&dst_data, 2, 1, 1), [9, 9, 9, 9]);
+        assert_eq!(read_pixel(&dst_data, 2, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(read_pixel(&dst_data, 2, 1, 0), [0, 0, 0, 0]);
+        assert_eq!(read_pixel(&dst_data, 2, 0, 1), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn leaves_destination_unchanged_when_popup_is_not_visible() {
+        let mut dst_data = vec![7; 2 * 2 * 4];
+        let original = dst_data.clone();
+        let popup_data = vec![9; 2 * 2 * 4];
+
+        composite_popup(
+            &mut DestBuffer {
+                data: &mut dst_data,
+                width: 2,
+                height: 2,
+            },
+            &PopupBuffer {
+                data: &popup_data,
+                width: 2,
+                height: 2,
+                x: 2,
+                y: 0,
+            },
+        );
+
+        assert_eq!(dst_data, original);
+    }
+
+    #[test]
+    fn skips_rows_that_exceed_buffer_lengths() {
+        let mut dst_data = vec![0; 2 * 2 * 4 - 1];
+        let popup_data = vec![9; 2 * 2 * 4 - 1];
+
+        composite_popup(
+            &mut DestBuffer {
+                data: &mut dst_data,
+                width: 2,
+                height: 2,
+            },
+            &PopupBuffer {
+                data: &popup_data,
+                width: 2,
+                height: 2,
+                x: 0,
+                y: 0,
+            },
+        );
+
+        assert_eq!(&dst_data[..8], &[9; 8]);
+        assert_eq!(&dst_data[8..], &[0; 7]);
+    }
+}

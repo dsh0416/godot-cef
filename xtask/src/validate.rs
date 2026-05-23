@@ -1,15 +1,8 @@
 //! Validation command - checks packaged addon layout and required artifacts
 
-use crate::bundle_common::{required_paths_for_platform, validate_required_paths};
+use crate::bundle_common::validate_required_paths;
+use crate::platform::PLATFORM_SPECS;
 use std::path::Path;
-
-const PLATFORM_TARGETS: &[&str] = &[
-    "universal-apple-darwin",
-    "x86_64-pc-windows-msvc",
-    "aarch64-pc-windows-msvc",
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-];
 
 pub fn run(addon_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let bin_dir = addon_dir.join("bin");
@@ -22,16 +15,19 @@ pub fn run(addon_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut validated = 0usize;
-    for platform in PLATFORM_TARGETS {
-        let platform_dir = bin_dir.join(platform);
+    for platform in PLATFORM_SPECS {
+        let platform_dir = bin_dir.join(platform.target);
         if !platform_dir.exists() {
-            println!("Skipping {} (not present)", platform);
+            println!("Skipping {} (not present)", platform.target);
             continue;
         }
 
-        let (files, dirs) = required_paths_for_platform(platform);
-        validate_required_paths(&platform_dir, files, dirs)?;
-        println!("Validated {}", platform);
+        validate_required_paths(
+            &platform_dir,
+            platform.required_files,
+            platform.required_dirs,
+        )?;
+        println!("Validated {}", platform.target);
         validated += 1;
     }
 

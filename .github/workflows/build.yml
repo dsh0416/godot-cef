@@ -117,44 +117,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise toolchain
-        uses: jdx/mise-action@v2
+      - name: Setup Rust and CEF
+        uses: ./.github/actions/setup-rust-cef
         with:
-          cache: true
-
-      - name: Install Rust target
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Select MSVC toolchain
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.msvc_arch }}
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Cache Cargo registry and build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
-          restore-keys: |
-            windows-${{ matrix.target }}-cargo-
-
-      - name: Cache CEF binaries
-        uses: actions/cache@v4
-        id: cef-cache
-        with:
-          path: ${{ env.CEF_PATH }}
-          key: cef-${{ hashFiles('mise.toml') }}-${{ matrix.cache_key }}
-
-      - name: Download CEF binaries
-        if: steps.cef-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force --target "${{ matrix.target }}" $env:CEF_PATH'
+          target: ${{ matrix.target }}
+          cef-cache-key: ${{ matrix.cache_key }}
+          cargo-cache-prefix: windows
+          msvc-arch: ${{ matrix.msvc_arch }}
 
       - name: Build and bundle for Windows
         env:
@@ -190,61 +159,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            cmake \
-            libgtk-3-dev \
-            libnss3-dev \
-            libatk1.0-dev \
-            libatk-bridge2.0-dev \
-            libcups2-dev \
-            libdrm-dev \
-            libxkbcommon-dev \
-            libxcomposite-dev \
-            libxdamage-dev \
-            libxrandr-dev \
-            libgbm-dev \
-            libpango1.0-dev \
-            libasound2-dev \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu
-
-      - name: Setup mise toolchain
-        uses: jdx/mise-action@v2
+      - name: Setup Rust and CEF
+        uses: ./.github/actions/setup-rust-cef
         with:
-          cache: true
-
-      - name: Install Rust target
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Cache Cargo registry and build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: linux-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
-          restore-keys: |
-            linux-${{ matrix.target }}-cargo-
-
-      - name: Cache CEF binaries
-        uses: actions/cache@v4
-        id: cef-cache
-        with:
-          path: ${{ env.CEF_PATH }}
-          key: cef-${{ hashFiles('mise.toml') }}-${{ matrix.cache_key }}
-
-      - name: Download CEF binaries
-        if: steps.cef-cache.outputs.cache-hit != 'true'
-        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target "${{ matrix.target }}" "$CEF_PATH"'
+          target: ${{ matrix.target }}
+          cef-cache-key: ${{ matrix.cache_key }}
+          cargo-cache-prefix: linux
+          install-linux-deps: "true"
 
       - name: Build and bundle for Linux
         env:
@@ -294,6 +215,7 @@ jobs:
             --artifacts artifacts \
             --output dist/addons/godot_cef \
             --addon-src addons/godot_cef
+          mise exec -- cargo xtask validate --addon dist/addons/godot_cef
           # Use dist as ZIP root so Asset Library installs into res://addons/godot_cef.
           zip -r godot_cef.zip dist
 

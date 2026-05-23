@@ -1,44 +1,34 @@
 //! Pack command - assembles all platform artifacts into a single Godot addon
 
-use crate::bundle_common::{copy_directory, required_paths_for_platform, validate_required_paths};
+use crate::bundle_common::{copy_directory, validate_required_paths};
+use crate::platform::{PLATFORM_SPECS, PlatformSpec};
 use std::fs;
 use std::path::Path;
-
-/// Platform targets and their artifact directory names
-const PLATFORMS: &[(&str, &str)] = &[
-    ("universal-apple-darwin", "gdcef-universal-apple-darwin"),
-    ("x86_64-pc-windows-msvc", "gdcef-x86_64-pc-windows-msvc"),
-    ("aarch64-pc-windows-msvc", "gdcef-aarch64-pc-windows-msvc"),
-    ("x86_64-unknown-linux-gnu", "gdcef-x86_64-unknown-linux-gnu"),
-    (
-        "aarch64-unknown-linux-gnu",
-        "gdcef-aarch64-unknown-linux-gnu",
-    ),
-];
 
 fn copy_platform_artifacts(
     artifacts_dir: &Path,
     output_bin_dir: &Path,
-    platform_target: &str,
-    artifact_name: &str,
+    platform: &PlatformSpec,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    let src_dir = artifacts_dir.join(artifact_name);
+    let src_dir = artifacts_dir.join(platform.artifact_name);
 
     if !src_dir.exists() {
-        println!("  Skipping {} (not found)", artifact_name);
+        println!("  Skipping {} (not found)", platform.artifact_name);
         return Ok(false);
     }
 
-    let dst_dir = output_bin_dir.join(platform_target);
+    let dst_dir = output_bin_dir.join(platform.target);
     if dst_dir.exists() {
         fs::remove_dir_all(&dst_dir)?;
     }
 
     copy_directory(&src_dir, &dst_dir)?;
-    let (required_files, required_dirs) = required_paths_for_platform(platform_target);
-    validate_required_paths(&dst_dir, required_files, required_dirs)?;
+    validate_required_paths(&dst_dir, platform.required_files, platform.required_dirs)?;
 
-    println!("  Copied: {} -> bin/{}/", artifact_name, platform_target);
+    println!(
+        "  Copied: {} -> bin/{}/",
+        platform.artifact_name, platform.target
+    );
     Ok(true)
 }
 
@@ -93,8 +83,8 @@ pub fn run(
     }
 
     let mut platforms_found = 0;
-    for (platform_target, artifact_name) in PLATFORMS {
-        if copy_platform_artifacts(artifacts_dir, &bin_dir, platform_target, artifact_name)? {
+    for platform in PLATFORM_SPECS {
+        if copy_platform_artifacts(artifacts_dir, &bin_dir, platform)? {
             platforms_found += 1;
         }
     }
