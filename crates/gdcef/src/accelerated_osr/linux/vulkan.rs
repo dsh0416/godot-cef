@@ -750,8 +750,10 @@ impl VulkanTextureImporter {
         }
 
         let mut external_props = vk::ExternalImageFormatProperties::default();
-        let mut format_props = vk::ImageFormatProperties2::default();
-        format_props.p_next = &mut external_props as *mut _ as *mut _;
+        let mut format_props = vk::ImageFormatProperties2 {
+            p_next: &mut external_props as *mut _ as *mut _,
+            ..Default::default()
+        };
 
         let result = unsafe {
             get_image_format_properties2(self.physical_device, &format_info, &mut format_props)
