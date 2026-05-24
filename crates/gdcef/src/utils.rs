@@ -40,9 +40,9 @@ pub fn get_display_scale_factor() -> f32 {
                 && let Some(candidate) = linux_desktop_scale_candidate()
                 && candidate > 1.0
             {
-                return candidate;
+                candidate
             } else {
-                return screen_scale;
+                screen_scale
             }
         }
 
