@@ -4,6 +4,10 @@ use godot::classes::Os;
 use godot::{classes::DisplayServer, obj::Singleton};
 use process_path::get_dylib_path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+#[cfg(target_os = "linux")]
+static LINUX_DESKTOP_SCALE_CANDIDATE: OnceLock<Option<f32>> = OnceLock::new();
 
 /// Returns the display scale factor for the primary screen.
 ///
@@ -12,6 +16,7 @@ use std::path::PathBuf;
 /// and high-DPI displays. A value of `1.0` means "no scaling".
 pub fn get_display_scale_factor() -> f32 {
     let display_server = DisplayServer::singleton();
+    let screen_scale = display_server.screen_get_scale();
 
     // NOTE: `display_server.screen_get_scale` is implemented on Android, iOS,
     // Web, macOS, and Linux (Wayland). On Windows, this method always returns
@@ -28,8 +33,65 @@ pub fn get_display_scale_factor() -> f32 {
 
     #[cfg(not(target_os = "windows"))]
     {
-        display_server.screen_get_scale()
+        #[cfg(target_os = "linux")]
+        {
+            if screen_scale <= 1.0
+                && env_or_empty("XDG_SESSION_TYPE").eq_ignore_ascii_case("wayland")
+                && let Some(candidate) = linux_desktop_scale_candidate()
+                && candidate > 1.0
+            {
+                return candidate;
+            } else {
+                return screen_scale;
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            screen_scale
+        }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_desktop_scale_candidate() -> Option<f32> {
+    *LINUX_DESKTOP_SCALE_CANDIDATE.get_or_init(|| {
+        let scales = gnome_monitors_xml_scales();
+        scales
+            .into_iter()
+            .filter(|scale| scale.is_finite() && *scale > 1.0)
+            .max_by(|a, b| a.total_cmp(b))
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn gnome_monitors_xml_scales() -> Vec<f32> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let path = PathBuf::from(home).join(".config/monitors.xml");
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut scales = Vec::new();
+    let mut rest = contents.as_str();
+    while let Some(start) = rest.find("<scale>") {
+        rest = &rest[start + "<scale>".len()..];
+        let Some(end) = rest.find("</scale>") else {
+            break;
+        };
+        let value = rest[..end].trim();
+        if let Ok(scale) = value.parse::<f32>() {
+            scales.push(scale);
+        }
+        rest = &rest[end + "</scale>".len()..];
+    }
+    scales
+}
+
+#[cfg(target_os = "linux")]
+fn env_or_empty(name: &str) -> String {
+    std::env::var(name).unwrap_or_default()
 }
 
 fn get_dylib_path_checked() -> CefResult<PathBuf> {
