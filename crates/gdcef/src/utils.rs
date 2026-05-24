@@ -66,6 +66,9 @@ fn linux_desktop_scale_candidate() -> Option<f32> {
 
 #[cfg(target_os = "linux")]
 fn gnome_monitors_xml_scales() -> Vec<f32> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
     let Some(home) = std::env::var_os("HOME") else {
         return Vec::new();
     };
@@ -73,18 +76,30 @@ fn gnome_monitors_xml_scales() -> Vec<f32> {
     let Ok(contents) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
+    let mut reader = Reader::from_str(&contents);
+    reader.config_mut().trim_text(true);
+
     let mut scales = Vec::new();
-    let mut rest = contents.as_str();
-    while let Some(start) = rest.find("<scale>") {
-        rest = &rest[start + "<scale>".len()..];
-        let Some(end) = rest.find("</scale>") else {
-            break;
-        };
-        let value = rest[..end].trim();
-        if let Ok(scale) = value.parse::<f32>() {
-            scales.push(scale);
+    let mut in_scale = false;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(element)) if element.name().as_ref() == b"scale" => {
+                in_scale = true;
+            }
+            Ok(Event::End(element)) if element.name().as_ref() == b"scale" => {
+                in_scale = false;
+            }
+            Ok(Event::Text(text)) if in_scale => {
+                if let Ok(value) = text.decode()
+                    && let Ok(scale) = value.parse::<f32>()
+                {
+                    scales.push(scale);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => return Vec::new(),
+            _ => {}
         }
-        rest = &rest[end + "</scale>".len()..];
     }
     scales
 }

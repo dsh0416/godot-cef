@@ -54,6 +54,7 @@ url = "2"
 percent-encoding = "2"
 adblock = "0.12"
 ciborium = "0.2"
+quick-xml = "0.39"
 
 [workspace.lints.rust]
 unconditional_panic = "deny"

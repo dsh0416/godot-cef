@@ -44,6 +44,7 @@ retour = { workspace = true }
 ash = { workspace = true }
 libloading = { workspace = true }
 libc = { workspace = true }
+quick-xml = { workspace = true }
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
 retour = { workspace = true }

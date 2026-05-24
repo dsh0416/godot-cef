@@ -774,6 +774,7 @@ dependencies = [
  "objc2-metal",
  "percent-encoding",
  "process_path",
+ "quick-xml",
  "retour",
  "software_render",
  "url",
