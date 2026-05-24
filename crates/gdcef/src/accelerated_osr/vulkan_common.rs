@@ -40,6 +40,7 @@ macro_rules! impl_vulkan_common_methods {
                     ash::vk::PFN_vkBindImageMemory
                 ),
                 create_image: load_device_fn!("vkCreateImage", ash::vk::PFN_vkCreateImage),
+                #[cfg(target_os = "linux")]
                 get_image_memory_requirements: load_device_fn!(
                     "vkGetImageMemoryRequirements",
                     ash::vk::PFN_vkGetImageMemoryRequirements
