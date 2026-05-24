@@ -4,6 +4,7 @@ use godot::classes::Os;
 use godot::{classes::DisplayServer, obj::Singleton};
 use process_path::get_dylib_path;
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
 use std::sync::OnceLock;
 
 #[cfg(target_os = "linux")]
