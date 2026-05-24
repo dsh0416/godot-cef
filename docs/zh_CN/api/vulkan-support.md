@@ -43,6 +43,47 @@ CEF 中的 GPU 加速离屏渲染（OSR）需要在 CEF 渲染器进程和宿主
 - `VK_KHR_external_memory_fd` — 基于文件描述符的共享
 - `VK_EXT_external_memory_dma_buf` — DMA-BUF 共享用于零拷贝传输
 
+### Linux NVIDIA 驱动要求
+
+:::: warning
+在使用 NVIDIA 专有驱动的 Linux 系统上，DMA-BUF 加速渲染需要通过 `nvidia-drm.modeset=1` 内核参数启用 DRM 内核模式设置。
+::::
+
+如果没有 `nvidia-drm.modeset=1`，NVIDIA 驱动可能不会暴露 CEF 与 Godot 之间零拷贝纹理共享所需的 DMA-BUF 路径。请通过发行版的引导加载器或 modprobe 配置设置该内核参数，然后重启再使用加速 OSR。
+
+对于基于 GRUB 的系统，编辑 `/etc/default/grub`，并将 `nvidia-drm.modeset=1` 添加到内核命令行：
+
+```bash
+sudo "${EDITOR:-nano}" /etc/default/grub
+```
+
+例如：
+
+```ini
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash nvidia-drm.modeset=1"
+```
+
+请保留引号中已有的内核参数，并用空格追加 `nvidia-drm.modeset=1`。然后重新生成 GRUB 配置：
+
+```bash
+# Debian/Ubuntu
+sudo update-grub
+
+# Fedora/RHEL
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+
+# Arch Linux
+sudo grub-mkconfig -o /boot/grub/grub.cfg
+```
+
+更新 GRUB 后需要重启。可以用以下命令确认 NVIDIA DRM modeset 状态：
+
+```bash
+cat /sys/module/nvidia_drm/parameters/modeset
+```
+
+期望输出为 `Y`。如果您的系统使用 systemd-boot 或 rEFInd 等其他引导加载器，请改为将 `nvidia-drm.modeset=1` 添加到对应引导加载器的内核命令行中。
+
 ## 多 GPU 支持
 
 在具有多个 GPU 的系统上（例如笔记本电脑的集成显卡 + 独立显卡），**CEF 必须使用与 Godot 相同的 GPU** 才能使纹理共享工作。这通过传递给 CEF 子进程的命令行开关（`--gpu-vendor-id` 和 `--gpu-device-id`）处理。

@@ -43,6 +43,47 @@ Since Godot doesn't provide an API to request additional Vulkan extensions durin
 - `VK_KHR_external_memory_fd` — File descriptor based sharing
 - `VK_EXT_external_memory_dma_buf` — DMA-BUF sharing for zero-copy transfers
 
+### Linux NVIDIA Driver Requirement
+
+:::: warning
+On Linux systems using NVIDIA proprietary drivers, DMA-BUF accelerated rendering requires DRM kernel mode setting to be enabled with the `nvidia-drm.modeset=1` kernel parameter.
+::::
+
+Without `nvidia-drm.modeset=1`, the NVIDIA driver may not expose the DMA-BUF path needed for zero-copy texture sharing between CEF and Godot. Configure this kernel parameter through your distribution's bootloader or modprobe configuration, then reboot before using accelerated OSR.
+
+For GRUB-based systems, edit `/etc/default/grub` and add `nvidia-drm.modeset=1` to the kernel command line:
+
+```bash
+sudo "${EDITOR:-nano}" /etc/default/grub
+```
+
+For example:
+
+```ini
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash nvidia-drm.modeset=1"
+```
+
+Keep any existing kernel parameters in the quoted value and append `nvidia-drm.modeset=1` separated by a space. Then regenerate the GRUB configuration:
+
+```bash
+# Debian/Ubuntu
+sudo update-grub
+
+# Fedora/RHEL
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+
+# Arch Linux
+sudo grub-mkconfig -o /boot/grub/grub.cfg
+```
+
+Reboot after updating GRUB. You can verify the NVIDIA DRM modeset state with:
+
+```bash
+cat /sys/module/nvidia_drm/parameters/modeset
+```
+
+The expected output is `Y`. If your system uses another bootloader, such as systemd-boot or rEFInd, add `nvidia-drm.modeset=1` to that bootloader's kernel command line instead.
+
 ## Multi-GPU Support
 
 On systems with multiple GPUs (e.g., laptops with integrated + discrete graphics), **CEF must use the same GPU as Godot** for texture sharing to work. This is handled via command-line switches (`--gpu-vendor-id` and `--gpu-device-id`) passed to CEF subprocesses.

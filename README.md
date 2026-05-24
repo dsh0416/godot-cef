@@ -103,7 +103,7 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 
 1. **Windows DirectX 12**: Requires at least Godot 4.6 beta 2. Godot 4.5.1 contains a bug where `RenderingDevice.get_driver_resource` on DirectX 12 textures always returns 0.
 
-2. **Vulkan Backends**: See [#4](https://github.com/dsh0416/godot-cef/issues/4) for details. On Windows and Linux, we use hooking to inject extensions for GPU-accelerated rendering (x86_64 only). This is a workaround until [godotengine/godot-proposals#13969](https://github.com/godotengine/godot-proposals/issues/13969) is resolved.
+2. **Vulkan Backends**: See [#4](https://github.com/dsh0416/godot-cef/issues/4) for details. On Windows and Linux, we use hooking to inject extensions for GPU-accelerated rendering (x86_64 only). This is a workaround until [godotengine/godot-proposals#13969](https://github.com/godotengine/godot-proposals/issues/13969) is resolved. On Linux with NVIDIA proprietary drivers, DMA-BUF acceleration requires the `nvidia-drm.modeset=1` kernel parameter; see the [Vulkan support guide](https://godotcef.org/api/vulkan-support.html#linux-nvidia-driver-requirement) for GRUB setup steps.
 
 3. **Software Rendering**: On platforms where accelerated rendering is not yet implemented, the extension automatically falls back to software rendering using CPU-based frame buffers.
 
