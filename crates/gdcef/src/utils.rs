@@ -47,7 +47,7 @@ pub fn get_display_scale_factor() -> f32 {
 
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
-        display_server.screen_get_scale();
+        display_server.screen_get_scale()
     }
 }
 
