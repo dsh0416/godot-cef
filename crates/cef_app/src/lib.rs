@@ -12,6 +12,8 @@ pub use loader::{load_cef_framework_from_path, load_sandbox_from_path};
 pub use render_handler::OsrRenderHandler;
 pub use types::{CursorType, FrameBuffer, PhysicalSize, PopupRect, PopupState};
 
+pub const GDCEF_PARENT_PID_SWITCH: &str = "gdcef-parent-pid";
+
 use crate::browser_process::{BrowserProcessHandlerBuilder, OsrBrowserProcessHandler};
 use crate::render_process::{OsrRenderProcessHandler, RenderProcessHandlerBuilder};
 use cef::{self, App, ImplApp, ImplCommandLine, ImplSchemeRegistrar, WrapApp, rc::Rc, wrap_app};

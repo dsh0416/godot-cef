@@ -5,6 +5,7 @@ use cef::{
     WrapBrowserProcessHandler, rc::Rc, wrap_browser_process_handler,
 };
 
+use crate::GDCEF_PARENT_PID_SWITCH;
 use crate::app::{GpuDeviceIds, SecurityConfig};
 
 #[derive(Clone)]
@@ -59,6 +60,11 @@ wrap_browser_process_handler! {
 
             command_line.append_switch(Some(&"disable-session-crashed-bubble".into()));
             command_line.append_switch(Some(&"enable-logging=stderr".into()));
+            let parent_pid = std::process::id().to_string();
+            command_line.append_switch_with_value(
+                Some(&GDCEF_PARENT_PID_SWITCH.into()),
+                Some(&parent_pid.as_str().into()),
+            );
 
             if let Some(ids) = &self.handler.gpu_device_ids {
                 command_line.append_switch_with_value(
