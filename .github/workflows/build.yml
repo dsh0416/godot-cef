@@ -184,8 +184,78 @@ jobs:
           path: artifacts/${{ matrix.target }}
           retention-days: 30
 
+  build-android:
+    runs-on: ubuntu-latest
+    name: Android
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: android-build-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            android-build-cargo-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: android-build-gradle-${{ hashFiles('android/**/*.gradle.kts', 'mise.toml') }}
+          restore-keys: |
+            android-build-gradle-
+
+      - name: Build Android Rust libraries
+        run: mise exec -- mise run android:build-rust
+
+      - name: Build Android WebView bridge
+        run: mise exec -- mise run android:kotlin
+
+      - name: Prepare Android artifacts
+        run: |
+          CARGO_TARGET_DIR="$(cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+          mkdir -p artifacts/aarch64-linux-android artifacts/x86_64-linux-android artifacts/android-webview
+          cp "$CARGO_TARGET_DIR/aarch64-linux-android/release/libgdcef.so" artifacts/aarch64-linux-android/
+          cp "$CARGO_TARGET_DIR/x86_64-linux-android/release/libgdcef.so" artifacts/x86_64-linux-android/
+          cp android/godot-cef-webview/build/outputs/aar/godot-cef-webview-debug.aar artifacts/android-webview/
+
+      - name: Upload Android ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdcef-aarch64-linux-android
+          path: artifacts/aarch64-linux-android
+          retention-days: 30
+
+      - name: Upload Android x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdcef-x86_64-linux-android
+          path: artifacts/x86_64-linux-android
+          retention-days: 30
+
+      - name: Upload Android WebView bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdcef-android-webview
+          path: artifacts/android-webview
+          retention-days: 30
+
   pack:
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux, build-android]
     runs-on: ubuntu-latest
     name: Pack Addon
 

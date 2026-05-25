@@ -9,10 +9,13 @@ linux.arm64    = "bin/aarch64-unknown-linux-gnu/libgdcef.so"
 macos          = "bin/universal-apple-darwin/Godot CEF.framework"
 windows.x86_64 = "bin/x86_64-pc-windows-msvc/gdcef.dll"
 windows.arm64  = "bin/aarch64-pc-windows-msvc/gdcef.dll"
+android.arm64  = "bin/aarch64-linux-android/libgdcef.so"
+android.x86_64 = "bin/x86_64-linux-android/libgdcef.so"
 
 [icons]
 CefTexture = "icons/webview.png"
 CefIpcInspector = "icons/webview.png"
+AndroidWebViewTexture = "icons/webview.png"
 
 [dependencies]
 

@@ -4,5 +4,9 @@ target/
 node_modules/
 addons/godot_cef/bin/
 
+android/.gradle/
+android/**/build/
+android/local.properties
+
 .DS_Store
 .envrc

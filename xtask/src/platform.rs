@@ -18,10 +18,13 @@ pub const WINDOWS_X64_TARGET: &str = "x86_64-pc-windows-msvc";
 pub const WINDOWS_ARM64_TARGET: &str = "aarch64-pc-windows-msvc";
 pub const LINUX_X64_TARGET: &str = "x86_64-unknown-linux-gnu";
 pub const LINUX_ARM64_TARGET: &str = "aarch64-unknown-linux-gnu";
+pub const ANDROID_ARM64_TARGET: &str = "aarch64-linux-android";
+pub const ANDROID_X64_TARGET: &str = "x86_64-linux-android";
 
 const MACOS_REQUIRED_FILES: &[&str] = &["Godot CEF.framework", "Godot CEF.app"];
 const WINDOWS_REQUIRED_FILES: &[&str] = &["gdcef.dll", "gdcef_helper.exe", "libcef.dll"];
 const LINUX_REQUIRED_FILES: &[&str] = &["libgdcef.so", "gdcef_helper", "libcef.so"];
+const ANDROID_REQUIRED_FILES: &[&str] = &["libgdcef.so"];
 const LOCALES_DIR: &[&str] = &["locales"];
 const NO_REQUIRED_DIRS: &[&str] = &[];
 
@@ -55,6 +58,18 @@ pub const PLATFORM_SPECS: &[PlatformSpec] = &[
         artifact_name: "gdcef-aarch64-unknown-linux-gnu",
         required_files: LINUX_REQUIRED_FILES,
         required_dirs: LOCALES_DIR,
+    },
+    PlatformSpec {
+        target: ANDROID_ARM64_TARGET,
+        artifact_name: "gdcef-aarch64-linux-android",
+        required_files: ANDROID_REQUIRED_FILES,
+        required_dirs: NO_REQUIRED_DIRS,
+    },
+    PlatformSpec {
+        target: ANDROID_X64_TARGET,
+        artifact_name: "gdcef-x86_64-linux-android",
+        required_files: ANDROID_REQUIRED_FILES,
+        required_dirs: NO_REQUIRED_DIRS,
     },
 ];
 

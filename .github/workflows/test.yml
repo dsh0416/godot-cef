@@ -151,6 +151,44 @@ jobs:
           RUSTC_WRAPPER: sccache
         run: mise exec -- cargo clippy --workspace --all-features --target ${{ matrix.target }} -- -D warnings
 
+  android:
+    runs-on: ubuntu-latest
+    name: Android
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup mise toolchain
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: android-test-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
+          restore-keys: |
+            android-test-cargo-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: android-test-gradle-${{ hashFiles('android/**/*.gradle.kts', 'mise.toml') }}
+          restore-keys: |
+            android-test-gradle-
+
+      - name: Check Android builds
+        run: mise exec -- mise run android:check
+
   fmt:
     runs-on: ubuntu-latest
     name: Format

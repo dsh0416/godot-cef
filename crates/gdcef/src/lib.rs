@@ -1,23 +1,13 @@
-mod accelerated_osr;
-mod browser;
-mod cef_init;
-mod cef_ipc_inspector;
-mod cef_texture;
-mod cef_texture2d;
-mod compat;
-mod cookie;
-mod cursor;
-mod drag;
-mod error;
-mod godot_protocol;
-mod input;
-mod ipc_data;
-mod render;
-mod settings;
-mod utils;
-mod vulkan_hook;
-mod webrender;
-mod webrender_ipc;
+#[cfg(not(target_os = "android"))]
+mod desktop;
+mod mobile_webview;
+
+#[cfg(not(target_os = "android"))]
+pub(crate) use desktop::{
+    accelerated_osr, browser, cef_init, cef_ipc_inspector, cef_texture, cef_texture2d, compat,
+    cookie, cursor, drag, error, godot_protocol, input, ipc_data, render, settings, utils,
+    webrender, webrender_ipc,
+};
 
 use godot::init::*;
 
@@ -26,29 +16,19 @@ struct GodotCef;
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotCef {
     fn on_stage_init(level: InitStage) {
-        match level {
-            InitStage::Core => {
-                // Install Vulkan hook at the Core stage, BEFORE RenderingServer is created.
-                // This allows us to inject platform-specific external memory extensions
-                // (e.g., VK_KHR_external_memory_win32 and related Win32 external memory extensions) into Godot's Vulkan device.
-                vulkan_hook::install_vulkan_hook();
+        #[cfg(not(target_os = "android"))]
+        desktop::on_stage_init(level);
 
-                if let Err(e) = utils::ensure_executable_permissions() {
-                    godot::global::godot_warn!(
-                        "[GodotCef] Failed to set executable permissions: {}",
-                        e
-                    );
-                }
-            }
-            InitStage::Scene => {
-                settings::register_project_settings();
-            }
-            _ => {}
-        }
+        #[cfg(target_os = "android")]
+        let _ = level;
     }
 }
 
 // Re-export CefTexture for convenience
+#[cfg(not(target_os = "android"))]
 pub use cef_ipc_inspector::CefIpcInspector;
+#[cfg(not(target_os = "android"))]
 pub use cef_texture::CefTexture;
+#[cfg(not(target_os = "android"))]
 pub use cef_texture2d::CefTexture2D;
+pub use mobile_webview::AndroidWebViewTexture;

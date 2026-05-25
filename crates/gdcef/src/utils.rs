@@ -2,6 +2,7 @@ use crate::error::{CefError, CefResult};
 use godot::classes::Engine;
 use godot::classes::Os;
 use godot::{classes::DisplayServer, obj::Singleton};
+#[cfg(not(target_os = "android"))]
 use process_path::get_dylib_path;
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
@@ -192,10 +193,12 @@ fn env_or_empty(name: &str) -> String {
     std::env::var(name).unwrap_or_default()
 }
 
+#[cfg(not(target_os = "android"))]
 fn get_dylib_path_checked() -> CefResult<PathBuf> {
     get_dylib_path().ok_or_else(|| CefError::ResourceNotFound("dylib path".to_string()))
 }
 
+#[cfg(not(target_os = "android"))]
 fn get_dylib_dir() -> CefResult<PathBuf> {
     let dylib_path = get_dylib_path_checked()?;
     dylib_path
@@ -276,7 +279,14 @@ pub fn get_subprocess_path() -> CefResult<PathBuf> {
         .map_err(CefError::from)
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "android")]
+pub fn get_subprocess_path() -> CefResult<PathBuf> {
+    Err(CefError::ResourceNotFound(
+        "CEF subprocess is not available on Android".to_string(),
+    ))
+}
+
+#[cfg(all(unix, not(target_os = "android")))]
 pub fn ensure_executable_permissions() -> CefResult<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -322,12 +332,12 @@ pub fn ensure_executable_permissions() -> CefResult<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(any(not(unix), target_os = "android"))]
 pub fn ensure_executable_permissions() -> CefResult<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 fn get_executable_paths() -> CefResult<Vec<PathBuf>> {
     let mut paths = Vec::new();
 
