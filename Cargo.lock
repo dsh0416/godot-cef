@@ -302,9 +302,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "148.1.0+147.0.14"
+version = "148.2.0+148.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f69f182b13a846048af7eb44b231c36ce316b2823ad0455e947f9ba955b2984f"
+checksum = "89442ad338365f6a9a32f5595a734860921133a9aad6f9adb0af5624a9121597"
 dependencies = [
  "anyhow",
  "ash",
@@ -330,9 +330,9 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "148.1.0+147.0.14"
+version = "148.2.0+148.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e528ba9dfc0c7a28c820a6bb3f7c80611eaaa11e6b4f8d13913b2c527edf559d"
+checksum = "22c85e020ec1e6fc257ef1f089a2fc3ada82ec87de52684e3eaac480bb0bdec5"
 dependencies = [
  "anyhow",
  "cmake",
@@ -774,7 +774,7 @@ dependencies = [
  "objc2-metal",
  "percent-encoding",
  "process_path",
- "quick-xml",
+ "quick-xml 0.40.1",
  "retour",
  "software_render",
  "url",
@@ -1600,7 +1600,7 @@ checksum = "092791278e026273c1b65bbdcfbba3a300f2994c896bd01ab01da613c29c46f1"
 dependencies = [
  "base64",
  "indexmap",
- "quick-xml",
+ "quick-xml 0.39.4",
  "serde",
  "time",
 ]
@@ -1720,6 +1720,15 @@ name = "quick-xml"
 version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.40.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2474bd2e5029e7ccb6abb2ba48cf2383a333851dedf495901544281590c7da7f"
 dependencies = [
  "memchr",
 ]
