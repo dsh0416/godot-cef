@@ -17,7 +17,6 @@ static LINUX_DESKTOP_SCALE_CANDIDATE: OnceLock<Option<f32>> = OnceLock::new();
 /// and high-DPI displays. A value of `1.0` means "no scaling".
 pub fn get_display_scale_factor() -> f32 {
     let display_server = DisplayServer::singleton();
-    let screen_scale = display_server.screen_get_scale();
 
     // NOTE: `display_server.screen_get_scale` is implemented on Android, iOS,
     // Web, macOS, and Linux (Wayland). On Windows, this method always returns
@@ -32,25 +31,23 @@ pub fn get_display_scale_factor() -> f32 {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     {
-        #[cfg(target_os = "linux")]
+        let screen_scale = display_server.screen_get_scale();
+        if screen_scale <= 1.0
+            && env_or_empty("XDG_SESSION_TYPE").eq_ignore_ascii_case("wayland")
+            && let Some(candidate) = linux_desktop_scale_candidate()
+            && candidate > 1.0
         {
-            if screen_scale <= 1.0
-                && env_or_empty("XDG_SESSION_TYPE").eq_ignore_ascii_case("wayland")
-                && let Some(candidate) = linux_desktop_scale_candidate()
-                && candidate > 1.0
-            {
-                candidate
-            } else {
-                screen_scale
-            }
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        {
+            candidate
+        } else {
             screen_scale
         }
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        display_server.screen_get_scale();
     }
 }
 
