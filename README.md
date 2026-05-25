@@ -187,7 +187,7 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
    export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
    ```
 
-   `CEF_VERSION` is pinned in `mise.toml` to the CEF runtime build version from the resolved `cef` / `cef-dll-sys` crate in `Cargo.lock`. For example, crate version `148.1.0+147.0.14` uses CEF runtime `147.0.14`.
+   `CEF_VERSION` is pinned in `mise.toml` to the CEF runtime build version from the resolved `cef` / `cef-dll-sys` crate in `Cargo.lock`. For example, crate version `148.2.0+148.0.8` uses CEF runtime `148.0.8`.
 
 4. **Build**:
    ```bash
