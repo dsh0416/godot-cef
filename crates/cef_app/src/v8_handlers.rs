@@ -1,12 +1,11 @@
 use ciborium::value::Value as CborValue;
 use std::sync::{Arc, Mutex};
-use std::{cell::RefCell, rc::Rc as StdRc};
 
 use cef::{
     self, CefStringUtf16, Frame, ImplFrame, ImplListValue, ImplProcessMessage, ImplV8Handler,
     ImplV8Value, ProcessId, V8Handler, V8Value, WrapV8Handler, binary_value_create,
-    process_message_create, rc::Rc, v8_value_create_bool, v8_value_create_function,
-    v8_value_create_object, wrap_v8_handler,
+    process_message_create, rc::Rc, v8_value_create_array, v8_value_create_bool,
+    v8_value_create_function, v8_value_create_object, wrap_v8_handler,
 };
 
 use crate::ipc_contract::{
@@ -186,62 +185,7 @@ wrap_v8_handler! {
     }
 }
 
-type ListenerCallbacks = StdRc<RefCell<Vec<V8Value>>>;
-
-#[derive(Clone)]
-pub(crate) struct IpcListenerSet {
-    callbacks: ListenerCallbacks,
-}
-
-impl IpcListenerSet {
-    pub fn new() -> Self {
-        Self {
-            callbacks: StdRc::new(RefCell::new(Vec::new())),
-        }
-    }
-
-    pub fn emit(&self, value: &V8Value) {
-        // Drop invalid/non-function callbacks first so stale V8 references
-        // do not accumulate across context lifetimes.
-        {
-            let mut callbacks = self.callbacks.borrow_mut();
-            callbacks.retain(|callback| callback.is_valid() != 0 && callback.is_function() != 0);
-        }
-
-        // Snapshot before invoking callbacks to avoid RefCell re-entrancy
-        // if listeners are added/removed while a callback is running.
-        let callbacks_snapshot = self.callbacks.borrow().clone();
-        for callback in callbacks_snapshot {
-            let _ = callback.execute_function(None, Some(&[Some(value.clone())]));
-        }
-    }
-
-    pub fn clear(&self) {
-        self.callbacks.borrow_mut().clear();
-    }
-
-    pub fn build_api_object(&self) -> Option<V8Value> {
-        let object = v8_value_create_object(None, None)?;
-
-        const LISTENER_OPS: &[(&str, ListenerOperation)] = &[
-            ("addListener", ListenerOperation::Add),
-            ("removeListener", ListenerOperation::Remove),
-            ("hasListener", ListenerOperation::Has),
-        ];
-
-        for &(name, op) in LISTENER_OPS {
-            let mut handler = OsrListenerHandlerBuilder::build(OsrListenerHandler::new(
-                self.callbacks.clone(),
-                op,
-            ));
-            let key: CefStringUtf16 = name.into();
-            let mut func = v8_value_create_function(Some(&key), Some(&mut handler))?;
-            object.set_value_bykey(Some(&key), Some(&mut func), v8_prop_default());
-        }
-
-        Some(object)
-    }
-}
+const LISTENER_CALLBACKS_KEY: &str = "__godotCefListenerCallbacks";
 
 #[derive(Clone, Copy)]
 enum ListenerOperation {
@@ -252,13 +196,12 @@ enum ListenerOperation {
 
 #[derive(Clone)]
 pub(crate) struct OsrListenerHandler {
-    callbacks: ListenerCallbacks,
     op: ListenerOperation,
 }
 
 impl OsrListenerHandler {
-    fn new(callbacks: ListenerCallbacks, op: ListenerOperation) -> Self {
-        Self { callbacks, op }
+    fn new(op: ListenerOperation) -> Self {
+        Self { op }
     }
 }
 
@@ -273,41 +216,22 @@ wrap_v8_handler! {
         fn execute(
             &self,
             _name: Option<&CefStringUtf16>,
-            _object: Option<&mut V8Value>,
+            object: Option<&mut V8Value>,
             arguments: Option<&[Option<V8Value>]>,
             retval: Option<&mut Option<cef::V8Value>>,
             _exception: Option<&mut CefStringUtf16>
         ) -> i32 {
             let mut result = false;
-            if let Some(arguments) = arguments
+            if let Some(object) = object
+                && let Some(arguments) = arguments
                 && let Some(Some(arg)) = arguments.first()
                 && arg.is_function() != 0
             {
-                let mut callbacks = self.handler.callbacks.borrow_mut();
-                match self.handler.op {
-                    ListenerOperation::Add => {
-                        if !callbacks.iter().any(|existing| {
-                            let mut cb = arg.clone();
-                            existing.is_same(Some(&mut cb)) != 0
-                        }) {
-                            callbacks.push(arg.clone());
-                        }
-                        result = true;
-                    }
-                    ListenerOperation::Remove => {
-                        callbacks.retain(|existing| {
-                            let mut cb = arg.clone();
-                            existing.is_same(Some(&mut cb)) == 0
-                        });
-                        result = true;
-                    }
-                    ListenerOperation::Has => {
-                        result = callbacks.iter().any(|existing| {
-                            let mut cb = arg.clone();
-                            existing.is_same(Some(&mut cb)) != 0
-                        });
-                    }
-                }
+                result = match self.handler.op {
+                    ListenerOperation::Add => add_ipc_listener(object, arg),
+                    ListenerOperation::Remove => remove_ipc_listener(object, arg),
+                    ListenerOperation::Has => has_ipc_listener(object, arg),
+                };
             }
 
             if let Some(retval) = retval {
@@ -316,6 +240,126 @@ wrap_v8_handler! {
             1
         }
     }
+}
+
+pub(crate) fn build_ipc_listener_object() -> Option<V8Value> {
+    let object = v8_value_create_object(None, None)?;
+    let mut callbacks = v8_value_create_array(0)?;
+    let callbacks_key: CefStringUtf16 = LISTENER_CALLBACKS_KEY.into();
+    object.set_value_bykey(
+        Some(&callbacks_key),
+        Some(&mut callbacks),
+        v8_prop_default(),
+    );
+
+    const LISTENER_OPS: &[(&str, ListenerOperation)] = &[
+        ("addListener", ListenerOperation::Add),
+        ("removeListener", ListenerOperation::Remove),
+        ("hasListener", ListenerOperation::Has),
+    ];
+
+    for &(name, op) in LISTENER_OPS {
+        let mut handler = OsrListenerHandlerBuilder::build(OsrListenerHandler::new(op));
+        let key: CefStringUtf16 = name.into();
+        let mut func = v8_value_create_function(Some(&key), Some(&mut handler))?;
+        object.set_value_bykey(Some(&key), Some(&mut func), v8_prop_default());
+    }
+
+    Some(object)
+}
+
+pub(crate) fn emit_ipc_listener(
+    listener_api: &mut V8Value,
+    receiver: &mut V8Value,
+    value: &V8Value,
+) {
+    let Some(callbacks) = listener_callbacks(listener_api) else {
+        return;
+    };
+
+    let callbacks = collect_listener_callbacks(&callbacks);
+    for callback in callbacks {
+        callback.execute_function(Some(&mut *receiver), Some(&[Some(value.clone())]));
+    }
+}
+
+fn listener_callbacks(object: &V8Value) -> Option<V8Value> {
+    let callbacks_key: CefStringUtf16 = LISTENER_CALLBACKS_KEY.into();
+    object.value_bykey(Some(&callbacks_key))
+}
+
+fn collect_listener_callbacks(callbacks: &V8Value) -> Vec<V8Value> {
+    let len = callbacks.array_length();
+    let mut snapshot = Vec::with_capacity(len.max(0) as usize);
+    for index in 0..len {
+        if let Some(callback) = callbacks.value_byindex(index)
+            && callback.is_valid() != 0
+            && callback.is_function() != 0
+        {
+            snapshot.push(callback);
+        }
+    }
+    snapshot
+}
+
+fn add_ipc_listener(object: &V8Value, callback: &V8Value) -> bool {
+    let Some(callbacks) = listener_callbacks(object) else {
+        return false;
+    };
+    if has_listener_in_callbacks(&callbacks, callback) {
+        return true;
+    }
+
+    let mut callback = callback.clone();
+    callbacks.set_value_byindex(callbacks.array_length(), Some(&mut callback)) != 0
+}
+
+fn remove_ipc_listener(object: &V8Value, callback: &V8Value) -> bool {
+    let Some(callbacks) = listener_callbacks(object) else {
+        return false;
+    };
+
+    let Some(mut replacement) = v8_value_create_array(0) else {
+        return false;
+    };
+    let mut write_index = 0;
+    for index in 0..callbacks.array_length() {
+        let Some(mut existing) = callbacks.value_byindex(index) else {
+            continue;
+        };
+        let mut callback = callback.clone();
+        if existing.is_same(Some(&mut callback)) != 0 {
+            continue;
+        }
+
+        replacement.set_value_byindex(write_index, Some(&mut existing));
+        write_index += 1;
+    }
+
+    let callbacks_key: CefStringUtf16 = LISTENER_CALLBACKS_KEY.into();
+    object.set_value_bykey(
+        Some(&callbacks_key),
+        Some(&mut replacement),
+        v8_prop_default(),
+    ) != 0
+}
+
+fn has_ipc_listener(object: &V8Value, callback: &V8Value) -> bool {
+    listener_callbacks(object)
+        .map(|callbacks| has_listener_in_callbacks(&callbacks, callback))
+        .unwrap_or(false)
+}
+
+fn has_listener_in_callbacks(callbacks: &V8Value, callback: &V8Value) -> bool {
+    for index in 0..callbacks.array_length() {
+        if let Some(existing) = callbacks.value_byindex(index) {
+            let mut callback = callback.clone();
+            if existing.is_same(Some(&mut callback)) != 0 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 impl_handler_build!(OsrIpcBinaryHandlerBuilder, OsrIpcBinaryHandler => V8Handler);

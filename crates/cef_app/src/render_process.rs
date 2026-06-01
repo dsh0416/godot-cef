@@ -16,9 +16,9 @@ use crate::ipc_contract::{
     ROUTE_IPC_DATA_GODOT_TO_RENDERER, ROUTE_IPC_GODOT_TO_RENDERER, ROUTE_TRIGGER_IME,
 };
 use crate::v8_handlers::{
-    IpcListenerSet, OsrImeCaretHandler, OsrImeCaretHandlerBuilder, OsrIpcBinaryHandler,
-    OsrIpcBinaryHandlerBuilder, OsrIpcDataHandler, OsrIpcDataHandlerBuilder, OsrIpcHandler,
-    OsrIpcHandlerBuilder, cbor_bytes_to_v8_value, v8_prop_default,
+    OsrImeCaretHandler, OsrImeCaretHandlerBuilder, OsrIpcBinaryHandler, OsrIpcBinaryHandlerBuilder,
+    OsrIpcDataHandler, OsrIpcDataHandlerBuilder, OsrIpcHandler, OsrIpcHandlerBuilder,
+    build_ipc_listener_object, cbor_bytes_to_v8_value, emit_ipc_listener, v8_prop_default,
 };
 
 fn send_browser_bool_message(frame: Option<&mut Frame>, route: &str, value: bool) {
@@ -78,19 +78,11 @@ fn eval_preload_script(context: &mut V8Context, script: &str) {
 }
 
 #[derive(Clone)]
-pub(crate) struct OsrRenderProcessHandler {
-    string_listeners: IpcListenerSet,
-    binary_listeners: IpcListenerSet,
-    data_listeners: IpcListenerSet,
-}
+pub(crate) struct OsrRenderProcessHandler;
 
 impl OsrRenderProcessHandler {
     pub fn new() -> Self {
-        Self {
-            string_listeners: IpcListenerSet::new(),
-            binary_listeners: IpcListenerSet::new(),
-            data_listeners: IpcListenerSet::new(),
-        }
+        Self
     }
 }
 
@@ -142,7 +134,6 @@ wrap_render_process_handler! {
             let Some(frame) = frame else {
                 return;
             };
-
             let frame_arc = Arc::new(Mutex::new(frame.clone()));
 
             register_v8_function(&global, "sendIpcMessage",
@@ -152,12 +143,8 @@ wrap_render_process_handler! {
             register_v8_function(&global, "sendIpcData",
                 &mut OsrIpcDataHandlerBuilder::build(OsrIpcDataHandler::new(Some(frame_arc.clone()))));
 
-            for (name, listeners) in [
-                ("ipcMessage", &self.handler.string_listeners),
-                ("ipcBinaryMessage", &self.handler.binary_listeners),
-                ("ipcDataMessage", &self.handler.data_listeners),
-            ] {
-                if let Some(mut obj) = listeners.build_api_object() {
+            for name in ["ipcMessage", "ipcBinaryMessage", "ipcDataMessage"] {
+                if let Some(mut obj) = build_ipc_listener_object() {
                     register_v8_value(&global, name, &mut obj);
                 }
             }
@@ -197,19 +184,6 @@ wrap_render_process_handler! {
             }
         }
 
-        fn on_context_released(
-            &self,
-            _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
-            _context: Option<&mut V8Context>,
-        ) {
-            // Listener callbacks hold V8 function references. Clear them when
-            // a V8 context is released so we don't retain stale callbacks.
-            self.handler.string_listeners.clear();
-            self.handler.binary_listeners.clear();
-            self.handler.data_listeners.clear();
-        }
-
         fn on_focused_node_changed(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, node: Option<&mut Domnode>) {
             if let Some(node) = node
                 && node.is_editable() == 1 {
@@ -247,7 +221,7 @@ wrap_render_process_handler! {
                     {
                         let msg_cef = args.string(0);
                         let msg_str = CefStringUtf16::from(&msg_cef);
-                        invoke_js_callback(frame, "onIpcMessage", Some(&self.handler.string_listeners), |_| {
+                        invoke_js_callback(frame, "onIpcMessage", "ipcMessage", |_| {
                             v8_value_create_string(Some(&msg_str))
                         });
                     }
@@ -257,7 +231,7 @@ wrap_render_process_handler! {
                     if let Some(buffer) = extract_binary_payload(message)
                         && let Some(frame) = frame
                     {
-                        invoke_js_callback(frame, "onIpcBinaryMessage", Some(&self.handler.binary_listeners), |_| {
+                        invoke_js_callback(frame, "onIpcBinaryMessage", "ipcBinaryMessage", |_| {
                             let mut copy = buffer.clone();
                             v8_value_create_array_buffer_with_copy(copy.as_mut_ptr(), copy.len())
                         });
@@ -268,7 +242,7 @@ wrap_render_process_handler! {
                     if let Some(buffer) = extract_binary_payload(message)
                         && let Some(frame) = frame
                     {
-                        invoke_js_callback(frame, "onIpcDataMessage", Some(&self.handler.data_listeners), |_| {
+                        invoke_js_callback(frame, "onIpcDataMessage", "ipcDataMessage", |_| {
                             cbor_bytes_to_v8_value(&buffer).ok()
                         });
                     }
@@ -315,7 +289,7 @@ fn extract_binary_payload(message: &mut ProcessMessage) -> Option<Vec<u8>> {
 fn invoke_js_callback(
     frame: &mut Frame,
     callback_name: &str,
-    listeners: Option<&IpcListenerSet>,
+    listener_api_name: &str,
     create_value: impl FnOnce(&mut V8Value) -> Option<V8Value>,
 ) {
     if let Some(context) = frame.v8_context()
@@ -329,10 +303,11 @@ fn invoke_js_callback(
                 && callback.is_function() != 0
             {
                 let args = [Some(value.clone())];
-                let _ = callback.execute_function(Some(&mut global), Some(&args));
+                callback.execute_function(Some(&mut global), Some(&args));
             }
-            if let Some(listeners) = listeners {
-                listeners.emit(&value);
+            let listener_api_key: CefStringUtf16 = listener_api_name.into();
+            if let Some(mut listener_api) = global.value_bykey(Some(&listener_api_key)) {
+                emit_ipc_listener(&mut listener_api, &mut global, &value);
             }
         }
         context.exit();
