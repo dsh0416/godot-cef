@@ -57,6 +57,14 @@ pub(crate) fn v8_prop_default() -> cef::V8Propertyattribute {
     cef::V8Propertyattribute::from(cef::sys::cef_v8_propertyattribute_t(0))
 }
 
+fn v8_prop_listener_callbacks() -> cef::V8Propertyattribute {
+    cef::V8Propertyattribute::from(
+        cef::sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_READONLY
+            | cef::sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_DONTENUM
+            | cef::sys::cef_v8_propertyattribute_t::V8_PROPERTY_ATTRIBUTE_DONTDELETE,
+    )
+}
+
 fn send_process_message_to_browser<F>(
     frame: Option<&Arc<Mutex<Frame>>>,
     route: &str,
@@ -246,11 +254,14 @@ pub(crate) fn build_ipc_listener_object() -> Option<V8Value> {
     let object = v8_value_create_object(None, None)?;
     let mut callbacks = v8_value_create_array(0)?;
     let callbacks_key: CefStringUtf16 = LISTENER_CALLBACKS_KEY.into();
-    object.set_value_bykey(
+    if object.set_value_bykey(
         Some(&callbacks_key),
         Some(&mut callbacks),
-        v8_prop_default(),
-    );
+        v8_prop_listener_callbacks(),
+    ) == 0
+    {
+        return None;
+    }
 
     const LISTENER_OPS: &[(&str, ListenerOperation)] = &[
         ("addListener", ListenerOperation::Add),
@@ -262,7 +273,9 @@ pub(crate) fn build_ipc_listener_object() -> Option<V8Value> {
         let mut handler = OsrListenerHandlerBuilder::build(OsrListenerHandler::new(op));
         let key: CefStringUtf16 = name.into();
         let mut func = v8_value_create_function(Some(&key), Some(&mut handler))?;
-        object.set_value_bykey(Some(&key), Some(&mut func), v8_prop_default());
+        if object.set_value_bykey(Some(&key), Some(&mut func), v8_prop_default()) == 0 {
+            return None;
+        }
     }
 
     Some(object)
@@ -279,13 +292,14 @@ pub(crate) fn emit_ipc_listener(
 
     let callbacks = collect_listener_callbacks(&callbacks);
     for callback in callbacks {
-        callback.execute_function(Some(&mut *receiver), Some(&[Some(value.clone())]));
+        let _ = callback.execute_function(Some(&mut *receiver), Some(&[Some(value.clone())]));
     }
 }
 
 fn listener_callbacks(object: &V8Value) -> Option<V8Value> {
     let callbacks_key: CefStringUtf16 = LISTENER_CALLBACKS_KEY.into();
-    object.value_bykey(Some(&callbacks_key))
+    let callbacks = object.value_bykey(Some(&callbacks_key))?;
+    (callbacks.is_array() != 0).then_some(callbacks)
 }
 
 fn collect_listener_callbacks(callbacks: &V8Value) -> Vec<V8Value> {
@@ -306,6 +320,9 @@ fn add_ipc_listener(object: &V8Value, callback: &V8Value) -> bool {
     let Some(callbacks) = listener_callbacks(object) else {
         return false;
     };
+    if !compact_listener_callbacks(&callbacks) {
+        return false;
+    }
     if has_listener_in_callbacks(&callbacks, callback) {
         return true;
     }
@@ -319,9 +336,6 @@ fn remove_ipc_listener(object: &V8Value, callback: &V8Value) -> bool {
         return false;
     };
 
-    let Some(mut replacement) = v8_value_create_array(0) else {
-        return false;
-    };
     let mut write_index = 0;
     for index in 0..callbacks.array_length() {
         let Some(mut existing) = callbacks.value_byindex(index) else {
@@ -331,17 +345,17 @@ fn remove_ipc_listener(object: &V8Value, callback: &V8Value) -> bool {
         if existing.is_same(Some(&mut callback)) != 0 {
             continue;
         }
+        if existing.is_valid() == 0 || existing.is_function() == 0 {
+            continue;
+        }
 
-        replacement.set_value_byindex(write_index, Some(&mut existing));
+        if callbacks.set_value_byindex(write_index, Some(&mut existing)) == 0 {
+            return false;
+        }
         write_index += 1;
     }
 
-    let callbacks_key: CefStringUtf16 = LISTENER_CALLBACKS_KEY.into();
-    object.set_value_bykey(
-        Some(&callbacks_key),
-        Some(&mut replacement),
-        v8_prop_default(),
-    ) != 0
+    set_array_length(&callbacks, write_index)
 }
 
 fn has_ipc_listener(object: &V8Value, callback: &V8Value) -> bool {
@@ -360,6 +374,33 @@ fn has_listener_in_callbacks(callbacks: &V8Value, callback: &V8Value) -> bool {
         }
     }
     false
+}
+
+fn compact_listener_callbacks(callbacks: &V8Value) -> bool {
+    let mut write_index = 0;
+    for index in 0..callbacks.array_length() {
+        let Some(mut callback) = callbacks.value_byindex(index) else {
+            continue;
+        };
+        if callback.is_valid() == 0 || callback.is_function() == 0 {
+            continue;
+        }
+        if callbacks.set_value_byindex(write_index, Some(&mut callback)) == 0 {
+            return false;
+        }
+        write_index += 1;
+    }
+
+    set_array_length(callbacks, write_index)
+}
+
+fn set_array_length(array: &V8Value, length: i32) -> bool {
+    let length_key: CefStringUtf16 = "length".into();
+    let Some(mut value) = cef::v8_value_create_int(length) else {
+        return false;
+    };
+
+    array.set_value_bykey(Some(&length_key), Some(&mut value), v8_prop_default()) != 0
 }
 
 impl_handler_build!(OsrIpcBinaryHandlerBuilder, OsrIpcBinaryHandler => V8Handler);
