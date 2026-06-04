@@ -303,7 +303,7 @@ fn invoke_js_callback(
                 && callback.is_function() != 0
             {
                 let args = [Some(value.clone())];
-                callback.execute_function(Some(&mut global), Some(&args));
+                let _ = callback.execute_function(Some(&mut global), Some(&args));
             }
             let listener_api_key: CefStringUtf16 = listener_api_name.into();
             if let Some(mut listener_api) = global.value_bykey(Some(&listener_api_key)) {
