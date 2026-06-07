@@ -16,6 +16,31 @@ struct CefState {
     initialized: bool,
 }
 
+impl CefState {
+    fn needs_initialize(&self) -> bool {
+        !self.initialized
+    }
+
+    fn mark_initialized(&mut self) {
+        self.initialized = true;
+    }
+
+    fn retain(&mut self) {
+        self.ref_count += 1;
+    }
+
+    fn release(&mut self) {
+        if self.ref_count == 0 {
+            return;
+        }
+
+        self.ref_count -= 1;
+        // CEF does not support a reliable initialize -> shutdown -> initialize cycle
+        // within the same process. Keep the process-wide CEF runtime alive after the
+        // last browser instance is released so a later CefTexture can be created.
+    }
+}
+
 static CEF_STATE: Mutex<CefState> = Mutex::new(CefState {
     ref_count: 0,
     initialized: false,
@@ -36,33 +61,23 @@ fn lock_cef_state() -> MutexGuard<'static, CefState> {
 pub fn cef_retain() -> CefResult<()> {
     let mut state = lock_cef_state();
 
-    if state.ref_count == 0 {
+    if state.needs_initialize() {
         load_cef_framework()?;
         cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
         initialize_cef()?;
-        state.initialized = true;
+        state.mark_initialized();
 
         settings::warn_if_insecure_settings();
         settings::log_production_security_baseline();
     }
 
-    state.ref_count += 1;
+    state.retain();
     Ok(())
 }
 
 pub fn cef_release() {
     let mut state = lock_cef_state();
-
-    if state.ref_count == 0 {
-        return;
-    }
-
-    state.ref_count -= 1;
-
-    if state.ref_count == 0 && state.initialized {
-        cef::shutdown();
-        state.initialized = false;
-    }
+    state.release();
 }
 
 /// Loads the CEF framework library (macOS-specific)
@@ -255,4 +270,23 @@ fn initialize_cef() -> CefResult<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn releasing_last_reference_keeps_cef_initialized_for_recreate() {
+        let mut state = CefState {
+            ref_count: 1,
+            initialized: true,
+        };
+
+        state.release();
+
+        assert_eq!(state.ref_count, 0);
+        assert!(state.initialized);
+        assert!(!state.needs_initialize());
+    }
 }
