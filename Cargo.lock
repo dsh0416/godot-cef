@@ -798,8 +798,10 @@ dependencies = [
  "cef",
  "cef-dll-sys",
  "cef_app",
+ "libc",
  "libloading 0.9.0",
  "process_path",
+ "tokio",
  "windows",
  "windows-sys 0.61.2",
 ]
@@ -2248,6 +2250,15 @@ checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tokio"
+version = "1.52.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
+dependencies = [
+ "pin-project-lite",
 ]
 
 [[package]]
