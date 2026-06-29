@@ -22,10 +22,6 @@ impl CefTexture2D {
         Vector2::new(self.texture_size.x as f32, self.texture_size.y as f32)
     }
 
-    pub(super) fn refresh_fallback_texture(&mut self) {
-        self.fallback_texture = Self::make_placeholder_texture(self.texture_size);
-    }
-
     pub(super) fn try_create_browser(&mut self) {
         let logical_size = self.logical_size();
         let dpi = self.get_dpi();

@@ -90,7 +90,6 @@ impl CefTexture2D {
         }
 
         self.texture_size = clamped;
-        self.refresh_fallback_texture();
         let logical_size = self.logical_size();
         let dpi = self.get_dpi();
         self.runtime.handle_size_change(logical_size, dpi);
