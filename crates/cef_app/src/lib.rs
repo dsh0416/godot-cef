@@ -56,6 +56,9 @@ wrap_app! {
             };
 
             command_line.append_switch(Some(&"no-sandbox".into()));
+            command_line.append_switch(Some(&"disable-in-process-stack-traces".into()));
+            command_line.append_switch(Some(&"disable-breakpad".into()));
+            command_line.append_switch(Some(&"disable-crash-reporter".into()));
             command_line.append_switch(Some(&"no-startup-window".into()));
             command_line.append_switch(Some(&"noerrdialogs".into()));
             command_line.append_switch(Some(&"hide-crash-restore-bubble".into()));
