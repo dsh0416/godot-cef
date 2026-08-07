@@ -198,6 +198,45 @@ fn initialize_cef() -> CefResult<()> {
         CefError::InitializationFailed(format!("Failed to get subprocess path: {}", e))
     })?;
 
+#[cfg(target_os = "linux")]
+struct SignalRestorer {
+    signals: Vec<(libc::c_int, libc::sigaction)>,
+}
+
+#[cfg(target_os = "linux")]
+impl SignalRestorer {
+    fn save() -> Self {
+        let sigs = [
+            libc::SIGSEGV,
+            libc::SIGBUS,
+            libc::SIGILL,
+            libc::SIGFPE,
+            libc::SIGTRAP,
+            libc::SIGABRT,
+            libc::SIGCHLD,
+            libc::SIGSYS,
+        ];
+        let mut saved = Vec::new();
+        for &sig in &sigs {
+            unsafe {
+                let mut old_act: libc::sigaction = std::mem::zeroed();
+                if libc::sigaction(sig, std::ptr::null(), &mut old_act) == 0 {
+                    saved.push((sig, old_act));
+                }
+            }
+        }
+        SignalRestorer { signals: saved }
+    }
+
+    fn restore(self) {
+        for (sig, old_act) in self.signals {
+            unsafe {
+                libc::sigaction(sig, &old_act, std::ptr::null_mut());
+            }
+        }
+    }
+}
+
     let root_cache_path = settings::get_data_path();
 
     let settings = Settings {
@@ -210,6 +249,7 @@ fn initialize_cef() -> CefResult<()> {
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         log_severity: cef::LogSeverity::DEFAULT as _,
+        no_sandbox: true as _,
         root_cache_path: root_cache_path
             .to_str()
             .ok_or_else(|| {
@@ -256,12 +296,23 @@ fn initialize_cef() -> CefResult<()> {
         }
     };
 
+    #[cfg(target_os = "linux")]
+    let signal_restorer = SignalRestorer::save();
+
     let ret = cef::initialize(
         Some(args.as_main_args()),
         Some(&settings),
         Some(&mut app),
         std::ptr::null_mut(),
     );
+
+    #[cfg(target_os = "linux")]
+    {
+        signal_restorer.restore();
+        unsafe {
+            libc::prctl(libc::PR_SET_DUMPABLE, 1);
+        }
+    }
 
     if ret != 1 {
         return Err(CefError::InitializationFailed(
