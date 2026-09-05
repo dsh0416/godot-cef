@@ -64,11 +64,6 @@ windows.arm64 = {
   "bin/aarch64-pc-windows-msvc/vulkan-1.dll" : ""
 }
 
-macos = {
-  "bin/universal-apple-darwin/Godot CEF.framework" : "Contents/Frameworks",
-  "bin/universal-apple-darwin/Godot CEF.app" : "Contents/Frameworks"
-}
-
 linux.x86_64 = {
   "bin/x86_64-unknown-linux-gnu/libgdcef.so" : "",
   "bin/x86_64-unknown-linux-gnu/gdcef_helper" : "",

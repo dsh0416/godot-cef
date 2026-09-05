@@ -86,10 +86,21 @@ jobs:
           RUSTC_WRAPPER: sccache
         run: mise exec -- cargo xtask bundle --release
 
+      - name: Validate macOS bundle
+        run: |
+          framework_path="addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework"
+          plist_path="$framework_path/Resources/Info.plist"
+          test "$(plutil -extract CFBundleExecutable raw "$plist_path")" = "libgdcef.dylib"
+          test "$(plutil -extract CFBundleSupportedPlatforms.0 raw "$plist_path")" = "MacOSX"
+          test -d "$framework_path/Helpers/Godot CEF.app"
+          otool -arch arm64 -D "$framework_path/libgdcef.dylib" | grep -Fxq '@rpath/Godot CEF.framework/libgdcef.dylib'
+          otool -arch x86_64 -D "$framework_path/libgdcef.dylib" | grep -Fxq '@rpath/Godot CEF.framework/libgdcef.dylib'
+          find "$framework_path/Helpers" -path '*/Libraries/*.dylib' -exec codesign --verify --strict {} \;
+          codesign --verify --deep --strict "$framework_path"
+
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts/universal-apple-darwin
-          cp -R "target/release/Godot CEF.app" "artifacts/universal-apple-darwin/"
           cp -R "target/release/Godot CEF.framework" "artifacts/universal-apple-darwin/"
 
       - name: Upload artifacts

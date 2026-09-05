@@ -106,7 +106,9 @@ fn load_sandbox(args: &cef::MainArgs) {
                 godot::global::godot_warn!("Failed to load CEF sandbox: {}", e);
             }
         }
-        Err(e) => godot::global::godot_warn!("Failed to load CEF sandbox: {}", e),
+        Err(e) => {
+            godot::global::godot_warn!("Failed to load CEF sandbox: {}", e);
+        }
     }
 }
 

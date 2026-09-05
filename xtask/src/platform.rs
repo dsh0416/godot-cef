@@ -19,7 +19,7 @@ pub const WINDOWS_ARM64_TARGET: &str = "aarch64-pc-windows-msvc";
 pub const LINUX_X64_TARGET: &str = "x86_64-unknown-linux-gnu";
 pub const LINUX_ARM64_TARGET: &str = "aarch64-unknown-linux-gnu";
 
-const MACOS_REQUIRED_FILES: &[&str] = &["Godot CEF.framework", "Godot CEF.app"];
+const MACOS_REQUIRED_FILES: &[&str] = &["Godot CEF.framework"];
 const WINDOWS_REQUIRED_FILES: &[&str] = &["gdcef.dll", "gdcef_helper.exe", "libcef.dll"];
 const LINUX_REQUIRED_FILES: &[&str] = &["libgdcef.so", "gdcef_helper", "libcef.so"];
 const LOCALES_DIR: &[&str] = &["locales"];

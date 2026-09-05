@@ -2,7 +2,6 @@
 //!
 //! Usage:
 //!   cargo xtask bundle [--release] [--target <triple>] # Bundle for current platform and deploy to addons/
-//!   cargo xtask bundle-app [--release]       # Bundle helper app (macOS only)
 //!   cargo xtask bundle-framework [--release] # Bundle framework (macOS only)
 //!   cargo xtask pack <artifacts> <output>    # Pack CI artifacts into distributable addon
 //!   cargo xtask validate --addon <path>      # Validate addon artifact completeness
@@ -48,17 +47,6 @@ enum Commands {
         /// Rust target triple to build and bundle
         #[arg(long)]
         target: Option<String>,
-    },
-
-    /// Bundle the helper app for macOS
-    BundleApp {
-        /// Build in release mode
-        #[arg(long, short)]
-        release: bool,
-
-        /// Custom target directory
-        #[arg(long)]
-        target_dir: Option<PathBuf>,
     },
 
     /// Bundle the GDExtension framework for macOS
@@ -114,7 +102,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "--target is not supported for `cargo xtask bundle` on macOS".into(),
                     );
                 }
-                bundle_app::run(release, target_dir.as_deref())?;
                 bundle_framework::run(release, target_dir.as_deref())?;
             }
 
@@ -126,19 +113,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(target_os = "linux")]
             {
                 bundle_linux::run(release, target_dir.as_deref(), target.as_deref())?;
-            }
-        }
-        Commands::BundleApp {
-            release,
-            target_dir,
-        } => {
-            #[cfg(target_os = "macos")]
-            bundle_app::run(release, target_dir.as_deref())?;
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = (release, target_dir);
-                eprintln!("bundle-app is only supported on macOS");
             }
         }
         Commands::BundleFramework {

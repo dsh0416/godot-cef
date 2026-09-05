@@ -10,6 +10,9 @@ use std::sync::OnceLock;
 #[cfg(target_os = "linux")]
 static LINUX_DESKTOP_SCALE_CANDIDATE: OnceLock<Option<f32>> = OnceLock::new();
 
+#[cfg(target_os = "macos")]
+const CEF_APP_FRAMEWORKS_PATH: &str = "Helpers/Godot CEF.app/Contents/Frameworks";
+
 /// Returns the display scale factor for the primary screen.
 ///
 /// This value can be used to scale UI elements from logical pixels to
@@ -222,10 +225,9 @@ pub fn get_framework_path() -> CefResult<PathBuf> {
     // current dylib path:
     //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework/libgdcef.dylib
     // framework is at:
-    //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.app/Contents/Frameworks/Chromium Embedded Framework (ARM64|X86_64).framework
+    //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework/Helpers/Godot CEF.app/Contents/Frameworks/Chromium Embedded Framework (ARM64|X86_64).framework
     dylib_dir
-        .join("..")
-        .join("Godot CEF.app/Contents/Frameworks")
+        .join(CEF_APP_FRAMEWORKS_PATH)
         .join(framework_name)
         .canonicalize()
         .map_err(CefError::from)
@@ -238,10 +240,9 @@ pub fn get_subprocess_path() -> CefResult<PathBuf> {
     // current dylib path:
     //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework/libgdcef.dylib
     // subprocess is at:
-    //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.app/Contents/Frameworks/Godot CEF Helper.app/Contents/MacOS/Godot CEF Helper
+    //   project/addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework/Helpers/Godot CEF.app/Contents/Frameworks/Godot CEF Helper.app/Contents/MacOS/Godot CEF Helper
     dylib_dir
-        .join("..")
-        .join("Godot CEF.app/Contents/Frameworks")
+        .join(CEF_APP_FRAMEWORKS_PATH)
         .join("Godot CEF Helper.app/Contents/MacOS")
         .join("Godot CEF Helper")
         .canonicalize()

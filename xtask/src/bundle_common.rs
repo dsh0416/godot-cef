@@ -78,6 +78,8 @@ pub struct FrameworkInfoPlist {
     pub cf_bundle_version: String,
     #[serde(rename = "CFBundleShortVersionString")]
     pub cf_bundle_short_version_string: String,
+    #[serde(rename = "CFBundleSupportedPlatforms")]
+    pub cf_bundle_supported_platforms: Vec<String>,
     #[serde(rename = "LSEnvironment")]
     pub ls_environment: HashMap<String, String>,
     #[serde(rename = "LSFileQuarantineEnabled")]
@@ -136,6 +138,7 @@ impl FrameworkInfoPlist {
             cf_bundle_signature: "????".to_string(),
             cf_bundle_version: "1.0.0".to_string(),
             cf_bundle_short_version_string: "1.0".to_string(),
+            cf_bundle_supported_platforms: vec!["MacOSX".to_string()],
             ls_environment: [("MallocNanoZone".to_string(), "0".to_string())]
                 .iter()
                 .cloned()
@@ -295,6 +298,26 @@ pub fn run_lipo(
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+pub fn sign_macos_code(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let status = Command::new("codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(path)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if !status.success() {
+        return Err(format!(
+            "ad-hoc codesign failed for {} with status: {}",
+            path.display(),
+            status
+        )
+        .into());
+    }
+    Ok(())
+}
+
 pub fn get_addon_bin_dir(platform_target: &str) -> PathBuf {
     workspace_root()
         .join("addons/godot_cef/bin")
@@ -355,14 +378,14 @@ pub fn deploy_bundle_to_addon(
 
     println!("Deploying bundle to addon: {}", addon_bin_dir.display());
 
+    if addon_bin_dir.exists() {
+        fs::remove_dir_all(&addon_bin_dir)?;
+    }
     fs::create_dir_all(&addon_bin_dir)?;
 
     let bundle_name = bundle_path.file_name().ok_or("Invalid bundle path")?;
     let dst = addon_bin_dir.join(bundle_name);
 
-    if dst.exists() {
-        fs::remove_dir_all(&dst)?;
-    }
     copy_directory(bundle_path, &dst)?;
     println!("  Deployed: {}", bundle_name.to_string_lossy());
 
