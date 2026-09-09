@@ -4,7 +4,7 @@ This matrix summarizes the expected rendering mode behavior for each platform/ba
 
 ## Version Baseline
 
-Current builds are based on the Rust `cef` / `cef-dll-sys` crates resolved as `148.4.0+148.0.10` in `Cargo.lock`. The matching CEF runtime version is pinned as `CEF_VERSION` in `mise.toml`; use it when installing CEF binaries manually:
+Current builds are based on the Rust `cef` / `cef-dll-sys` crates resolved as `152.0.0+152.0.5` in `Cargo.lock`. The matching CEF runtime version is pinned as `CEF_VERSION` in `mise.toml`; use it when installing CEF binaries manually:
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"

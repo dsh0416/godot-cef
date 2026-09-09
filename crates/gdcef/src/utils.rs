@@ -135,10 +135,10 @@ fn gnome_monitors_xml_scales() -> GnomeMonitorsXml {
     let mut text_target: Option<MonitorXmlText> = None;
     loop {
         match reader.read_event() {
-            Ok(Event::Start(element)) if element.name().as_ref() == b"logicalmonitor" => {
+            Ok(Event::Start(element)) if element.name().as_ref() == "logicalmonitor" => {
                 current_monitor = Some(GnomeLogicalMonitor::default());
             }
-            Ok(Event::End(element)) if element.name().as_ref() == b"logicalmonitor" => {
+            Ok(Event::End(element)) if element.name().as_ref() == "logicalmonitor" => {
                 if let Some(monitor) = current_monitor.take() {
                     logical_monitors.push(monitor);
                 }
@@ -146,18 +146,17 @@ fn gnome_monitors_xml_scales() -> GnomeMonitorsXml {
             }
             Ok(Event::Start(element)) if current_monitor.is_some() => {
                 text_target = match element.name().as_ref() {
-                    b"primary" => Some(MonitorXmlText::Primary),
-                    b"scale" => Some(MonitorXmlText::Scale),
+                    "primary" => Some(MonitorXmlText::Primary),
+                    "scale" => Some(MonitorXmlText::Scale),
                     _ => None,
                 };
             }
-            Ok(Event::End(element)) if matches!(element.name().as_ref(), b"primary" | b"scale") => {
+            Ok(Event::End(element)) if matches!(element.name().as_ref(), "primary" | "scale") => {
                 text_target = None;
             }
             Ok(Event::Text(text)) => {
-                if let Some(monitor) = current_monitor.as_mut()
-                    && let Some(value) = text.decode().ok()
-                {
+                if let Some(monitor) = current_monitor.as_mut() {
+                    let value = text.as_ref();
                     match text_target {
                         Some(MonitorXmlText::Primary) => {
                             let normalized = value.trim();

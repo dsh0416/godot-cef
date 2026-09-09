@@ -3,7 +3,7 @@ use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::{CursorType, PhysicalSize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use wide::{i8x16, u8x16};
+use wide::u8x16;
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
@@ -102,10 +102,10 @@ impl ClientQueues {
     }
 }
 
-/// Swizzle indices for BGRA -> RGBA conversion.
+/// Shuffle indices for BGRA -> RGBA conversion.
 /// [B,G,R,A] at indices [0,1,2,3] -> [R,G,B,A] means pick [2,1,0,3] for each pixel.
-const BGRA_TO_RGBA_INDICES: i8x16 =
-    i8x16::new([2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15]);
+const BGRA_TO_RGBA_INDICES: u8x16 =
+    u8x16::new([2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15]);
 
 /// Converts BGRA pixel data to RGBA using SIMD operations.
 /// Processes 16 bytes (4 pixels) at a time for optimal performance.
@@ -119,11 +119,8 @@ fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
         let mut src = [0u8; 16];
         src.copy_from_slice(&bgra[offset..offset + 16]);
         let v = u8x16::new(src);
-        // Swizzle BGRA -> RGBA using precomputed indices
-        let shuffled = v.swizzle(BGRA_TO_RGBA_INDICES);
-        let result: [i8; 16] = shuffled.into();
-        let result_u8: [u8; 16] = result.map(|b| b as u8);
-        rgba[offset..offset + 16].copy_from_slice(&result_u8);
+        let shuffled = v.shuffle_zeroing(BGRA_TO_RGBA_INDICES);
+        rgba[offset..offset + 16].copy_from_slice(&shuffled.to_array());
     }
 
     // Handle remaining pixels that don't fit in a 16-byte chunk

@@ -13,9 +13,9 @@
   "license": "MIT",
   "devDependencies": {
     "@nolebase/vitepress-plugin-enhanced-readabilities": "^2.18.2",
-    "mermaid": "^11.16.1",
+    "mermaid": "^11.17.2",
     "vitepress": "^1.6.4",
     "vitepress-plugin-mermaid": "^2.0.17",
-    "vue": "^3.5.41"
+    "vue": "^3.5.42"
   }
 }
