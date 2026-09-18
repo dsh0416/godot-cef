@@ -104,12 +104,12 @@ fn load_sandbox(args: &cef::MainArgs) {
         Ok(framework_path) => {
             if let Err(e) = cef_app::load_sandbox_from_path(&framework_path, args) {
                 godot::global::godot_warn!("Failed to load CEF sandbox: {}", e);
-                return;
+                drop(e);
             }
         }
         Err(e) => {
             godot::global::godot_warn!("Failed to load CEF sandbox: {}", e);
-            return;
+            drop(e);
         }
     }
 }
