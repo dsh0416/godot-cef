@@ -1,8 +1,11 @@
 pub(crate) mod backend;
 mod browser_lifecycle;
 mod cookie_ops;
+mod focus_state;
 mod ime;
+mod input_routing;
 mod permission_ops;
+mod pointer_state;
 mod rendering;
 mod signals;
 mod source_drag;
@@ -11,9 +14,7 @@ use cef::{self, ImplBrowserHost, ImplDragData, do_message_loop_work};
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
-    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, InputEventKey,
-    InputEventMagnifyGesture, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
-    InputEventScreenDrag, InputEventScreenTouch, LineEdit, TextureRect,
+    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, LineEdit, TextureRect,
 };
 use godot::prelude::*;
 
@@ -80,7 +81,10 @@ pub struct CefTexture {
     // IME state
     ime_active: bool,
     ime_proxy: Option<Gd<LineEdit>>,
-    ime_focus_regrab_pending: bool,
+    focus_state: focus_state::FocusState,
+    focus_reconcile_pending: bool,
+    pointer_state: pointer_state::PointerState,
+    last_pointer_position: Vector2,
 
     // Popup state
     popup_overlay: Option<Gd<TextureRect>>,
@@ -117,7 +121,10 @@ impl ITextureRect for CefTexture {
             browser_create_deferred_pending: false,
             ime_active: false,
             ime_proxy: None,
-            ime_focus_regrab_pending: false,
+            focus_state: Default::default(),
+            focus_reconcile_pending: false,
+            pointer_state: Default::default(),
+            last_pointer_position: Vector2::ZERO,
             popup_overlay: None,
             popup_texture: None,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -135,6 +142,11 @@ impl ITextureRect for CefTexture {
             }
             ControlNotification::INTERNAL_PROCESS => {
                 self.refresh_browser_drag();
+                if self.browser_input_available() {
+                    self.reconcile_browser_focus();
+                } else {
+                    self.suspend_browser_input();
+                }
             }
             ControlNotification::RESIZED => {
                 // React immediately to control size changes so CEF receives
@@ -143,29 +155,36 @@ impl ITextureRect for CefTexture {
                 self.update_texture();
             }
             ControlNotification::PREDELETE => {
+                self.suspend_browser_input();
                 self.cleanup_instance();
             }
             ControlNotification::PAUSED
             | ControlNotification::DISABLED
             | ControlNotification::EXIT_TREE
-            | ControlNotification::DRAG_END
             | ControlNotification::WM_WINDOW_FOCUS_OUT => {
+                self.suspend_browser_input();
+            }
+            ControlNotification::DRAG_END => {
                 self.cancel_browser_drag();
+            }
+            ControlNotification::WM_WINDOW_FOCUS_IN => {
+                self.defer_browser_focus_update();
             }
             ControlNotification::VISIBILITY_CHANGED => {
                 if !self.base().is_visible_in_tree() {
-                    self.cancel_browser_drag();
+                    self.suspend_browser_input();
+                } else {
+                    self.defer_browser_focus_update();
                 }
             }
-            ControlNotification::FOCUS_ENTER => {
-                if let Some(host) = self.with_app(|app| app.host()) {
-                    host.set_focus(true as _);
-                }
+            ControlNotification::FOCUS_ENTER | ControlNotification::FOCUS_EXIT => {
+                self.defer_browser_focus_update();
             }
-            ControlNotification::FOCUS_EXIT => {
-                if let Some(host) = self.with_app(|app| app.host()) {
-                    host.set_focus(false as _);
-                }
+            ControlNotification::MOUSE_ENTER => {
+                self.pointer_state.enter();
+            }
+            ControlNotification::MOUSE_EXIT => {
+                self.handle_browser_mouse_exit();
             }
             ControlNotification::OS_IME_UPDATE => {
                 self.handle_os_ime_update();
@@ -176,6 +195,20 @@ impl ITextureRect for CefTexture {
 
     fn input(&mut self, event: Gd<InputEvent>) {
         self.handle_input_event(event);
+    }
+
+    fn gui_input(&mut self, event: Gd<InputEvent>) {
+        self.handle_gui_input_event(event);
+    }
+
+    fn has_point(&self, point: Vector2) -> bool {
+        // Accelerated select/autocomplete popups can extend outside the view.
+        // Keep them in this control's GUI target and coordinate space.
+        let popup_rect = self
+            .popup_overlay
+            .as_ref()
+            .and_then(|overlay| overlay.is_visible().then(|| overlay.get_rect()));
+        input_routing::browser_has_point(point, self.base().get_size(), popup_rect)
     }
 }
 
@@ -189,12 +222,6 @@ impl CefTexture {
     fn with_app_mut<R>(&mut self, f: impl FnOnce(&mut crate::browser::App) -> R) -> R {
         let mut helper = self.texture2d_helper.bind_mut();
         f(helper.runtime_app_mut())
-    }
-
-    fn event_position_to_local(&self, position: Vector2) -> Vector2 {
-        // `input()` delivers positions in viewport space for this node path, while
-        // CEF expects view-local coordinates relative to the browser texture.
-        position - self.base().get_global_position()
     }
 
     fn make_browser_material() -> Gd<godot::classes::Material> {
@@ -344,67 +371,7 @@ impl CefTexture {
             self.create_browser();
         }
         self.base_mut().set_process(true);
-    }
-
-    fn handle_input_event(&mut self, event: Gd<InputEvent>) {
-        if let Ok(key) = event.clone().try_cast::<InputEventKey>()
-            && key.is_pressed()
-            && key.get_keycode() == godot::global::Key::ESCAPE
-        {
-            self.cancel_browser_drag();
-        }
-        let pixel_scale = self.get_pixel_scale_factor();
-        let device_scale = self.get_device_scale_factor();
-
-        if let Ok(mut mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
-            let local_position = self.event_position_to_local(mouse_button.get_position());
-            mouse_button.set_position(local_position);
-            self.texture2d_helper.bind().forward_mouse_button_event(
-                mouse_button,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut mouse_motion) = event.clone().try_cast::<InputEventMouseMotion>() {
-            let local_position = self.event_position_to_local(mouse_motion.get_position());
-            mouse_motion.set_position(local_position);
-            self.texture2d_helper.bind().forward_mouse_motion_event(
-                mouse_motion,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut pan_gesture) = event.clone().try_cast::<InputEventPanGesture>() {
-            let local_position = self.event_position_to_local(pan_gesture.get_position());
-            pan_gesture.set_position(local_position);
-            self.texture2d_helper.bind().forward_pan_gesture_event(
-                pan_gesture,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut screen_touch) = event.clone().try_cast::<InputEventScreenTouch>() {
-            let local_position = self.event_position_to_local(screen_touch.get_position());
-            screen_touch.set_position(local_position);
-            self.texture2d_helper.bind_mut().forward_screen_touch_event(
-                screen_touch,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut screen_drag) = event.clone().try_cast::<InputEventScreenDrag>() {
-            let local_position = self.event_position_to_local(screen_drag.get_position());
-            screen_drag.set_position(local_position);
-            self.texture2d_helper.bind_mut().forward_screen_drag_event(
-                screen_drag,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(magnify_gesture) = event.clone().try_cast::<InputEventMagnifyGesture>() {
-            self.texture2d_helper
-                .bind()
-                .forward_magnify_gesture_event(magnify_gesture);
-        } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
-            self.texture2d_helper
-                .bind()
-                .forward_key_event(key_event, self.ime_active);
-        }
+        self.reconcile_browser_focus();
     }
 
     #[func]

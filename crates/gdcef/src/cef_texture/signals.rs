@@ -409,11 +409,8 @@ impl CefTexture {
     fn process_ime_enable_events(&mut self, events: &VecDeque<bool>) {
         // Take the last event (latest wins)
         if let Some(&enable) = events.back() {
-            if enable && !self.ime_active {
-                self.activate_ime();
-            } else if !enable && self.ime_active {
-                self.deactivate_ime();
-            }
+            self.focus_state.editable = enable;
+            self.reconcile_browser_focus();
         }
     }
 

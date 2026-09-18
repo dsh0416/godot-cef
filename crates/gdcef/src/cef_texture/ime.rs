@@ -4,6 +4,7 @@
 //! and cursor positioning.
 
 use super::CefTexture;
+use super::focus_state::FocusOwner;
 use cef::ImplBrowserHost;
 use godot::classes::control::{FocusMode, MouseFilter};
 use godot::classes::{Control, DisplayServer, LineEdit};
@@ -23,8 +24,9 @@ impl CefTexture {
         let callable_changed = self.base().callable("on_ime_proxy_text_changed");
         line_edit.connect("text_changed", &callable_changed);
 
-        let callable_focus_exited = self.base().callable("on_ime_proxy_focus_exited");
-        line_edit.connect("focus_exited", &callable_focus_exited);
+        let callable_focus_changed = self.base().callable("on_ime_proxy_focus_exited");
+        line_edit.connect("focus_entered", &callable_focus_changed);
+        line_edit.connect("focus_exited", &callable_focus_changed);
 
         self.base_mut().add_child(&line_edit);
         self.ime_proxy = Some(line_edit);
@@ -66,11 +68,13 @@ impl CefTexture {
 
     /// Called when the IME proxy LineEdit text changes during composition.
     pub(super) fn on_ime_proxy_text_changed_impl(&mut self, new_text: GString) {
-        let Some(host) = self.with_app(|app| app.host()) else {
-            return;
-        };
-
-        input::ime_commit_text(&host, &new_text.to_string());
+        if self.ime_active
+            && self.browser_input_available()
+            && self.browser_focus_owner() == FocusOwner::Proxy
+            && let Some(host) = self.with_app(|app| app.host())
+        {
+            input::ime_commit_text(&host, &new_text.to_string());
+        }
 
         if let Some(proxy) = self.ime_proxy.as_mut() {
             proxy.set_text("");
@@ -78,78 +82,113 @@ impl CefTexture {
     }
 
     pub(super) fn on_ime_proxy_focus_exited_impl(&mut self) {
-        if self.ime_focus_regrab_pending {
+        self.defer_browser_focus_update();
+    }
+
+    pub(super) fn defer_browser_focus_update(&mut self) {
+        if self.focus_reconcile_pending {
             return;
         }
-
-        // Defer the check to the next frame when the focus system has settled
+        self.focus_reconcile_pending = true;
+        // Focus-exited is emitted before Godot assigns the new owner. Inspect
+        // the settled owner, never the transient gap during a proxy transfer.
         self.base_mut()
             .call_deferred("_check_ime_focus_after_exit", &[]);
     }
 
     pub(super) fn check_ime_focus_after_exit_impl(&mut self) {
-        if !self.ime_active {
-            return;
-        }
+        self.focus_reconcile_pending = false;
+        self.reconcile_browser_focus();
+    }
 
+    pub(super) fn browser_focus_owner(&self) -> FocusOwner {
+        if !self.base().is_inside_tree() {
+            return FocusOwner::Outside;
+        }
         if let Some(viewport) = self.base().get_viewport()
             && let Some(focused) = viewport.gui_get_focus_owner()
         {
             let self_control = self.base().clone().upcast::<Control>();
-
             if focused == self_control {
-                self.ime_focus_regrab_pending = true;
-                self.base_mut().release_focus();
-                if let Some(proxy) = self.ime_proxy.as_mut() {
-                    proxy.grab_focus();
-                }
-                self.ime_focus_regrab_pending = false;
-                return;
+                return FocusOwner::Browser;
+            }
+            if self
+                .ime_proxy
+                .as_ref()
+                .is_some_and(|proxy| focused == proxy.clone().upcast::<Control>())
+            {
+                return FocusOwner::Proxy;
             }
         }
-
-        self.deactivate_ime();
+        FocusOwner::Outside
     }
 
-    /// Activates IME by focusing the hidden LineEdit proxy.
-    pub(super) fn activate_ime(&mut self) {
-        if self.ime_active {
-            return;
-        }
-
-        self.base_mut().release_focus();
-
-        if let Some(proxy) = self.ime_proxy.as_mut() {
-            proxy.set_text("");
-            proxy.grab_focus();
-        }
-
-        if let Some(host) = self.with_app(|app| app.host()) {
-            host.set_focus(true as _);
-        }
-
-        self.ime_active = true;
+    pub(super) fn browser_input_available(&self) -> bool {
+        self.base().is_inside_tree()
+            && self.base().is_visible_in_tree()
+            && self.base().can_process()
+            && self.base().is_processing()
+            && self
+                .base()
+                .get_window()
+                .is_some_and(|window| window.has_focus())
+            && self.with_app(|app| app.state.is_some())
     }
 
-    /// Deactivates IME and commits any pending text.
-    pub(super) fn deactivate_ime(&mut self) {
-        if !self.ime_active {
+    pub(super) fn reconcile_browser_focus(&mut self) {
+        let owner = self.browser_focus_owner();
+        let available = self.browser_input_available();
+        self.apply_browser_focus(owner, available);
+    }
+
+    pub(super) fn suspend_browser_focus(&mut self) {
+        self.apply_browser_focus(FocusOwner::Outside, false);
+    }
+
+    fn apply_browser_focus(&mut self, owner: FocusOwner, available: bool) {
+        let Some(host) = self.with_app(|app| app.host()) else {
+            // A future browser must receive focus even if the logical owner
+            // has not changed since this node started processing.
+            self.focus_state.invalidate_host_focus();
+            self.ime_active = false;
             return;
+        };
+        let update = self.focus_state.reconcile(owner, available);
+        // Clear composition before losing CEF focus, and never commit a late
+        // proxy signal into whichever DOM element happens to be active later.
+        if self.ime_active && !update.ime_active {
+            host.ime_cancel_composition();
+            if let Some(proxy) = self.ime_proxy.as_mut() {
+                proxy.set_text("");
+            }
+        }
+        self.ime_active = update.ime_active;
+
+        if let Some(focused) = update.cef_focus {
+            host.set_focus(focused as _);
         }
 
-        // Clear the proxy
-        if let Some(proxy) = self.ime_proxy.as_mut() {
-            proxy.set_text("");
+        match update.transfer {
+            Some(FocusOwner::Proxy) => {
+                // grab_focus performs the transfer. Do not separately release
+                // the browser control and publish a spurious CEF blur.
+                if let Some(mut proxy) = self.ime_proxy.clone() {
+                    // This can synchronously notify the parent control. Keep
+                    // its Rust borrow suspended while Godot transfers focus.
+                    let _guard = self.base_mut();
+                    proxy.grab_focus();
+                }
+            }
+            Some(FocusOwner::Browser) => self.base_mut().grab_focus(),
+            _ => {}
         }
-
-        self.ime_active = false;
-
-        // Return focus to CefTexture
-        self.base_mut().grab_focus();
     }
 
     pub(super) fn handle_os_ime_update(&mut self) {
-        if !self.ime_active {
+        if !self.ime_active
+            || !self.browser_input_available()
+            || self.browser_focus_owner() != FocusOwner::Proxy
+        {
             return;
         }
 
