@@ -10,7 +10,7 @@ mod rendering;
 mod signals;
 mod source_drag;
 
-use cef::{self, ImplBrowserHost, ImplDragData, do_message_loop_work};
+use cef::{self, ImplBrowserHost, ImplDragData};
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
@@ -352,10 +352,6 @@ impl CefTexture {
         self.handle_max_fps_change();
         _ = self.handle_size_change();
         self.update_texture();
-
-        if self.with_app(|app| app.state.is_some()) {
-            do_message_loop_work();
-        }
 
         self.request_external_begin_frame();
         self.update_cursor();

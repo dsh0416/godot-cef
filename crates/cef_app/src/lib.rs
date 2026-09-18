@@ -2,6 +2,7 @@ mod app;
 mod browser_process;
 pub mod ipc_contract;
 mod loader;
+pub mod message_pump;
 mod render_handler;
 mod render_process;
 mod types;

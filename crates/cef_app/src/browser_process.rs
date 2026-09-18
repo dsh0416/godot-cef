@@ -41,6 +41,12 @@ wrap_browser_process_handler! {
             *self.handler.is_cef_ready.borrow_mut() = true;
         }
 
+        fn on_schedule_message_pump_work(&self, delay_ms: i64) {
+            // This callback may run on any CEF thread. Do not call Godot or
+            // execute CEF work here; the host UI loop consumes the deadline.
+            crate::message_pump::MESSAGE_PUMP.schedule(delay_ms);
+        }
+
         fn on_before_child_process_launch(&self, command_line: Option<&mut CommandLine>) {
             let Some(command_line) = command_line else {
                 return;

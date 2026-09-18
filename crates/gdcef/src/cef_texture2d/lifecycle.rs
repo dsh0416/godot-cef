@@ -92,7 +92,7 @@ impl CefTexture2D {
         let dpi = self.get_dpi();
         let _ = self.runtime.handle_size_change(logical_size, dpi);
         self.update_texture();
-        self.runtime.message_loop_and_begin_frame();
+        self.runtime.request_external_begin_frame();
         self.drain_event_queues();
     }
 }

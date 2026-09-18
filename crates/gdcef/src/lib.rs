@@ -2,6 +2,7 @@ mod accelerated_osr;
 mod browser;
 mod cef_init;
 mod cef_ipc_inspector;
+mod cef_pump;
 mod cef_texture;
 mod cef_texture2d;
 mod compat;
@@ -25,6 +26,12 @@ struct GodotCef;
 
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotCef {
+    fn on_stage_deinit(level: InitStage) {
+        if level == InitStage::Scene {
+            cef_pump::uninstall();
+        }
+    }
+
     fn on_stage_init(level: InitStage) {
         match level {
             InitStage::Core => {

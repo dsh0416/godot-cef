@@ -338,3 +338,26 @@ paths, pinned CEF generated headers and upstream CEF/Chromium/Godot source were
 inspected. No Windows execution or performance measurements were performed.
 The machine's default local CEF SDK is 145.0.22, so it must not be mistaken for
 the pinned 152.0.6 runtime when doing subsequent builds or reproduction.
+
+### Non-GPU implementation validation
+
+The separate drag, focus/input and scheduler fixes were validated using a
+separately downloaded CEF 152.0.6 SDK. The final Rust suites contain 105 passing
+tests. Workspace Clippy with `-D warnings`, formatting, whitespace checks and
+the VitePress documentation build pass. Cargo still reports the existing unused
+`software_render` dependency in the benchmark manifest.
+
+A graphical smoke test on macOS ARM64, Godot 4.6 stable and software CEF rendering
+also passes. It checks exclusive DOM focus and text input between two browsers
+and a native LineEdit, repeated editable clicks, three payload-bearing drags
+without a listener, release cancellation after an ignored accepted drag, and
+cancellation when an accepted drag's listener disables normal processing.
+The test records actual CEF drag session IDs and checks OS window focus during
+input. Page timers advance across a scene pause, and browser recreation succeeds
+after a zero-browser interval. The timer check alone does not prove strict
+message-pump deadlines while paused.
+
+These results do not validate accelerated GPU handoff, Windows/Linux behavior,
+native CJK composition, or latency under minimized-window throttling. Those
+parts of the regression matrix remain open; GPU implementation and the hook
+decision remain tracked in #227.

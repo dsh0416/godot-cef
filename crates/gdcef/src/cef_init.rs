@@ -59,6 +59,7 @@ fn lock_cef_state() -> MutexGuard<'static, CefState> {
 }
 
 pub fn cef_retain() -> CefResult<()> {
+    crate::cef_pump::ensure_installed().map_err(CefError::InitializationFailed)?;
     let mut state = lock_cef_state();
 
     if state.needs_initialize() {
@@ -66,6 +67,7 @@ pub fn cef_retain() -> CefResult<()> {
         cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
         initialize_cef()?;
         state.mark_initialized();
+        crate::cef_pump::activate();
 
         settings::warn_if_insecure_settings();
         settings::log_production_security_baseline();
