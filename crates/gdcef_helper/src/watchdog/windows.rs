@@ -13,6 +13,6 @@ pub(super) fn prepare_parent_watchdog(parent_pid: u32) -> Result<Option<usize>, 
 }
 
 pub(super) fn wait_for_parent(_parent_pid: u32, watch: usize) {
-    let handle = windows::Win32::Foundation::HANDLE(watch as isize);
+    let handle = windows::Win32::Foundation::HANDLE(watch as *mut std::ffi::c_void);
     unsafe { WaitForSingleObject(handle, INFINITE) };
 }
