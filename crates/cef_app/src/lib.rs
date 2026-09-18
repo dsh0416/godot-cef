@@ -16,6 +16,43 @@ use crate::browser_process::{BrowserProcessHandlerBuilder, OsrBrowserProcessHand
 use crate::render_process::{OsrRenderProcessHandler, RenderProcessHandlerBuilder};
 use cef::{self, App, ImplApp, ImplCommandLine, ImplSchemeRegistrar, WrapApp, rc::Rc, wrap_app};
 
+/// Returns the Chromium features that must be enabled for the current host.
+///
+/// Chromium's Wayland desktop capturer uses PipeWire through the XDG desktop
+/// portal. The feature is intentionally enabled only for a Wayland session;
+/// X11 keeps the existing capturer and behavior.
+#[allow(unused_mut, unused_variables)]
+fn default_enable_features(
+    backend: GodotRenderBackend,
+    wayland_session: bool,
+) -> Vec<&'static str> {
+    let mut features = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        if backend == GodotRenderBackend::Vulkan {
+            features.extend(["Vulkan", "VulkanFromANGLE", "DefaultANGLEVulkan"]);
+        }
+
+        if wayland_session {
+            features.push("WebRTCPipeWireCapturer");
+        }
+    }
+
+    features
+}
+
+fn is_wayland_session() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return std::env::var("XDG_SESSION_TYPE")
+            .is_ok_and(|value| value.eq_ignore_ascii_case("wayland"));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    false
+}
+
 wrap_app! {
     pub struct AppBuilder {
         app: OsrApp,
@@ -69,11 +106,15 @@ wrap_app! {
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
             command_line.append_switch(Some(&"use-views".into()));
 
-            #[cfg(target_os = "linux")]
-            if self.app.godot_backend() == GodotRenderBackend::Vulkan {
+            let enable_features = default_enable_features(
+                self.app.godot_backend(),
+                is_wayland_session(),
+            );
+            if !enable_features.is_empty() {
+                let enable_features = enable_features.join(",");
                 command_line.append_switch_with_value(
                     Some(&"enable-features".into()),
-                    Some(&"Vulkan,VulkanFromANGLE,DefaultANGLEVulkan".into()),
+                    Some(&enable_features.as_str().into()),
                 );
             }
 
@@ -154,5 +195,38 @@ wrap_app! {
 impl AppBuilder {
     pub fn build(app: OsrApp) -> cef::App {
         Self::new(app)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_features_are_empty_without_linux_specific_options() {
+        assert!(default_enable_features(GodotRenderBackend::Unknown, false).is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn wayland_enables_pipewire_without_dropping_vulkan_features() {
+        assert_eq!(
+            default_enable_features(GodotRenderBackend::Vulkan, true),
+            vec![
+                "Vulkan",
+                "VulkanFromANGLE",
+                "DefaultANGLEVulkan",
+                "WebRTCPipeWireCapturer"
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn x11_does_not_enable_pipewire() {
+        assert_eq!(
+            default_enable_features(GodotRenderBackend::Unknown, false),
+            Vec::<&str>::new()
+        );
     }
 }
