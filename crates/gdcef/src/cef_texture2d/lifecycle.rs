@@ -60,6 +60,7 @@ impl CefTexture2D {
 
     pub(super) fn cleanup_instance(&mut self) {
         self.disconnect_frame_hook();
+        self.cancel_active_touches();
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             if let Some(ref mut stable) = self.stable_texture_2d_rd {

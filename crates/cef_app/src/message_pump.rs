@@ -63,8 +63,16 @@ impl MessagePumpScheduler {
     }
 
     fn schedule_at(&self, now: Instant, delay_ms: i64) {
-        let delay = Duration::from_millis(delay_ms.max(0) as u64).min(MAX_IDLE_DELAY);
-        self.lock().deadline = Some(now + delay);
+        let delay = Duration::from_millis(delay_ms.max(0) as u64);
+        // CEF's requested deadline is authoritative. `i64::MAX` is larger
+        // than the range representable by some platform `Instant`s, so keep
+        // an unrepresentable deadline safely in the future rather than
+        // panicking while converting it.
+        let deadline = now.checked_add(delay).unwrap_or_else(|| {
+            now.checked_add(Duration::from_secs(365 * 24 * 60 * 60 * 100))
+                .expect("a platform Instant must represent a century")
+        });
+        self.lock().deadline = Some(deadline);
     }
 
     /// Execute at most one due iteration on the activating thread. Requests
@@ -202,14 +210,24 @@ mod tests {
     }
 
     #[test]
-    fn idle_service_is_bounded_and_large_delays_cannot_overflow() {
+    fn long_cef_deadlines_are_not_clamped() {
+        let scheduler = MessagePumpScheduler::new();
+        scheduler.activate();
+        let now = Instant::now();
+        scheduler.schedule_at(now, 100);
+        assert!(!scheduler.run_due_at(now, || unreachable!()));
+        assert!(!scheduler.run_due_at(now + MAX_IDLE_DELAY, || unreachable!()));
+        assert!(scheduler.run_due_at(now + Duration::from_millis(100), || {}));
+        assert!(scheduler.lock().deadline.is_some());
+    }
+
+    #[test]
+    fn an_unrepresentable_cef_deadline_does_not_panic_or_run_early() {
         let scheduler = MessagePumpScheduler::new();
         scheduler.activate();
         let now = Instant::now();
         scheduler.schedule_at(now, i64::MAX);
-        assert!(!scheduler.run_due_at(now, || unreachable!()));
-        assert!(scheduler.run_due_at(now + MAX_IDLE_DELAY, || {}));
-        assert!(scheduler.lock().deadline.is_some());
+        assert!(!scheduler.run_due_at(now + Duration::from_secs(1), || unreachable!()));
     }
 
     #[test]
