@@ -87,6 +87,7 @@ impl D3D12TextureImporter {
                     "[AcceleratedOSR/D3D12] Failed to create command queue: {:?}",
                     e
                 );
+                ()
             })
             .ok()?;
 
@@ -99,6 +100,7 @@ impl D3D12TextureImporter {
         }
         .map_err(|e| {
             godot_error!("[AcceleratedOSR/D3D12] Failed to create fence: {:?}", e);
+            ()
         })
         .ok()?;
 
@@ -108,6 +110,7 @@ impl D3D12TextureImporter {
                     "[AcceleratedOSR/D3D12] Failed to create fence event: {:?}",
                     e
                 );
+                ()
             })
             .ok()?;
 
@@ -123,6 +126,7 @@ impl D3D12TextureImporter {
                         "[AcceleratedOSR/D3D12] Failed to cast command queue to IUnknown: {:?}",
                         e
                     );
+                    ()
                 })
                 .ok()?,
         )];
@@ -146,18 +150,21 @@ impl D3D12TextureImporter {
                  Accelerated OSR requires D3D11on12 (Windows 10+).",
                 e
             );
+            ()
         })
         .ok()?;
 
         let d3d11_device = d3d11_device
             .ok_or_else(|| {
                 godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null device");
+                ();
                 "D3D11 device is null"
             })
             .ok()?;
         let d3d11_context = d3d11_context
             .ok_or_else(|| {
                 godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null context");
+                ();
                 "D3D11 context is null"
             })
             .ok()?;
@@ -169,6 +176,7 @@ impl D3D12TextureImporter {
                     "[AcceleratedOSR/D3D12] Failed to query ID3D11On12Device: {:?}",
                     e
                 );
+                ()
             })
             .ok()?;
 
