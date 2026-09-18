@@ -70,7 +70,7 @@ impl MessagePumpScheduler {
         // panicking while converting it.
         let deadline = now.checked_add(delay).unwrap_or_else(|| {
             now.checked_add(Duration::from_secs(365 * 24 * 60 * 60 * 100))
-                .expect("a platform Instant must represent a century")
+                .unwrap_or(now)
         });
         self.lock().deadline = Some(deadline);
     }
