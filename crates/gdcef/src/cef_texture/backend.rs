@@ -533,6 +533,12 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
         return;
     }
     app.mark_browser_closing();
+    if let Some(state) = &app.state {
+        if let Ok(mut drag) = state.source_drag.lock() {
+            drag.enabled = false;
+        }
+        state.finish_source_drag(None, None, 0);
+    }
 
     if let Some(state) = &app.state
         && let Ok(mut pending) = state.pending_permission_requests.lock()
@@ -653,8 +659,11 @@ fn create_software_browser(
         texture.set_image(&initial_image);
     }
 
-    let cef_render_handler =
-        webrender::SoftwareOsrHandler::build(render_handler, queues.event_queues.clone());
+    let cef_render_handler = webrender::SoftwareOsrHandler::build(
+        render_handler,
+        queues.event_queues.clone(),
+        queues.source_drag.clone(),
+    );
     let mut client = webrender::CefClientImpl::build(
         cef_render_handler,
         cursor_type.clone(),
@@ -677,6 +686,7 @@ fn create_software_browser(
     })?;
 
     let event_queues = queues.event_queues.clone();
+    let source_drag = queues.source_drag.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Software {
@@ -689,6 +699,7 @@ fn create_software_browser(
         popup_state,
         event_queues,
         audio: queues.into_audio_state(),
+        source_drag,
         popup_policy,
         pending_permission_requests,
         pending_permission_aggregates,
@@ -769,8 +780,11 @@ fn create_accelerated_browser(
         pending_permission_aggregates.clone(),
     );
 
-    let cef_render_handler =
-        webrender::AcceleratedOsrHandler::build(render_handler, queues.event_queues.clone());
+    let cef_render_handler = webrender::AcceleratedOsrHandler::build(
+        render_handler,
+        queues.event_queues.clone(),
+        queues.source_drag.clone(),
+    );
     let mut client = webrender::CefClientImpl::build(
         cef_render_handler,
         cursor_type.clone(),
@@ -798,6 +812,7 @@ fn create_accelerated_browser(
     };
 
     let event_queues = queues.event_queues.clone();
+    let source_drag = queues.source_drag.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Accelerated {
@@ -810,6 +825,7 @@ fn create_accelerated_browser(
         popup_state,
         event_queues,
         audio: queues.into_audio_state(),
+        source_drag,
         popup_policy,
         pending_permission_requests,
         pending_permission_aggregates,

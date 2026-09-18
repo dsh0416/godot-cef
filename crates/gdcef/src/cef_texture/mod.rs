@@ -5,6 +5,7 @@ mod ime;
 mod permission_ops;
 mod rendering;
 mod signals;
+mod source_drag;
 
 use cef::{self, ImplBrowserHost, ImplDragData, do_message_loop_work};
 use godot::classes::notify::ControlNotification;
@@ -132,6 +133,9 @@ impl ITextureRect for CefTexture {
             ControlNotification::PROCESS => {
                 self.on_process();
             }
+            ControlNotification::INTERNAL_PROCESS => {
+                self.refresh_browser_drag();
+            }
             ControlNotification::RESIZED => {
                 // React immediately to control size changes so CEF receives
                 // resize notifications even if process timing is delayed.
@@ -140,6 +144,18 @@ impl ITextureRect for CefTexture {
             }
             ControlNotification::PREDELETE => {
                 self.cleanup_instance();
+            }
+            ControlNotification::PAUSED
+            | ControlNotification::DISABLED
+            | ControlNotification::EXIT_TREE
+            | ControlNotification::DRAG_END
+            | ControlNotification::WM_WINDOW_FOCUS_OUT => {
+                self.cancel_browser_drag();
+            }
+            ControlNotification::VISIBILITY_CHANGED => {
+                if !self.base().is_visible_in_tree() {
+                    self.cancel_browser_drag();
+                }
             }
             ControlNotification::FOCUS_ENTER => {
                 if let Some(host) = self.with_app(|app| app.host()) {
@@ -279,6 +295,7 @@ impl CefTexture {
         self.base_mut().set_material(&Self::make_browser_material());
         // Must explicitly enable processing when using on_notification instead of fn process()
         self.base_mut().set_process(true);
+        self.base_mut().set_process_internal(true);
         // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF.
         self.base_mut().set_focus_mode(FocusMode::CLICK);
 
@@ -330,6 +347,12 @@ impl CefTexture {
     }
 
     fn handle_input_event(&mut self, event: Gd<InputEvent>) {
+        if let Ok(key) = event.clone().try_cast::<InputEventKey>()
+            && key.is_pressed()
+            && key.get_keycode() == godot::global::Key::ESCAPE
+        {
+            self.cancel_browser_drag();
+        }
         let pixel_scale = self.get_pixel_scale_factor();
         let device_scale = self.get_device_scale_factor();
 
@@ -769,46 +792,32 @@ impl CefTexture {
 
     #[func]
     pub fn drag_source_ended(&mut self, position: Vector2, operation: i32) {
-        let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
-            crate::cef_i32_to_raw!(operation),
-        ));
-        self.with_app_mut(|app| {
-            let Some(host) = app.host() else {
-                return;
-            };
-            if !app.drag_state.is_dragging_from_browser {
-                return;
-            }
-            host.drag_source_ended_at(position.x as i32, position.y as i32, op);
-            host.drag_source_system_drag_ended();
-            app.drag_state.is_dragging_from_browser = false;
-            app.drag_state.source_position = None;
-            app.drag_state.allowed_ops = 0;
-        });
+        self.finish_browser_drag(None, Some(position), operation);
+    }
+
+    #[func]
+    pub fn drag_source_ended_for_session(
+        &mut self,
+        session_id: i64,
+        position: Vector2,
+        operation: i32,
+    ) {
+        self.finish_browser_drag(Some(session_id), Some(position), operation);
     }
 
     #[func]
     pub fn drag_source_system_ended(&mut self) {
-        self.with_app_mut(|app| {
-            let Some(host) = app.host() else {
-                return;
-            };
-            if !app.drag_state.is_dragging_from_browser {
-                return;
-            }
-            let (x, y) = app.drag_state.source_position.unwrap_or((0, 0));
-            let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(0));
-            host.drag_source_ended_at(x, y, op);
-            host.drag_source_system_drag_ended();
-            app.drag_state.is_dragging_from_browser = false;
-            app.drag_state.source_position = None;
-            app.drag_state.allowed_ops = 0;
-        });
+        self.finish_browser_drag(None, None, 0);
+    }
+
+    #[func]
+    pub fn drag_source_system_ended_for_session(&mut self, session_id: i64) {
+        self.finish_browser_drag(Some(session_id), None, 0);
     }
 
     #[func]
     pub fn is_dragging_from_browser(&self) -> bool {
-        self.with_app(|app| app.drag_state.is_dragging_from_browser)
+        self.source_drag_session_id().is_some()
     }
 
     #[func]

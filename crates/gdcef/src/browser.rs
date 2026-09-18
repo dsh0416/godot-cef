@@ -93,6 +93,7 @@ pub struct DragDataInfo {
 #[derive(Debug, Clone)]
 pub enum DragEvent {
     Started {
+        session_id: i64,
         drag_data: DragDataInfo,
         x: i32,
         y: i32,
@@ -463,9 +464,7 @@ pub type AudioShutdownFlag = Arc<AtomicBool>;
 #[derive(Debug, Clone, Default)]
 pub struct DragState {
     pub is_drag_over: bool,
-    pub is_dragging_from_browser: bool,
     pub allowed_ops: u32,
-    pub source_position: Option<(i32, i32)>,
 }
 
 /// Rendering mode for the CEF browser.
@@ -536,6 +535,7 @@ pub struct BrowserState {
     pub popup_state: PopupStateQueue,
     /// Consolidated event queues for browser-to-Godot communication.
     pub event_queues: EventQueuesHandle,
+    pub(crate) source_drag: crate::drag::SourceDragHandle,
     /// Audio capture state (present when audio capture is enabled).
     pub audio: Option<AudioState>,
     /// Shared popup policy flag, readable from CEF's IO thread.
@@ -666,17 +666,13 @@ mod tests {
         let mut app = App::default();
         for _ in 0..1000 {
             app.drag_state.is_drag_over = true;
-            app.drag_state.is_dragging_from_browser = true;
             app.drag_state.allowed_ops = u32::MAX;
-            app.drag_state.source_position = Some((10, 20));
 
             app.clear_runtime_state();
 
             assert!(app.state.is_none());
             assert!(!app.drag_state.is_drag_over);
-            assert!(!app.drag_state.is_dragging_from_browser);
             assert_eq!(app.drag_state.allowed_ops, 0);
-            assert_eq!(app.drag_state.source_position, None);
         }
     }
 
