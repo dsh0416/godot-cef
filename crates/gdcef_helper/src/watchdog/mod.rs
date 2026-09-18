@@ -48,7 +48,6 @@ pub(crate) fn start_parent_watchdog(command_line: &CommandLine) {
         if platform::prepare_parent_watchdog(parent_pid).is_err() {
             std::process::exit(0);
         }
-        return;
     }
 
     #[cfg(not(target_os = "linux"))]
