@@ -42,15 +42,22 @@ fn default_enable_features(
     features
 }
 
+#[cfg(target_os = "linux")]
 fn is_wayland_session() -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        return std::env::var("XDG_SESSION_TYPE")
-            .is_ok_and(|value| value.eq_ignore_ascii_case("wayland"));
-    }
+    std::env::var("XDG_SESSION_TYPE").is_ok_and(|value| value.eq_ignore_ascii_case("wayland"))
+}
 
-    #[cfg(not(target_os = "linux"))]
+#[cfg(not(target_os = "linux"))]
+fn is_wayland_session() -> bool {
     false
+}
+
+fn merge_enable_features(features: &mut Vec<String>, value: &str) {
+    for feature in value.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+        if !features.iter().any(|existing| existing == feature) {
+            features.push(feature.to_owned());
+        }
+    }
 }
 
 wrap_app! {
@@ -106,17 +113,13 @@ wrap_app! {
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
             command_line.append_switch(Some(&"use-views".into()));
 
-            let enable_features = default_enable_features(
+            let mut enable_features: Vec<String> = default_enable_features(
                 self.app.godot_backend(),
                 is_wayland_session(),
-            );
-            if !enable_features.is_empty() {
-                let enable_features = enable_features.join(",");
-                command_line.append_switch_with_value(
-                    Some(&"enable-features".into()),
-                    Some(&enable_features.as_str().into()),
-                );
-            }
+            )
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
 
             // Only enable remote debugging in debug builds or when running from the editor
             // for security purposes. In production builds, this should be disabled.
@@ -167,11 +170,24 @@ wrap_app! {
                 // Format: "--switch-name" or "--switch-name=value" or "switch-name" or "switch-name=value"
                 let switch_str = trimmed.trim_start_matches('-');
                 if let Some((name, value)) = switch_str.split_once('=') {
+                    if name == "enable-features" {
+                        merge_enable_features(&mut enable_features, value);
+                        continue;
+                    }
+
                     command_line
                         .append_switch_with_value(Some(&name.into()), Some(&value.into()));
                 } else {
                     command_line.append_switch(Some(&switch_str.into()));
                 }
+            }
+
+            if !enable_features.is_empty() {
+                let enable_features = enable_features.join(",");
+                command_line.append_switch_with_value(
+                    Some(&"enable-features".into()),
+                    Some(&enable_features.as_str().into()),
+                );
             }
         }
 
@@ -205,6 +221,21 @@ mod tests {
     #[test]
     fn default_features_are_empty_without_linux_specific_options() {
         assert!(default_enable_features(GodotRenderBackend::Unknown, false).is_empty());
+    }
+
+    #[test]
+    fn custom_features_are_merged_without_duplicates() {
+        let mut features = vec!["WebRTCPipeWireCapturer".to_owned()];
+
+        merge_enable_features(
+            &mut features,
+            "WebRTC, WebRTCPipeWireCapturer, ,UseOzonePlatform",
+        );
+
+        assert_eq!(
+            features,
+            vec!["WebRTCPipeWireCapturer", "WebRTC", "UseOzonePlatform"]
+        );
     }
 
     #[cfg(target_os = "linux")]
