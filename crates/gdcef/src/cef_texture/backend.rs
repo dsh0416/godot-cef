@@ -1,7 +1,6 @@
 use adblock::lists::{FilterSet, ParseOptions};
 use cef::{
-    BrowserSettings, CefStringUtf16, ImplBrowser, ImplBrowserHost, ImplDictionaryValue,
-    RequestContextSettings, WindowInfo,
+    BrowserSettings, CefStringUtf16, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, WindowInfo,
 };
 use cef_app::PhysicalSize;
 use cef_app::ipc_contract::EXTRA_INFO_PRELOAD_SCRIPT;
@@ -110,24 +109,22 @@ fn shared_request_context(log_prefix: &str) -> Result<cef::RequestContext, CefEr
         return Ok(context.clone());
     }
 
-    let cache_path = crate::settings::get_data_path();
-    let cache_path = cache_path.to_str().ok_or_else(|| {
-        CefError::BrowserCreationFailed("cache path is not valid UTF-8".to_string())
-    })?;
-    let context_settings = RequestContextSettings {
-        cache_path: cache_path.into(),
-        ..Default::default()
-    };
     let mut handler = webrender::RequestContextHandlerImpl::build(
         webrender::OsrRequestContextHandler::new(build_adblock_engine(log_prefix)),
     );
-    let mut context =
-        cef::request_context_create_context(Some(&context_settings), Some(&mut handler))
-            .ok_or_else(|| {
-                CefError::BrowserCreationFailed(
-                    "failed to create shared request context".to_string(),
-                )
-            })?;
+    let mut global_context = cef::request_context_get_global_context().ok_or_else(|| {
+        CefError::BrowserCreationFailed("failed to get global request context".to_string())
+    })?;
+    // Share the global CefBrowserContext itself. Recreating a context from the
+    // same cache path can produce a separate wrapper whose scheme handlers are
+    // not used by requests associated with the global Chromium Profile.
+    let mut context = cef::request_context_cef_create_context_shared(
+        Some(&mut global_context),
+        Some(&mut handler),
+    )
+    .ok_or_else(|| {
+        CefError::BrowserCreationFailed("failed to create shared request context".to_string())
+    })?;
 
     godot_protocol::register_res_scheme_handler_on_context(&mut context);
     godot_protocol::register_user_scheme_handler_on_context(&mut context);
