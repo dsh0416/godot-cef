@@ -152,15 +152,12 @@ fn reserve_port(dir: &Path, start: u16, attempts: u16) -> Option<PortReservation
         let Some(lock) = try_lock_file(&dir.join(format!("{port}.lock"))) else {
             continue;
         };
-        match std::net::TcpListener::bind(("127.0.0.1", port)) {
-            Ok(listener) => {
-                return Some(PortReservation {
-                    port,
-                    _lock: lock,
-                    listener: Some(listener),
-                });
-            }
-            Err(_) => {}
+        if let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", port)) {
+            return Some(PortReservation {
+                port,
+                _lock: lock,
+                listener: Some(listener),
+            });
         }
     }
     None
