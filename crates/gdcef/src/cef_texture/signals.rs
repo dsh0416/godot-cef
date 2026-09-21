@@ -278,18 +278,18 @@ impl CefTexture {
         for event in events {
             match event {
                 DragEvent::Started {
+                    session_id,
                     drag_data,
                     x,
                     y,
                     allowed_ops,
                 } => {
-                    let drag_info = DragDataInfo::from_internal(drag_data);
+                    if self.source_drag_session_id() != Some(*session_id) {
+                        continue;
+                    }
+                    let mut drag_info = DragDataInfo::from_internal(drag_data);
+                    drag_info.bind_mut().session_id = *session_id;
                     let position = Vector2::new(*x as f32, *y as f32);
-                    self.with_app_mut(|app| {
-                        app.drag_state.is_dragging_from_browser = true;
-                        app.drag_state.allowed_ops = *allowed_ops;
-                        app.drag_state.source_position = Some((*x, *y));
-                    });
                     emit_signal_variants!(
                         self,
                         "drag_started",
@@ -409,11 +409,8 @@ impl CefTexture {
     fn process_ime_enable_events(&mut self, events: &VecDeque<bool>) {
         // Take the last event (latest wins)
         if let Some(&enable) = events.back() {
-            if enable && !self.ime_active {
-                self.activate_ime();
-            } else if !enable && self.ime_active {
-                self.deactivate_ime();
-            }
+            self.focus_state.editable = enable;
+            self.reconcile_browser_focus();
         }
     }
 

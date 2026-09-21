@@ -1,18 +1,20 @@
 pub(crate) mod backend;
 mod browser_lifecycle;
 mod cookie_ops;
+mod focus_state;
 mod ime;
+mod input_routing;
 mod permission_ops;
+mod pointer_state;
 mod rendering;
 mod signals;
+mod source_drag;
 
-use cef::{self, ImplBrowserHost, ImplDragData, do_message_loop_work};
+use cef::{self, ImplBrowserHost, ImplDragData};
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
-    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, InputEventKey,
-    InputEventMagnifyGesture, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
-    InputEventScreenDrag, InputEventScreenTouch, LineEdit, TextureRect,
+    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, LineEdit, TextureRect,
 };
 use godot::prelude::*;
 
@@ -79,7 +81,10 @@ pub struct CefTexture {
     // IME state
     ime_active: bool,
     ime_proxy: Option<Gd<LineEdit>>,
-    ime_focus_regrab_pending: bool,
+    focus_state: focus_state::FocusState,
+    focus_reconcile_pending: bool,
+    pointer_state: pointer_state::PointerState,
+    last_pointer_position: Vector2,
 
     // Popup state
     popup_overlay: Option<Gd<TextureRect>>,
@@ -116,7 +121,10 @@ impl ITextureRect for CefTexture {
             browser_create_deferred_pending: false,
             ime_active: false,
             ime_proxy: None,
-            ime_focus_regrab_pending: false,
+            focus_state: Default::default(),
+            focus_reconcile_pending: false,
+            pointer_state: Default::default(),
+            last_pointer_position: Vector2::ZERO,
             popup_overlay: None,
             popup_texture: None,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -132,6 +140,14 @@ impl ITextureRect for CefTexture {
             ControlNotification::PROCESS => {
                 self.on_process();
             }
+            ControlNotification::INTERNAL_PROCESS => {
+                self.refresh_browser_drag();
+                if self.browser_input_available() {
+                    self.reconcile_browser_focus();
+                } else {
+                    self.suspend_browser_input();
+                }
+            }
             ControlNotification::RESIZED => {
                 // React immediately to control size changes so CEF receives
                 // resize notifications even if process timing is delayed.
@@ -139,17 +155,36 @@ impl ITextureRect for CefTexture {
                 self.update_texture();
             }
             ControlNotification::PREDELETE => {
+                self.suspend_browser_input();
                 self.cleanup_instance();
             }
-            ControlNotification::FOCUS_ENTER => {
-                if let Some(host) = self.with_app(|app| app.host()) {
-                    host.set_focus(true as _);
+            ControlNotification::PAUSED
+            | ControlNotification::DISABLED
+            | ControlNotification::EXIT_TREE
+            | ControlNotification::WM_WINDOW_FOCUS_OUT => {
+                self.suspend_browser_input();
+            }
+            ControlNotification::DRAG_END => {
+                self.cancel_browser_drag();
+            }
+            ControlNotification::WM_WINDOW_FOCUS_IN => {
+                self.defer_browser_focus_update();
+            }
+            ControlNotification::VISIBILITY_CHANGED => {
+                if !self.base().is_visible_in_tree() {
+                    self.suspend_browser_input();
+                } else {
+                    self.defer_browser_focus_update();
                 }
             }
-            ControlNotification::FOCUS_EXIT => {
-                if let Some(host) = self.with_app(|app| app.host()) {
-                    host.set_focus(false as _);
-                }
+            ControlNotification::FOCUS_ENTER | ControlNotification::FOCUS_EXIT => {
+                self.defer_browser_focus_update();
+            }
+            ControlNotification::MOUSE_ENTER => {
+                self.pointer_state.enter();
+            }
+            ControlNotification::MOUSE_EXIT => {
+                self.handle_browser_mouse_exit();
             }
             ControlNotification::OS_IME_UPDATE => {
                 self.handle_os_ime_update();
@@ -160,6 +195,20 @@ impl ITextureRect for CefTexture {
 
     fn input(&mut self, event: Gd<InputEvent>) {
         self.handle_input_event(event);
+    }
+
+    fn gui_input(&mut self, event: Gd<InputEvent>) {
+        self.handle_gui_input_event(event);
+    }
+
+    fn has_point(&self, point: Vector2) -> bool {
+        // Accelerated select/autocomplete popups can extend outside the view.
+        // Keep them in this control's GUI target and coordinate space.
+        let popup_rect = self
+            .popup_overlay
+            .as_ref()
+            .and_then(|overlay| overlay.is_visible().then(|| overlay.get_rect()));
+        input_routing::browser_has_point(point, self.base().get_size(), popup_rect)
     }
 }
 
@@ -173,12 +222,6 @@ impl CefTexture {
     fn with_app_mut<R>(&mut self, f: impl FnOnce(&mut crate::browser::App) -> R) -> R {
         let mut helper = self.texture2d_helper.bind_mut();
         f(helper.runtime_app_mut())
-    }
-
-    fn event_position_to_local(&self, position: Vector2) -> Vector2 {
-        // `input()` delivers positions in viewport space for this node path, while
-        // CEF expects view-local coordinates relative to the browser texture.
-        position - self.base().get_global_position()
     }
 
     fn make_browser_material() -> Gd<godot::classes::Material> {
@@ -279,6 +322,7 @@ impl CefTexture {
         self.base_mut().set_material(&Self::make_browser_material());
         // Must explicitly enable processing when using on_notification instead of fn process()
         self.base_mut().set_process(true);
+        self.base_mut().set_process_internal(true);
         // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF.
         self.base_mut().set_focus_mode(FocusMode::CLICK);
 
@@ -309,10 +353,6 @@ impl CefTexture {
         _ = self.handle_size_change();
         self.update_texture();
 
-        if self.with_app(|app| app.state.is_some()) {
-            do_message_loop_work();
-        }
-
         self.request_external_begin_frame();
         self.update_cursor();
 
@@ -327,61 +367,7 @@ impl CefTexture {
             self.create_browser();
         }
         self.base_mut().set_process(true);
-    }
-
-    fn handle_input_event(&mut self, event: Gd<InputEvent>) {
-        let pixel_scale = self.get_pixel_scale_factor();
-        let device_scale = self.get_device_scale_factor();
-
-        if let Ok(mut mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
-            let local_position = self.event_position_to_local(mouse_button.get_position());
-            mouse_button.set_position(local_position);
-            self.texture2d_helper.bind().forward_mouse_button_event(
-                mouse_button,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut mouse_motion) = event.clone().try_cast::<InputEventMouseMotion>() {
-            let local_position = self.event_position_to_local(mouse_motion.get_position());
-            mouse_motion.set_position(local_position);
-            self.texture2d_helper.bind().forward_mouse_motion_event(
-                mouse_motion,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut pan_gesture) = event.clone().try_cast::<InputEventPanGesture>() {
-            let local_position = self.event_position_to_local(pan_gesture.get_position());
-            pan_gesture.set_position(local_position);
-            self.texture2d_helper.bind().forward_pan_gesture_event(
-                pan_gesture,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut screen_touch) = event.clone().try_cast::<InputEventScreenTouch>() {
-            let local_position = self.event_position_to_local(screen_touch.get_position());
-            screen_touch.set_position(local_position);
-            self.texture2d_helper.bind_mut().forward_screen_touch_event(
-                screen_touch,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut screen_drag) = event.clone().try_cast::<InputEventScreenDrag>() {
-            let local_position = self.event_position_to_local(screen_drag.get_position());
-            screen_drag.set_position(local_position);
-            self.texture2d_helper.bind_mut().forward_screen_drag_event(
-                screen_drag,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(magnify_gesture) = event.clone().try_cast::<InputEventMagnifyGesture>() {
-            self.texture2d_helper
-                .bind()
-                .forward_magnify_gesture_event(magnify_gesture);
-        } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
-            self.texture2d_helper
-                .bind()
-                .forward_key_event(key_event, self.ime_active);
-        }
+        self.reconcile_browser_focus();
     }
 
     #[func]
@@ -769,46 +755,32 @@ impl CefTexture {
 
     #[func]
     pub fn drag_source_ended(&mut self, position: Vector2, operation: i32) {
-        let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
-            crate::cef_i32_to_raw!(operation),
-        ));
-        self.with_app_mut(|app| {
-            let Some(host) = app.host() else {
-                return;
-            };
-            if !app.drag_state.is_dragging_from_browser {
-                return;
-            }
-            host.drag_source_ended_at(position.x as i32, position.y as i32, op);
-            host.drag_source_system_drag_ended();
-            app.drag_state.is_dragging_from_browser = false;
-            app.drag_state.source_position = None;
-            app.drag_state.allowed_ops = 0;
-        });
+        self.finish_browser_drag(None, Some(position), operation);
+    }
+
+    #[func]
+    pub fn drag_source_ended_for_session(
+        &mut self,
+        session_id: i64,
+        position: Vector2,
+        operation: i32,
+    ) {
+        self.finish_browser_drag(Some(session_id), Some(position), operation);
     }
 
     #[func]
     pub fn drag_source_system_ended(&mut self) {
-        self.with_app_mut(|app| {
-            let Some(host) = app.host() else {
-                return;
-            };
-            if !app.drag_state.is_dragging_from_browser {
-                return;
-            }
-            let (x, y) = app.drag_state.source_position.unwrap_or((0, 0));
-            let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(0));
-            host.drag_source_ended_at(x, y, op);
-            host.drag_source_system_drag_ended();
-            app.drag_state.is_dragging_from_browser = false;
-            app.drag_state.source_position = None;
-            app.drag_state.allowed_ops = 0;
-        });
+        self.finish_browser_drag(None, None, 0);
+    }
+
+    #[func]
+    pub fn drag_source_system_ended_for_session(&mut self, session_id: i64) {
+        self.finish_browser_drag(Some(session_id), None, 0);
     }
 
     #[func]
     pub fn is_dragging_from_browser(&self) -> bool {
-        self.with_app(|app| app.drag_state.is_dragging_from_browser)
+        self.source_drag_session_id().is_some()
     }
 
     #[func]

@@ -2,6 +2,7 @@ mod app;
 mod browser_process;
 pub mod ipc_contract;
 mod loader;
+pub mod message_pump;
 mod render_handler;
 mod render_process;
 mod types;
@@ -12,9 +13,55 @@ pub use loader::{load_cef_framework_from_path, load_sandbox_from_path};
 pub use render_handler::OsrRenderHandler;
 pub use types::{CursorType, FrameBuffer, PhysicalSize, PopupRect, PopupState};
 
+pub const GDCEF_PARENT_PID_SWITCH: &str = "gdcef-parent-pid";
+
 use crate::browser_process::{BrowserProcessHandlerBuilder, OsrBrowserProcessHandler};
 use crate::render_process::{OsrRenderProcessHandler, RenderProcessHandlerBuilder};
 use cef::{self, App, ImplApp, ImplCommandLine, ImplSchemeRegistrar, WrapApp, rc::Rc, wrap_app};
+
+/// Returns the Chromium features that must be enabled for the current host.
+///
+/// Chromium's Wayland desktop capturer uses PipeWire through the XDG desktop
+/// portal. The feature is intentionally enabled only for a Wayland session;
+/// X11 keeps the existing capturer and behavior.
+#[allow(unused_mut, unused_variables)]
+fn default_enable_features(
+    backend: GodotRenderBackend,
+    wayland_session: bool,
+) -> Vec<&'static str> {
+    let mut features = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        if backend == GodotRenderBackend::Vulkan {
+            features.extend(["Vulkan", "VulkanFromANGLE", "DefaultANGLEVulkan"]);
+        }
+
+        if wayland_session {
+            features.push("WebRTCPipeWireCapturer");
+        }
+    }
+
+    features
+}
+
+#[cfg(target_os = "linux")]
+fn is_wayland_session() -> bool {
+    std::env::var("XDG_SESSION_TYPE").is_ok_and(|value| value.eq_ignore_ascii_case("wayland"))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn is_wayland_session() -> bool {
+    false
+}
+
+fn merge_enable_features(features: &mut Vec<String>, value: &str) {
+    for feature in value.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+        if !features.iter().any(|existing| existing == feature) {
+            features.push(feature.to_owned());
+        }
+    }
+}
 
 wrap_app! {
     pub struct AppBuilder {
@@ -69,13 +116,13 @@ wrap_app! {
             command_line.append_switch(Some(&"off-screen-rendering-enabled".into()));
             command_line.append_switch(Some(&"use-views".into()));
 
-            #[cfg(target_os = "linux")]
-            if self.app.godot_backend() == GodotRenderBackend::Vulkan {
-                command_line.append_switch_with_value(
-                    Some(&"enable-features".into()),
-                    Some(&"Vulkan,VulkanFromANGLE,DefaultANGLEVulkan".into()),
-                );
-            }
+            let mut enable_features: Vec<String> = default_enable_features(
+                self.app.godot_backend(),
+                is_wayland_session(),
+            )
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
 
             // Only enable remote debugging in debug builds or when running from the editor
             // for security purposes. In production builds, this should be disabled.
@@ -126,11 +173,24 @@ wrap_app! {
                 // Format: "--switch-name" or "--switch-name=value" or "switch-name" or "switch-name=value"
                 let switch_str = trimmed.trim_start_matches('-');
                 if let Some((name, value)) = switch_str.split_once('=') {
+                    if name == "enable-features" {
+                        merge_enable_features(&mut enable_features, value);
+                        continue;
+                    }
+
                     command_line
                         .append_switch_with_value(Some(&name.into()), Some(&value.into()));
                 } else {
                     command_line.append_switch(Some(&switch_str.into()));
                 }
+            }
+
+            if !enable_features.is_empty() {
+                let enable_features = enable_features.join(",");
+                command_line.append_switch_with_value(
+                    Some(&"enable-features".into()),
+                    Some(&enable_features.as_str().into()),
+                );
             }
         }
 
@@ -154,5 +214,53 @@ wrap_app! {
 impl AppBuilder {
     pub fn build(app: OsrApp) -> cef::App {
         Self::new(app)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_features_are_empty_without_linux_specific_options() {
+        assert!(default_enable_features(GodotRenderBackend::Unknown, false).is_empty());
+    }
+
+    #[test]
+    fn custom_features_are_merged_without_duplicates() {
+        let mut features = vec!["WebRTCPipeWireCapturer".to_owned()];
+
+        merge_enable_features(
+            &mut features,
+            "WebRTC, WebRTCPipeWireCapturer, ,UseOzonePlatform",
+        );
+
+        assert_eq!(
+            features,
+            vec!["WebRTCPipeWireCapturer", "WebRTC", "UseOzonePlatform"]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn wayland_enables_pipewire_without_dropping_vulkan_features() {
+        assert_eq!(
+            default_enable_features(GodotRenderBackend::Vulkan, true),
+            vec![
+                "Vulkan",
+                "VulkanFromANGLE",
+                "DefaultANGLEVulkan",
+                "WebRTCPipeWireCapturer"
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn x11_does_not_enable_pipewire() {
+        assert_eq!(
+            default_enable_features(GodotRenderBackend::Unknown, false),
+            Vec::<&str>::new()
+        );
     }
 }

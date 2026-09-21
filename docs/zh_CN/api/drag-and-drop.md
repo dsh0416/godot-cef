@@ -25,6 +25,7 @@ CefTexture 支持 Godot 与嵌入式 CEF 浏览器之间的双向拖放（Drag &
 
 | 属性 | 类型 | 描述 |
 |------|------|------|
+| `session_id` | `int` | 浏览器发起拖动的唯一 ID；手动创建或外部传入的数据为 `0` |
 | `is_link` | `bool` | 是否为 URL 链接拖动 |
 | `is_file` | `bool` | 是否为文件拖动 |
 | `is_fragment` | `bool` | 是否为文本/HTML 片段拖动 |
@@ -115,6 +116,10 @@ func _notification(what):
 
 ## CEF 浏览器 → Godot（处理浏览器发起的拖动）
 
+只有可见、正在处理且连接了 `drag_started` 信号的 `CefTexture` 才会接受浏览器拖动。没有监听器时会拒绝拖动，避免 CEF 等待永远不会到来的结束通知。独立使用的 `CefTexture2D` 不接受浏览器拖动。
+
+请在放置处理函数中完成已接受的拖动。鼠标释放后、Godot 拖动结束时，或发生 Escape、窗口失焦、隐藏、暂停和销毁时，节点会取消尚未完成的拖动。因此，即使监听器收到信号后没有结束拖动，也不会一直阻塞浏览器。
+
 当用户开始从网页拖动内容（例如图像、链接或选中的文本）时，CefTexture 会发出您可以连接并在游戏中处理的信号。
 
 ### 信号
@@ -173,6 +178,14 @@ func _on_drag_entered(drag_data: DragDataInfo, mask: int):
 ### 通知 CEF 浏览器拖动结束
 
 当从浏览器发起的拖动结束时，只通知 CEF 一次：
+
+对于延迟回调，请保存 `drag_data.session_id`，并使用 `drag_source_ended_for_session(session_id, position, operation)` 或 `drag_source_system_ended_for_session(session_id)`。过期或重复的结束通知会被忽略，浏览器重建后也不例外。下面的旧方法针对**当前**拖动，只应同步使用。结束位置使用 CEF 视图坐标，与 `drag_started` 提供的坐标一致。
+
+```gdscript
+func finish_drag(data: DragDataInfo, position: Vector2, accepted: bool):
+    var operation = DragOperation.COPY if accepted else DragOperation.NONE
+    cef_texture.drag_source_ended_for_session(data.session_id, position, operation)
+```
 
 #### `drag_source_ended(position: Vector2, operation: int)`
 
@@ -261,4 +274,3 @@ func _notification(what):
             cef_texture.drag_source_system_ended()
         browser_drag_data = null
 ```
-

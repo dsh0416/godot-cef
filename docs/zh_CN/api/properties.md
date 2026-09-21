@@ -142,7 +142,7 @@ IPC。它不是安全隔离边界，也不应包含不允许被页面读取的�
 | `godot_cef/network/user_agent` | `String` | `""` | 自定义 User-Agent 字符串。留空则使用 CEF 默认 User-Agent。 |
 | `godot_cef/network/proxy_server` | `String` | `""` | 代理服务器 URL（如 `socks5://127.0.0.1:1080` 或 `http://proxy:8080`）。留空表示直连。 |
 | `godot_cef/network/proxy_bypass_list` | `String` | `""` | 不走代理的主机列表（逗号分隔，如 `localhost,127.0.0.1,*.local`）。 |
-| `godot_cef/network/enable_adblock` | `bool` | `false` | 启用基于规则的请求过滤（adblock）。仅对该设置生效后新创建的浏览器实例生效（adblock 配置在浏览器创建时确定）。 |
+| `godot_cef/network/enable_adblock` | `bool` | `false` | 启用基于规则的请求过滤（adblock）。请在创建第一个浏览器前完成配置；所有浏览器实例共享由此创建的请求上下文。 |
 | `godot_cef/network/adblock_rules_path` | `String` | `""` | EasyList/ABP 兼容规则文件路径。支持 `user://` 与 `res://`。当 adblock 关闭时忽略该项。 |
 
 ### 高级设置

@@ -43,6 +43,7 @@ where
 pub(crate) struct ClientQueues {
     /// Consolidated event queues (UI-thread callbacks).
     pub event_queues: EventQueuesHandle,
+    pub source_drag: crate::drag::SourceDragHandle,
     /// Audio packet queue (may be called from audio thread).
     pub audio_packet_queue: AudioPacketQueue,
     /// Audio parameters state.
@@ -75,6 +76,7 @@ impl ClientQueues {
         use std::sync::atomic::AtomicBool;
         Self {
             event_queues: Arc::new(Mutex::new(EventQueues::new())),
+            source_drag: Arc::new(Mutex::new(crate::drag::SourceDragState::default())),
             audio_packet_queue: Arc::new(Mutex::new(VecDeque::new())),
             audio_params: Arc::new(Mutex::new(None)),
             audio_sample_rate: Arc::new(Mutex::new(sample_rate)),
@@ -251,17 +253,30 @@ fn handle_start_dragging(
     x: ::std::os::raw::c_int,
     y: ::std::os::raw::c_int,
     event_queues: &EventQueuesHandle,
+    source_drag: &crate::drag::SourceDragHandle,
 ) -> ::std::os::raw::c_int {
-    if let Some(drag_data) = drag_data {
-        let drag_info = extract_drag_data_info(drag_data);
-        with_event_queues(event_queues, |queues| {
-            queues.drag_events.push_back(DragEvent::Started {
-                drag_data: drag_info,
-                x,
-                y,
-                allowed_ops: drag_ops_to_u32(allowed_ops),
-            });
+    let Some(drag_data) = drag_data else {
+        return 0;
+    };
+    let Ok(mut state) = source_drag.lock() else {
+        return 0;
+    };
+    let allowed_ops = drag_ops_to_u32(allowed_ops);
+    let Some(session_id) = state.start((x, y), allowed_ops) else {
+        return 0;
+    };
+    let drag_info = extract_drag_data_info(drag_data);
+    if !with_event_queues(event_queues, |queues| {
+        queues.drag_events.push_back(DragEvent::Started {
+            session_id,
+            drag_data: drag_info,
+            x,
+            y,
+            allowed_ops,
         });
+    }) {
+        state.finish(Some(session_id));
+        return 0;
     }
     1
 }
@@ -281,6 +296,7 @@ macro_rules! impl_common_render_handler {
             pub struct $struct_name {
                 handler: $handler_type,
                 event_queues: EventQueuesHandle,
+                source_drag: crate::drag::SourceDragHandle,
             }
 
             impl RenderHandler {
@@ -347,7 +363,7 @@ macro_rules! impl_common_render_handler {
                     x: ::std::os::raw::c_int,
                     y: ::std::os::raw::c_int,
                 ) -> ::std::os::raw::c_int {
-                    handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues)
+                    handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues, &self.source_drag)
                 }
 
                 fn update_drag_cursor(
@@ -398,7 +414,8 @@ impl_common_render_handler!(SoftwareOsrHandler, handler: cef_app::OsrRenderHandl
 impl_build_new!(
     pub SoftwareOsrHandler => cef::RenderHandler;
     handler: cef_app::OsrRenderHandler,
-    event_queues: EventQueuesHandle
+    event_queues: EventQueuesHandle,
+    source_drag: crate::drag::SourceDragHandle
 );
 
 impl_common_render_handler!(AcceleratedOsrHandler, handler: PlatformAcceleratedRenderHandler,
@@ -442,7 +459,8 @@ impl_common_render_handler!(AcceleratedOsrHandler, handler: PlatformAcceleratedR
 impl_build_new!(
     pub AcceleratedOsrHandler => cef::RenderHandler;
     handler: PlatformAcceleratedRenderHandler,
-    event_queues: EventQueuesHandle
+    event_queues: EventQueuesHandle,
+    source_drag: crate::drag::SourceDragHandle
 );
 
 fn cef_cursor_to_cursor_type(cef_type: cef::sys::cef_cursor_type_t) -> CursorType {

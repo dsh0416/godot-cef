@@ -31,6 +31,9 @@ impl CefTexture {
 
         self.ime_active = false;
         self.ime_proxy = None;
+        self.focus_state = Default::default();
+        self.focus_reconcile_pending = false;
+        self.pointer_state = Default::default();
 
         if let Some(mut overlay) = self.popup_overlay.take() {
             overlay.queue_free();
@@ -80,6 +83,7 @@ impl CefTexture {
             return Err(err);
         }
         self.with_app_mut(|app| app.mark_browser_running());
+        self.focus_state.invalidate_host_focus();
         if let Some(texture) =
             self.with_app(|app| app.state.as_ref().map(|s| s.render_mode.texture_2d()))
         {

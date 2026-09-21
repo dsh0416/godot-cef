@@ -92,14 +92,6 @@ pub fn claim_process_profile(base: &Path) -> ActiveProfile {
     active
 }
 
-pub fn current_profile_path() -> Option<PathBuf> {
-    let guard = match PROCESS_PROFILE.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    guard.as_ref().map(|claim| claim.path.clone())
-}
-
 /// Returns the first port in `start..start+attempts` that can be bound.
 /// Returns `start` when none of those ports are free.
 pub fn pick_available_port(start: u16, attempts: u16) -> u16 {

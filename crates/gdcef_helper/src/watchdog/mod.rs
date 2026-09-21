@@ -1,0 +1,59 @@
+#[cfg(not(target_os = "linux"))]
+mod runtime;
+
+#[cfg(target_os = "linux")]
+#[path = "linux.rs"]
+mod platform;
+
+#[cfg(target_os = "macos")]
+#[path = "macos.rs"]
+mod platform;
+
+#[cfg(target_os = "windows")]
+#[path = "windows.rs"]
+mod platform;
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+#[path = "unsupported.rs"]
+mod platform;
+
+use cef::{CefString, CommandLine, ImplCommandLine};
+
+pub(crate) fn start_parent_watchdog(command_line: &CommandLine) {
+    let switch = CefString::from(cef_app::GDCEF_PARENT_PID_SWITCH);
+    if command_line.has_switch(Some(&switch)) != 1 {
+        return;
+    }
+
+    let parent_pid = CefString::from(&command_line.switch_value(Some(&switch))).to_string();
+    let Ok(parent_pid) = parent_pid.parse::<u32>() else {
+        eprintln!(
+            "Ignoring invalid {} switch value",
+            cef_app::GDCEF_PARENT_PID_SWITCH
+        );
+        return;
+    };
+
+    if parent_pid <= 1 || parent_pid == std::process::id() {
+        eprintln!(
+            "Ignoring unusable {} switch value: {}",
+            cef_app::GDCEF_PARENT_PID_SWITCH,
+            parent_pid
+        );
+        return;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if platform::prepare_parent_watchdog(parent_pid).is_err() {
+            std::process::exit(0);
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    match platform::prepare_parent_watchdog(parent_pid) {
+        Ok(Some(watch)) => runtime::spawn_parent_watchdog(parent_pid, watch),
+        Ok(None) => {}
+        Err(()) => std::process::exit(0),
+    }
+}

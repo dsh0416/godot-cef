@@ -60,6 +60,7 @@ fn lock_cef_state() -> MutexGuard<'static, CefState> {
 }
 
 pub fn cef_retain() -> CefResult<()> {
+    crate::cef_pump::ensure_installed().map_err(CefError::InitializationFailed)?;
     let mut state = lock_cef_state();
 
     if state.needs_initialize() {
@@ -67,6 +68,7 @@ pub fn cef_retain() -> CefResult<()> {
         cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
         initialize_cef()?;
         state.mark_initialized();
+        crate::cef_pump::activate();
 
         settings::warn_if_insecure_settings();
         settings::log_production_security_baseline();
@@ -353,20 +355,6 @@ fn initialize_cef() -> CefResult<()> {
     }
 
     Ok(())
-}
-
-/// Request-context settings that share this process's CEF profile.
-///
-/// Every browser created with these settings reads and writes the same cookies,
-/// cache, and localStorage. A different Godot process has its own profile.
-pub(crate) fn shared_request_context_settings() -> cef::RequestContextSettings {
-    let mut context_settings = cef::RequestContextSettings::default();
-    if let Some(path) = profile_dir::current_profile_path()
-        && let Some(text) = path.to_str()
-    {
-        context_settings.cache_path = text.into();
-    }
-    context_settings
 }
 
 #[cfg(test)]

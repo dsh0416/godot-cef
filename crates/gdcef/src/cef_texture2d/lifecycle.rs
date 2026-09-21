@@ -60,6 +60,7 @@ impl CefTexture2D {
 
     pub(super) fn cleanup_instance(&mut self) {
         self.disconnect_frame_hook();
+        self.cancel_active_touches();
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             if let Some(ref mut stable) = self.stable_texture_2d_rd {
@@ -92,7 +93,7 @@ impl CefTexture2D {
         let dpi = self.get_dpi();
         let _ = self.runtime.handle_size_change(logical_size, dpi);
         self.update_texture();
-        self.runtime.message_loop_and_begin_frame();
+        self.runtime.request_external_begin_frame();
         self.drain_event_queues();
     }
 }

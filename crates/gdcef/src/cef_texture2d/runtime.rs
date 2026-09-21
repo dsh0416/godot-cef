@@ -123,10 +123,7 @@ impl CefTextureRuntime {
         backend::update_primary_texture(state, log_prefix)
     }
 
-    pub(crate) fn message_loop_and_begin_frame(&self) {
-        if self.app.state.is_some() {
-            cef::do_message_loop_work();
-        }
+    pub(crate) fn request_external_begin_frame(&self) {
         backend::request_external_begin_frame(&self.app);
     }
 

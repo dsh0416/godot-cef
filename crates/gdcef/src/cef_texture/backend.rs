@@ -25,6 +25,8 @@ use crate::error::CefError;
 use crate::utils::get_display_scale_factor;
 use crate::{godot_protocol, render, webrender};
 
+static SHARED_REQUEST_CONTEXT: Mutex<Option<cef::RequestContext>> = Mutex::new(None);
+
 /// Shared browser creation inputs used by both `CefTexture` and `CefTexture2D`.
 pub(crate) struct BackendCreateParams {
     pub logical_size: Vector2,
@@ -89,6 +91,45 @@ fn build_adblock_engine(log_prefix: &str) -> Option<Rc<adblock::Engine>> {
     let _metadata = filter_set.add_filter_list(rules, ParseOptions::default());
     godot::global::godot_print!("[{}] Adblock filter list loaded.", log_prefix);
     Some(Rc::new(adblock::Engine::new_with_filter_set(filter_set)))
+}
+
+fn shared_request_context(log_prefix: &str) -> Result<cef::RequestContext, CefError> {
+    let mut shared = match SHARED_REQUEST_CONTEXT.lock() {
+        Ok(context) => context,
+        Err(poisoned) => {
+            godot::global::godot_warn!(
+                "[{}] Shared request context mutex was poisoned; continuing with recovered state",
+                log_prefix
+            );
+            poisoned.into_inner()
+        }
+    };
+
+    if let Some(context) = shared.as_ref() {
+        return Ok(context.clone());
+    }
+
+    let mut handler = webrender::RequestContextHandlerImpl::build(
+        webrender::OsrRequestContextHandler::new(build_adblock_engine(log_prefix)),
+    );
+    let mut global_context = cef::request_context_get_global_context().ok_or_else(|| {
+        CefError::BrowserCreationFailed("failed to get global request context".to_string())
+    })?;
+    // Share the global CefBrowserContext itself. Recreating a context from the
+    // same cache path can produce a separate wrapper whose scheme handlers are
+    // not used by requests associated with the global Chromium Profile.
+    let mut context = cef::request_context_cef_create_context_shared(
+        Some(&mut global_context),
+        Some(&mut handler),
+    )
+    .ok_or_else(|| {
+        CefError::BrowserCreationFailed("failed to create shared request context".to_string())
+    })?;
+
+    godot_protocol::register_res_scheme_handler_on_context(&mut context);
+    godot_protocol::register_user_scheme_handler_on_context(&mut context);
+    *shared = Some(context.clone());
+    Ok(context)
 }
 
 pub(crate) fn should_use_accelerated_osr(enable_accelerated_osr: bool, log_prefix: &str) -> bool {
@@ -443,21 +484,9 @@ pub(crate) fn try_create_browser(
         ..Default::default()
     };
 
-    let adblock_engine = build_adblock_engine(params.log_prefix);
-    let context_settings = crate::cef_init::shared_request_context_settings();
-    let mut context = cef::request_context_create_context(
-        Some(&context_settings),
-        Some(&mut webrender::RequestContextHandlerImpl::build(
-            webrender::OsrRequestContextHandler::new(adblock_engine),
-        )),
-    );
-    if let Some(ctx) = context.as_mut() {
-        godot_protocol::register_res_scheme_handler_on_context(ctx);
-        godot_protocol::register_user_scheme_handler_on_context(ctx);
-    }
-
     let preload_script =
         resolve_preload_script(&params.preload_script, &params.preload_script_path)?;
+    let mut context = Some(shared_request_context(params.log_prefix)?);
     let create_params = BrowserCreateParams {
         dpi: params.dpi,
         pixel_width,
@@ -501,6 +530,12 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
         return;
     }
     app.mark_browser_closing();
+    if let Some(state) = &app.state {
+        if let Ok(mut drag) = state.source_drag.lock() {
+            drag.enabled = false;
+        }
+        state.finish_source_drag(None, None, 0);
+    }
 
     if let Some(state) = &app.state
         && let Ok(mut pending) = state.pending_permission_requests.lock()
@@ -621,8 +656,11 @@ fn create_software_browser(
         texture.set_image(&initial_image);
     }
 
-    let cef_render_handler =
-        webrender::SoftwareOsrHandler::build(render_handler, queues.event_queues.clone());
+    let cef_render_handler = webrender::SoftwareOsrHandler::build(
+        render_handler,
+        queues.event_queues.clone(),
+        queues.source_drag.clone(),
+    );
     let mut client = webrender::CefClientImpl::build(
         cef_render_handler,
         cursor_type.clone(),
@@ -645,6 +683,7 @@ fn create_software_browser(
     })?;
 
     let event_queues = queues.event_queues.clone();
+    let source_drag = queues.source_drag.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Software {
@@ -657,6 +696,7 @@ fn create_software_browser(
         popup_state,
         event_queues,
         audio: queues.into_audio_state(),
+        source_drag,
         popup_policy,
         pending_permission_requests,
         pending_permission_aggregates,
@@ -737,8 +777,11 @@ fn create_accelerated_browser(
         pending_permission_aggregates.clone(),
     );
 
-    let cef_render_handler =
-        webrender::AcceleratedOsrHandler::build(render_handler, queues.event_queues.clone());
+    let cef_render_handler = webrender::AcceleratedOsrHandler::build(
+        render_handler,
+        queues.event_queues.clone(),
+        queues.source_drag.clone(),
+    );
     let mut client = webrender::CefClientImpl::build(
         cef_render_handler,
         cursor_type.clone(),
@@ -766,6 +809,7 @@ fn create_accelerated_browser(
     };
 
     let event_queues = queues.event_queues.clone();
+    let source_drag = queues.source_drag.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Accelerated {
@@ -778,6 +822,7 @@ fn create_accelerated_browser(
         popup_state,
         event_queues,
         audio: queues.into_audio_state(),
+        source_drag,
         popup_policy,
         pending_permission_requests,
         pending_permission_aggregates,

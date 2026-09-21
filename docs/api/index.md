@@ -39,6 +39,16 @@ The `CefTexture` node extends `TextureRect` and provides a Chromium-based web br
 
 ## Global Configuration
 
+CEF work is serviced once per Godot main-loop iteration when due, shared by all
+`CefTexture` and `CefTexture2D` instances. Pausing the scene, hiding a browser or
+freeing the last browser does not disconnect this service. Browser rendering
+and node signals still follow their normal processing settings.
+
+The service requires Godot's `SceneTree` main loop and runs on its main thread.
+Global FPS limits, minimized-window throttling and blocking main-thread work
+can delay CEF tasks; the browser frame-rate setting does not override those
+limits.
+
 Due to the architecture of CEF, certain parameters can only be configured **once** during Godot's boot-up process. These settings are configured via **Project Settings** and apply to all `CefTexture` instances.
 
 ### Project Settings

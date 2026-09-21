@@ -23,10 +23,19 @@ The IME candidate window is positioned near the text cursor through a dual-mecha
 Both mechanisms write to the same queue, ensuring the IME window stays correctly positioned throughout the editing session.
 
 ### Focus Handling
-When clicking inside an already-focused editable element to reposition the cursor:
-- The system detects focus transitioning to the parent CefTexture
-- Focus is automatically re-grabbed on the IME proxy to maintain input capability
-- This prevents IME from being incorrectly deactivated during cursor repositioning
+
+CefTexture and its hidden LineEdit share one logical browser focus. Clicking an
+editable element again transfers Godot focus to the proxy without blurring CEF.
+Clicking another Godot control relinquishes browser focus; a delayed IME event
+cannot take it back. An unfinished composition is cancelled when browser focus
+is lost, the window loses focus, or the control is hidden or paused.
+
+Pointer events follow Godot's normal GUI hit testing, `mouse_filter`, transforms,
+and capture. A press inside the browser continues to receive motion and release
+outside it. Keyboard events go only to the browser that owns focus. Incoming
+Godot events are not modified, so multiple browser controls can coexist with
+native controls. `CefTexture2D` consumers that forward events manually remain
+responsible for their own focus and pointer routing.
 
 ## Configuration Requirements
 

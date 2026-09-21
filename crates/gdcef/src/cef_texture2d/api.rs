@@ -10,6 +10,14 @@ impl CefTexture2D {
         self.runtime.app_mut()
     }
 
+    pub(crate) fn cancel_active_touches(&mut self) {
+        if let Some(host) = self.runtime.app().host() {
+            input::cancel_screen_touches(&host, &mut self.touch_id_map);
+        } else {
+            self.touch_id_map.clear();
+        }
+    }
+
     #[func]
     pub fn get_enable_accelerated_osr(&self) -> bool {
         self.enable_accelerated_osr
@@ -231,12 +239,15 @@ impl CefTexture2D {
             frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
 
             if let Ok(mut queues) = state.event_queues.lock()
-                && should_enable_ipc_inspector() {
-                queues.debug_ipc_events.push_back(crate::browser::DebugIpcEvent::text(
+                && should_enable_ipc_inspector()
+            {
+                queues
+                    .debug_ipc_events
+                    .push_back(crate::browser::DebugIpcEvent::text(
                         crate::browser::DebugIpcDirection::ToRenderer,
                         message_string,
                     ));
-                }
+            }
         }
     }
 
@@ -247,7 +258,9 @@ impl CefTexture2D {
             return;
         };
         let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[CefTexture2D] Cannot send binary IPC message: no main frame");
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send binary IPC message: no main frame"
+            );
             return;
         };
 
@@ -274,15 +287,15 @@ impl CefTexture2D {
         argument_list.set_binary(0, Some(&mut binary_value));
         frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
         if let Ok(mut queues) = state.event_queues.lock()
-
-            && should_enable_ipc_inspector() {
-                queues
-                    .debug_ipc_events
-                    .push_back(crate::browser::DebugIpcEvent::binary(
-                        crate::browser::DebugIpcDirection::ToRenderer,
-                        &bytes,
-                    ));
-            }
+            && should_enable_ipc_inspector()
+        {
+            queues
+                .debug_ipc_events
+                .push_back(crate::browser::DebugIpcEvent::binary(
+                    crate::browser::DebugIpcDirection::ToRenderer,
+                    &bytes,
+                ));
+        }
     }
 
     #[func]
@@ -332,7 +345,8 @@ impl CefTexture2D {
         frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
 
         if let Ok(mut queues) = state.event_queues.lock()
-            && should_enable_ipc_inspector() {
+            && should_enable_ipc_inspector()
+        {
             queues
                 .debug_ipc_events
                 .push_back(crate::browser::DebugIpcEvent::data_from_variant(
@@ -340,7 +354,7 @@ impl CefTexture2D {
                     &data,
                     bytes.len(),
                 ));
-            }
+        }
     }
 
     #[func]

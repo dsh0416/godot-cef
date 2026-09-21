@@ -4,7 +4,7 @@ This matrix summarizes the expected rendering mode behavior for each platform/ba
 
 ## Version Baseline
 
-Current builds are based on the Rust `cef` / `cef-dll-sys` crates resolved as `152.0.0+152.0.5` in `Cargo.lock`. The matching CEF runtime version is pinned as `CEF_VERSION` in `mise.toml`; use it when installing CEF binaries manually:
+Current builds are based on the Rust `cef` / `cef-dll-sys` crates resolved as `152.3.0+152.0.6` in `Cargo.lock`. The matching CEF runtime version is pinned as `CEF_VERSION` in `mise.toml`; use it when installing CEF binaries manually:
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"
@@ -45,4 +45,3 @@ At startup, Godot CEF logs:
 - Fallback reason when accelerated rendering cannot be used.
 
 During browser creation, logs also indicate whether each `CefTexture` instance starts in accelerated or software mode.
-
