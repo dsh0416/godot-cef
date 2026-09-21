@@ -9,6 +9,7 @@ use crate::utils::get_subprocess_path;
 
 use crate::accelerated_osr::RenderBackend;
 use crate::error::{CefError, CefResult};
+use crate::profile_dir;
 use crate::settings;
 
 struct CefState {
@@ -150,8 +151,47 @@ fn initialize_cef() -> CefResult<()> {
     let godot_backend = detect_godot_render_backend();
     let (accel_supported, accel_reason) =
         crate::accelerated_osr::accelerated_osr_support_diagnostic();
-    let enable_remote_debugging = should_enable_remote_debugging();
-    let remote_debugging_port = settings::get_remote_devtools_port();
+    let mut enable_remote_debugging = should_enable_remote_debugging();
+    let profile = profile_dir::claim_process_profile(&settings::get_data_path());
+    let preferred_debugging_port = settings::get_remote_devtools_port();
+    let remote_debugging_port = if enable_remote_debugging {
+        match profile_dir::claim_devtools_port(
+            &settings::get_data_path(),
+            preferred_debugging_port,
+            32,
+        ) {
+            Some(chosen) => {
+                if chosen != preferred_debugging_port {
+                    godot::global::godot_print!(
+                        "[CefInit] Remote debugging port {} is busy. Listening on {}.",
+                        preferred_debugging_port,
+                        chosen
+                    );
+                }
+                chosen
+            }
+            None => {
+                godot::global::godot_warn!(
+                    "[CefInit] No free remote debugging port near {}. Remote debugging is disabled for this process.",
+                    preferred_debugging_port
+                );
+                enable_remote_debugging = false;
+                0
+            }
+        }
+    } else {
+        preferred_debugging_port
+    };
+
+    if profile.primary {
+        godot::global::godot_print!("[CefInit] CEF profile: {}", profile.path.display());
+    } else {
+        godot::global::godot_print!(
+            "[CefInit] {} is already used by another process. This process is using {}. Browsers in this process still share one profile.",
+            settings::get_data_path().display(),
+            profile.path.display()
+        );
+    }
 
     let security_config = settings::get_security_config();
     let user_agent = settings::get_user_agent();
@@ -243,8 +283,7 @@ fn initialize_cef() -> CefResult<()> {
         }
     }
 
-    let root_cache_path = settings::get_data_path();
-    let cache_path = root_cache_path.to_str().ok_or_else(|| {
+    let profile_path = profile.path.to_str().ok_or_else(|| {
         CefError::InitializationFailed("cache path is not valid UTF-8".to_string())
     })?;
 
@@ -259,8 +298,8 @@ fn initialize_cef() -> CefResult<()> {
         external_message_pump: true as _,
         log_severity: cef::LogSeverity::DEFAULT as _,
         no_sandbox: true as _,
-        cache_path: cache_path.into(),
-        root_cache_path: cache_path.into(),
+        cache_path: profile_path.into(),
+        root_cache_path: profile_path.into(),
         ..Default::default()
     };
 
@@ -304,6 +343,7 @@ fn initialize_cef() -> CefResult<()> {
     #[cfg(target_os = "linux")]
     let signal_restorer = SignalRestorer::save();
 
+    profile_dir::release_devtools_listener();
     let ret = cef::initialize(
         Some(args.as_main_args()),
         Some(&settings),
@@ -320,6 +360,7 @@ fn initialize_cef() -> CefResult<()> {
     }
 
     if ret != 1 {
+        profile_dir::release_devtools_port();
         return Err(CefError::InitializationFailed(
             "CEF initialization returned error code".to_string(),
         ));
