@@ -151,24 +151,34 @@ fn initialize_cef() -> CefResult<()> {
     let godot_backend = detect_godot_render_backend();
     let (accel_supported, accel_reason) =
         crate::accelerated_osr::accelerated_osr_support_diagnostic();
-    let enable_remote_debugging = should_enable_remote_debugging();
+    let mut enable_remote_debugging = should_enable_remote_debugging();
     let profile = profile_dir::claim_process_profile(&settings::get_data_path());
     let preferred_debugging_port = settings::get_remote_devtools_port();
     let remote_debugging_port = if enable_remote_debugging {
-        let start = if profile.primary {
-            preferred_debugging_port
-        } else {
-            preferred_debugging_port.saturating_add(1)
-        };
-        let chosen = profile_dir::pick_available_port(start, 32);
-        if chosen != preferred_debugging_port {
-            godot::global::godot_print!(
-                "[CefInit] Remote debugging port {} is busy. Listening on {}.",
-                preferred_debugging_port,
+        match profile_dir::claim_devtools_port(
+            &settings::get_data_path(),
+            preferred_debugging_port,
+            32,
+        ) {
+            Some(chosen) => {
+                if chosen != preferred_debugging_port {
+                    godot::global::godot_print!(
+                        "[CefInit] Remote debugging port {} is busy. Listening on {}.",
+                        preferred_debugging_port,
+                        chosen
+                    );
+                }
                 chosen
-            );
+            }
+            None => {
+                godot::global::godot_warn!(
+                    "[CefInit] No free remote debugging port near {}. Remote debugging is disabled for this process.",
+                    preferred_debugging_port
+                );
+                enable_remote_debugging = false;
+                0
+            }
         }
-        chosen
     } else {
         preferred_debugging_port
     };
@@ -333,6 +343,7 @@ fn initialize_cef() -> CefResult<()> {
     #[cfg(target_os = "linux")]
     let signal_restorer = SignalRestorer::save();
 
+    profile_dir::release_devtools_listener();
     let ret = cef::initialize(
         Some(args.as_main_args()),
         Some(&settings),
@@ -349,6 +360,7 @@ fn initialize_cef() -> CefResult<()> {
     }
 
     if ret != 1 {
+        profile_dir::release_devtools_port();
         return Err(CefError::InitializationFailed(
             "CEF initialization returned error code".to_string(),
         ));
