@@ -12,6 +12,7 @@ mod error;
 mod godot_protocol;
 mod input;
 mod ipc_data;
+mod profile_dir;
 mod render;
 mod settings;
 mod utils;

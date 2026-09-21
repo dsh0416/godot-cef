@@ -1,7 +1,6 @@
 use adblock::lists::{FilterSet, ParseOptions};
 use cef::{
-    BrowserSettings, CefStringUtf16, ImplBrowser, ImplBrowserHost, ImplDictionaryValue,
-    RequestContextSettings, WindowInfo,
+    BrowserSettings, CefStringUtf16, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, WindowInfo,
 };
 use cef_app::PhysicalSize;
 use cef_app::ipc_contract::EXTRA_INFO_PRELOAD_SCRIPT;
@@ -445,8 +444,9 @@ pub(crate) fn try_create_browser(
     };
 
     let adblock_engine = build_adblock_engine(params.log_prefix);
+    let context_settings = crate::cef_init::shared_request_context_settings();
     let mut context = cef::request_context_create_context(
-        Some(&RequestContextSettings::default()),
+        Some(&context_settings),
         Some(&mut webrender::RequestContextHandlerImpl::build(
             webrender::OsrRequestContextHandler::new(adblock_engine),
         )),

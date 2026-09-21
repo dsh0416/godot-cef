@@ -9,6 +9,7 @@ use crate::utils::get_subprocess_path;
 
 use crate::accelerated_osr::RenderBackend;
 use crate::error::{CefError, CefResult};
+use crate::profile_dir;
 use crate::settings;
 
 struct CefState {
@@ -149,7 +150,36 @@ fn initialize_cef() -> CefResult<()> {
     let (accel_supported, accel_reason) =
         crate::accelerated_osr::accelerated_osr_support_diagnostic();
     let enable_remote_debugging = should_enable_remote_debugging();
-    let remote_debugging_port = settings::get_remote_devtools_port();
+    let profile = profile_dir::claim_process_profile(&settings::get_data_path());
+    let preferred_debugging_port = settings::get_remote_devtools_port();
+    let remote_debugging_port = if enable_remote_debugging {
+        let start = if profile.primary {
+            preferred_debugging_port
+        } else {
+            preferred_debugging_port.saturating_add(1)
+        };
+        let chosen = profile_dir::pick_available_port(start, 32);
+        if chosen != preferred_debugging_port {
+            godot::global::godot_print!(
+                "[CefInit] Remote debugging port {} is busy. Listening on {}.",
+                preferred_debugging_port,
+                chosen
+            );
+        }
+        chosen
+    } else {
+        preferred_debugging_port
+    };
+
+    if profile.primary {
+        godot::global::godot_print!("[CefInit] CEF profile: {}", profile.path.display());
+    } else {
+        godot::global::godot_print!(
+            "[CefInit] {} is already used by another process. This process is using {}. Browsers in this process still share one profile.",
+            settings::get_data_path().display(),
+            profile.path.display()
+        );
+    }
 
     let security_config = settings::get_security_config();
     let user_agent = settings::get_user_agent();
@@ -241,7 +271,9 @@ fn initialize_cef() -> CefResult<()> {
         }
     }
 
-    let root_cache_path = settings::get_data_path();
+    let profile_path = profile.path.to_str().ok_or_else(|| {
+        CefError::InitializationFailed("cache path is not valid UTF-8".to_string())
+    })?;
 
     let settings = Settings {
         browser_subprocess_path: subprocess_path
@@ -254,12 +286,8 @@ fn initialize_cef() -> CefResult<()> {
         external_message_pump: true as _,
         log_severity: cef::LogSeverity::DEFAULT as _,
         no_sandbox: true as _,
-        root_cache_path: root_cache_path
-            .to_str()
-            .ok_or_else(|| {
-                CefError::InitializationFailed("cache path is not valid UTF-8".to_string())
-            })?
-            .into(),
+        cache_path: profile_path.into(),
+        root_cache_path: profile_path.into(),
         ..Default::default()
     };
 
@@ -325,6 +353,20 @@ fn initialize_cef() -> CefResult<()> {
     }
 
     Ok(())
+}
+
+/// Request-context settings that share this process's CEF profile.
+///
+/// Every browser created with these settings reads and writes the same cookies,
+/// cache, and localStorage. A different Godot process has its own profile.
+pub(crate) fn shared_request_context_settings() -> cef::RequestContextSettings {
+    let mut context_settings = cef::RequestContextSettings::default();
+    if let Some(path) = profile_dir::current_profile_path()
+        && let Some(text) = path.to_str()
+    {
+        context_settings.cache_path = text.into();
+    }
+    context_settings
 }
 
 #[cfg(test)]
