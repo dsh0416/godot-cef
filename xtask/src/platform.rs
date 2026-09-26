@@ -63,8 +63,6 @@ pub const WINDOWS_RUNTIME_ASSETS: RuntimeAssetSpec = RuntimeAssetSpec {
     cef_files: &[
         "libcef.dll",
         "chrome_elf.dll",
-        "libEGL.dll",
-        "libGLESv2.dll",
         "d3dcompiler_47.dll",
         "dxcompiler.dll",
         "dxil.dll",
@@ -85,8 +83,6 @@ pub const WINDOWS_RUNTIME_ASSETS: RuntimeAssetSpec = RuntimeAssetSpec {
         "gdcef_helper.exe",
         "libcef.dll",
         "chrome_elf.dll",
-        "libEGL.dll",
-        "libGLESv2.dll",
         "d3dcompiler_47.dll",
         "dxcompiler.dll",
         "dxil.dll",
