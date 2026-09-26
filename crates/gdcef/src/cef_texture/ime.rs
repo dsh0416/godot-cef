@@ -21,6 +21,14 @@ impl CefTexture {
         line_edit.set_size(Vector2::new(200.0, 30.0));
         line_edit.set_mouse_filter(MouseFilter::IGNORE);
         line_edit.set_focus_mode(FocusMode::ALL);
+        // Keep the proxy in edit mode across `ui_text_submit`. The proxy is
+        // hidden and never meant to submit anything, but the page's Enter is
+        // forwarded to it, and LineEdit leaves edit mode on that action
+        // (`unedit()`), after which `gui_input` drops every key event because of
+        // its `if (!editing) return;` guard. The host would then report focus and
+        // editability as healthy while no text could reach the page, until a
+        // mouse click re-entered edit mode.
+        line_edit.set_keep_editing_on_text_submit(true);
         let callable_changed = self.base().callable("on_ime_proxy_text_changed");
         line_edit.connect("text_changed", &callable_changed);
 
