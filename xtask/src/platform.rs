@@ -108,8 +108,6 @@ pub const WINDOWS_RUNTIME_ASSETS: RuntimeAssetSpec = RuntimeAssetSpec {
 pub const LINUX_RUNTIME_ASSETS: RuntimeAssetSpec = RuntimeAssetSpec {
     cef_files: &[
         "libcef.so",
-        "libEGL.so",
-        "libGLESv2.so",
         "libvk_swiftshader.so",
         "libvulkan.so.1",
         "vk_swiftshader_icd.json",
@@ -125,8 +123,6 @@ pub const LINUX_RUNTIME_ASSETS: RuntimeAssetSpec = RuntimeAssetSpec {
         "libgdcef.so",
         "gdcef_helper",
         "libcef.so",
-        "libEGL.so",
-        "libGLESv2.so",
         "libvk_swiftshader.so",
         "libvulkan.so.1",
         "vk_swiftshader_icd.json",

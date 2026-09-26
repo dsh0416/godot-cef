@@ -70,8 +70,6 @@ linux.x86_64 = {
 
   "bin/x86_64-unknown-linux-gnu/chrome-sandbox" : "",
   "bin/x86_64-unknown-linux-gnu/libcef.so" : "",
-  "bin/x86_64-unknown-linux-gnu/libEGL.so" : "",
-  "bin/x86_64-unknown-linux-gnu/libGLESv2.so" : "",
   "bin/x86_64-unknown-linux-gnu/libvk_swiftshader.so" : "",
   "bin/x86_64-unknown-linux-gnu/libvulkan.so.1" : "",
   "bin/x86_64-unknown-linux-gnu/v8_context_snapshot.bin" : "",
@@ -89,8 +87,6 @@ linux.arm64 = {
 
   "bin/aarch64-unknown-linux-gnu/chrome-sandbox" : "",
   "bin/aarch64-unknown-linux-gnu/libcef.so" : "",
-  "bin/aarch64-unknown-linux-gnu/libEGL.so" : "",
-  "bin/aarch64-unknown-linux-gnu/libGLESv2.so" : "",
   "bin/aarch64-unknown-linux-gnu/libvk_swiftshader.so" : "",
   "bin/aarch64-unknown-linux-gnu/libvulkan.so.1" : "",
   "bin/aarch64-unknown-linux-gnu/v8_context_snapshot.bin" : "",
