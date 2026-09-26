@@ -3,9 +3,9 @@
 lockfile_version = 1
 
 [[tools."cargo:export-cef-dir"]]
-version = "154.1.0"
+version = "154.1.0+154.0.26"
 backend = "cargo:export-cef-dir"
-specifiers = ["154.1.0"]
+specifiers = ["154.1.0+154.0.26"]
 
 [[tools.node]]
 version = "26.10.0"
