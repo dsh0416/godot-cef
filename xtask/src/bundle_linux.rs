@@ -102,8 +102,6 @@ fn strip_cef_binaries(
     println!("Stripping CEF binaries...");
     let strip_tool = strip_tool_for_target(platform_target);
     strip_binary(&target_dir.join("libcef.so"), strip_tool)?;
-    strip_binary(&target_dir.join("libEGL.so"), strip_tool)?;
-    strip_binary(&target_dir.join("libGLESv2.so"), strip_tool)?;
     strip_binary(&target_dir.join("libvk_swiftshader.so"), strip_tool)?;
     strip_binary(&target_dir.join("libvulkan.so.1"), strip_tool)?;
     Ok(())
