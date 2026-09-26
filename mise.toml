@@ -6,7 +6,7 @@
 rust = { version = "nightly", components = "rustfmt,clippy" }
 node = "26"
 pnpm = "latest"
-"cargo:export-cef-dir" = "152.3.0+152.0.6"
+"cargo:export-cef-dir" = "154.1.0"
 
 [settings]
 lockfile = true
