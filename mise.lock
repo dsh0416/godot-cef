@@ -3,9 +3,9 @@
 lockfile_version = 1
 
 [[tools."cargo:export-cef-dir"]]
-version = "154.1.0+154.0.26"
+version = "154.2.0+154.0.28"
 backend = "cargo:export-cef-dir"
-specifiers = ["154.1.0+154.0.26"]
+specifiers = ["154.2.0+154.0.28"]
 
 [[tools.node]]
 version = "26.10.0"
@@ -88,7 +88,7 @@ url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/581813237"
 provenance = "github-attestations"
 
 [[tools.rust]]
-version = "nightly-2026-09-26"
+version = "nightly-2026-09-27"
 backend = "core:rust"
 specifiers = ["nightly"]
 
