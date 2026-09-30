@@ -58,8 +58,19 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 export LD_LIBRARY_PATH="$CEF_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-Official Linux builds support x86_64. For unsupported Linux ARM64 source builds,
-see [Building unsupported targets](docs/api/unsupported-targets.md).
+For Linux ARM64 cross builds, download the matching CEF runtime and build with
+the ARM64 Rust target:
+
+```bash
+export CEF_PATH="$HOME/.local/share/cef_aarch64"
+export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
+rustup target add aarch64-unknown-linux-gnu
+cargo xtask bundle --release --target aarch64-unknown-linux-gnu
+```
+
+The repository config allows unresolved symbols from `libcef.so` during Linux
+ARM64 cross linking, because those CEF system dependencies are provided by the
+target ARM64 Linux runtime rather than the x64 build host.
 
 You'll also need system dependencies:
 
@@ -70,6 +81,10 @@ sudo apt-get install -y \
     libdrm-dev libxkbcommon-dev libxcomposite-dev \
     libxdamage-dev libxrandr-dev libgbm-dev \
     libpango1.0-dev libasound2-dev
+
+# Additional tools for Linux ARM64 cross builds
+sudo apt-get install -y \
+    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
 ```
 
 #### macOS
@@ -94,9 +109,15 @@ export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 $env:PATH="$env:PATH;$env:CEF_PATH"
 ```
 
-Official Windows builds support x86_64. The bundler still accepts Windows ARM64
-for unsupported source builds; see [Building unsupported targets](docs/api/unsupported-targets.md).
-These local outputs are excluded from `cargo xtask pack` and official distributions.
+For Windows ARM64 cross builds from an x64 Windows machine, use the ARM64 CEF
+runtime and Rust target:
+
+```powershell
+$env:CEF_PATH="$env:USERPROFILE/.local/share/cef_arm64"
+export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
+rustup target add aarch64-pc-windows-msvc
+cargo xtask bundle --release --target aarch64-pc-windows-msvc
+```
 
 ### Building
 
@@ -273,6 +294,26 @@ For visual/rendering changes:
 For release or packaging changes, also run `cargo xtask pack` with the
 platform artifacts you changed and then `cargo xtask validate --addon` against
 the staged addon directory.
+
+### Distribution variants
+
+`cargo xtask pack` defaults to the full addon, preserving all five platform
+artifacts. For release packaging, stage and validate each variant independently:
+
+```bash
+cargo xtask pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
+cargo xtask validate --addon staging/full/dist/addons/godot_cef --variant full
+cargo xtask pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
+cargo xtask validate --addon staging/store/dist/addons/godot_cef --variant store
+```
+
+Variant validation requires every selected target and rejects excluded target
+directories. Omit `--variant` for the existing partial-addon validation behavior.
+The Store packer derives its descriptor from the full source manifest by removing
+Windows/Linux ARM64 entries; do not install both descriptors in one Godot project.
+See [Distribution variants](docs/api/distribution-variants.md) for archive layout,
+architecture coverage, and manual ARM64 builds. CI builds all architectures and
+publishes both package artifacts; this PR does not itself publish a release.
 
 ### Lifecycle Cleanup Checklist
 

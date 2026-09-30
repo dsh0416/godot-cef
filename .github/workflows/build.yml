@@ -120,6 +120,9 @@ jobs:
           - target: x86_64-pc-windows-msvc
             cache_key: windows-x64
             msvc_arch: x64
+          - target: aarch64-pc-windows-msvc
+            cache_key: windows-arm64
+            msvc_arch: amd64_arm64
 
     steps:
       - name: Checkout repository
@@ -160,6 +163,8 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             cache_key: linux-x64
+          - target: aarch64-unknown-linux-gnu
+            cache_key: linux-arm64
 
     steps:
       - name: Checkout repository
@@ -212,24 +217,35 @@ jobs:
         with:
           path: artifacts
 
-      - name: Pack Godot addon
+      - name: Pack full and Asset Store addons
         env:
           RUSTC_WRAPPER: sccache
         run: |
-          # Use staging directory to avoid deleting source addon files
-          mise exec -- cargo xtask pack \
-            --artifacts artifacts \
-            --output dist/addons/godot_cef \
-            --addon-src addons/godot_cef
-          mise exec -- cargo xtask validate --addon dist/addons/godot_cef
-          # Use dist as ZIP root so Asset Library installs into res://addons/godot_cef.
-          zip -r godot_cef.zip dist
+          # Stage each variant independently; both ZIPs retain the existing dist/addons layout.
+          for variant in full store; do
+            mise exec -- cargo xtask pack \
+              --artifacts artifacts \
+              --output staging/$variant/dist/addons/godot_cef \
+              --addon-src addons/godot_cef \
+              --variant "$variant"
+            mise exec -- cargo xtask validate \
+              --addon staging/$variant/dist/addons/godot_cef --variant "$variant"
+          done
+          (cd staging/full && zip -r ../../godot_cef.zip dist)
+          (cd staging/store && zip -r ../../godot_cef-store.zip dist)
 
-      - name: Upload packed addon
+      - name: Upload full addon
         uses: actions/upload-artifact@v7
         with:
           name: godot_cef-addon
           path: godot_cef.zip
+          retention-days: 30
+
+      - name: Upload Asset Store addon
+        uses: actions/upload-artifact@v7
+        with:
+          name: godot_cef-store-addon
+          path: godot_cef-store.zip
           retention-days: 30
 
   release:
@@ -248,8 +264,16 @@ jobs:
           name: godot_cef-addon
           path: .
 
-      - name: Rename addon with version
-        run: mv godot_cef.zip godot_cef-${{ github.ref_name }}.zip
+      - name: Download Asset Store addon
+        uses: actions/download-artifact@v8
+        with:
+          name: godot_cef-store-addon
+          path: .
+
+      - name: Rename addons with version
+        run: |
+          mv godot_cef.zip godot_cef-${{ github.ref_name }}.zip
+          mv godot_cef-store.zip godot_cef-store-${{ github.ref_name }}.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -258,4 +282,6 @@ jobs:
           draft: true # release is draft until it is manually published
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
-          files: godot_cef-${{ github.ref_name }}.zip
+          files: |
+            godot_cef-${{ github.ref_name }}.zip
+            godot_cef-store-${{ github.ref_name }}.zip

@@ -92,14 +92,13 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 
 ## Platform Support
 
-Official binary targets: Windows x86_64, Linux x86_64, and macOS universal
-(x86_64/ARM64). **Breaking change:** official Windows ARM64 and Linux ARM64 builds,
-packages, and Godot export registrations have been removed. Users needing these
-targets can remain on an earlier release or follow the unsupported
-[source-build guide](https://godotcef.org/api/unsupported-targets.html); local builds
-require their own validation and manifest registration. Windows x86_64 emulation
-is not a validated replacement. This distribution change may require a major
-release; release planning is tracked in [#238](https://github.com/dsh0416/godot-cef/issues/238).
+The default/full GitHub Release addon includes Windows x86_64/ARM64, Linux
+x86_64/ARM64, and macOS universal (x86_64/ARM64). A separate **Asset Store** addon
+includes Windows x86_64, Linux x86_64, and the same macOS universal framework to
+reduce download size. Both packages install as `addons/godot_cef`; choose one.
+ARM64 Windows/Linux users should use the full package. See
+[Distribution variants](https://godotcef.org/api/distribution-variants.html) for
+package names, local packaging commands and source-build instructions.
 
 | Platform | DirectX 12 | Metal | Vulkan | Software Rendering |
 |----------|------------|-------|--------|-------------------|

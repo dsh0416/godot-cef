@@ -51,7 +51,7 @@ export default withMermaid(defineConfig({
                 { text: '拖放', link: '/zh_CN/api/drag-and-drop' },
                 { text: '下载', link: '/zh_CN/api/downloads' },
                 { text: 'Vulkan 支持', link: '/zh_CN/api/vulkan-support' },
-                { text: '不支持目标的自编译', link: '/zh_CN/api/unsupported-targets' },
+                { text: '分发版本与源码构建', link: '/zh_CN/api/distribution-variants' },
                 { text: 'GPU 设备绑定', link: '/zh_CN/api/gpu-device-pinning' }
               ]
             }
@@ -100,7 +100,7 @@ export default withMermaid(defineConfig({
             { text: 'Drag and Drop', link: '/api/drag-and-drop' },
             { text: 'Downloads', link: '/api/downloads' },
             { text: 'Vulkan Support', link: '/api/vulkan-support' },
-            { text: 'Building Unsupported Targets', link: '/api/unsupported-targets' },
+            { text: 'Distribution Variants', link: '/api/distribution-variants' },
             { text: 'GPU Device Pinning', link: '/api/gpu-device-pinning' }
           ]
         }

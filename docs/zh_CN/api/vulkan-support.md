@@ -2,7 +2,8 @@
 
 本页面介绍 Godot CEF 如何通过运行时函数钩子在 Vulkan 后端启用 GPU 加速渲染，以及该方案的限制与注意事项。
 
-Windows/Linux ARM64 不是官方二进制目标；如需自行构建，见[不支持目标的自编译指南](./unsupported-targets)。
+本页包含完整 GitHub Release 包支持的架构。精简的 Asset Store 包不含 Windows/Linux ARM64；
+需要这些架构时请选择完整包。详见[分发版本](./distribution-variants)。
 
 ## 背景
 
@@ -104,8 +105,8 @@ cat /sys/module/nvidia_drm/parameters/modeset
 
 钩子机制依赖于 [retour](https://github.com/darfink/retour-rs) 库进行运行时函数重定向。该库目前不支持 ARM64 架构，这意味着：
 
-- **Windows ARM64（仅不支持的自编译目标）** — Vulkan 钩子不可用
-- **Linux ARM64（仅不支持的自编译目标）** — Vulkan 钩子不可用
+- **Windows ARM64** — Vulkan 钩子不可用
+- **Linux ARM64** — Vulkan 钩子不可用
 - **macOS（Apple Silicon）** — Vulkan 钩子不可用
 
 在不支持的架构上，扩展会自动回退到软件渲染。
@@ -146,9 +147,9 @@ cat /sys/module/nvidia_drm/parameters/modeset
 | 平台 | 架构 | Vulkan 加速 OSR | 备注 |
 |------|------|-----------------|------|
 | Windows | x86_64 | ✅ 支持 | 通过 `vkCreateDevice` 扩展注入钩子 |
+| Windows | ARM64 | ❌ 不支持 | retour 不支持 ARM64 |
 | Linux | x86_64 | ✅ 支持 | 通过 `vkCreateDevice` 扩展注入钩子 |
-| Windows | ARM64 | ❌ 不支持 | 仅不支持的自编译目标；retour 不支持 ARM64 |
-| Linux | ARM64 | ❌ 不支持 | 仅不支持的自编译目标；retour 不支持 ARM64 |
+| Linux | ARM64 | ❌ 不支持 | retour 不支持 ARM64 |
 | macOS | 任意 | ❌ 不适用 | MoltenVK 静态链接阻止钩子；使用 Metal 后端 |
 
 ## 未来：正式 Godot API

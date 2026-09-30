@@ -2,7 +2,9 @@
 
 This page documents how Godot CEF enables GPU-accelerated rendering on Vulkan backends through runtime function hooking, and the limitations of this approach.
 
-Windows/Linux ARM64 are not official binary targets; see [Building unsupported targets](./unsupported-targets) for private source builds.
+This page covers architectures in the full GitHub Release addon. The smaller
+Asset Store addon omits Windows/Linux ARM64; use the full package for those
+targets. See [Distribution variants](./distribution-variants).
 
 ## Background
 
@@ -104,8 +106,8 @@ Vulkan hook-based acceleration is **only available on x86_64 (64-bit x86) archit
 
 The hooking mechanism relies on the [retour](https://github.com/darfink/retour-rs) library for runtime function detouring. This library currently does not support ARM64 architecture, which means:
 
-- **Windows ARM64 (unsupported self-build only)** — Vulkan hooks not available
-- **Linux ARM64 (unsupported self-build only)** — Vulkan hooks not available
+- **Windows ARM64** — Vulkan hooks not available
+- **Linux ARM64** — Vulkan hooks not available
 - **macOS (Apple Silicon)** — Vulkan hooks not available
 
 On unsupported architectures, the extension automatically falls back to software rendering.
@@ -146,9 +148,9 @@ If you experience issues with accelerated rendering, try:
 | Platform | Architecture | Vulkan Accelerated OSR | Notes |
 |----------|--------------|------------------------|-------|
 | Windows  | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
+| Windows  | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
 | Linux    | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
-| Windows  | ARM64        | ❌ Not supported       | Unsupported self-build only; retour does not support ARM64 |
-| Linux    | ARM64        | ❌ Not supported       | Unsupported self-build only; retour does not support ARM64 |
+| Linux    | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
 | macOS    | Any          | ❌ Not applicable      | Static linking of MoltenVK prevents hooking; use Metal backend |
 
 ## Future: Proper Godot API

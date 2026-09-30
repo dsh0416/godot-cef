@@ -2,13 +2,9 @@
 
 This matrix summarizes the expected rendering mode behavior for each platform/backend combination.
 
-Official binary targets: Windows x86_64, Linux x86_64, and macOS universal
-(x86_64/ARM64). **Breaking change:** official Windows ARM64 and Linux ARM64 builds,
-packages, and Godot export registrations have been removed. Users can remain on
-an earlier release or follow the [unsupported source-build guide](./unsupported-targets),
-register their own manifest, and validate their results. Windows x86_64 emulation
-is unverified. This distribution change may require a major release; see
-[#238](https://github.com/dsh0416/godot-cef/issues/238).
+This page covers architectures in the full GitHub Release addon. The smaller
+Asset Store addon omits Windows/Linux ARM64; use the full package for those
+targets. See [Distribution variants](./distribution-variants).
 
 ## Version Baseline
 
@@ -27,12 +23,15 @@ This keeps the downloaded runtime files aligned with the Rust bindings.
 |----------|--------------|---------------|-----------------|-----------------|
 | Windows  | x86_64       | Direct3D12    | Yes             | Accelerated |
 | Windows  | x86_64       | Vulkan        | Yes (hook-based) | Accelerated |
-| Windows  | x86_64          | OpenGL        | No              | Software fallback |
+| Windows  | ARM64        | Direct3D12    | Yes             | Accelerated |
+| Windows  | any          | OpenGL        | No              | Software fallback |
+| Windows  | ARM64        | Vulkan        | No (hooks unsupported) | Software fallback |
 | macOS    | any          | Metal         | Yes             | Accelerated |
 | macOS    | any          | Vulkan        | No              | Software fallback |
 | macOS    | any          | OpenGL        | No              | Software fallback |
 | Linux    | x86_64       | Vulkan        | Yes (hook-based) | Accelerated |
-| Linux    | x86_64          | OpenGL        | No              | Software fallback |
+| Linux    | any          | OpenGL        | No              | Software fallback |
+| Linux    | ARM64        | Vulkan        | No (hooks unsupported) | Software fallback |
 
 ## Fallback Conditions
 

@@ -2,11 +2,8 @@
 
 该矩阵用于总结不同平台与渲染后端下，Godot CEF 的预期渲染行为。
 
-官方二进制目标：Windows x86_64、Linux x86_64、macOS universal（x86_64/ARM64）。
-**破坏性变更：**已停止 Windows ARM64 和 Linux ARM64 的官方构建、打包与 Godot 导出注册。
-需要这些目标的用户可以保留旧版本，或参考[不支持目标的自编译指南](./unsupported-targets)，
-自行构建、注册清单并验证运行情况。Windows x86_64 模拟运行不是已验证的替代方案。
-此分发变更可能需要新的主版本；见 [#238](https://github.com/dsh0416/godot-cef/issues/238)。
+本页包含完整 GitHub Release 包支持的架构。精简的 Asset Store 包不含 Windows/Linux ARM64；
+需要这些架构时请选择完整包。详见[分发版本](./distribution-variants)。
 
 ## 版本基线
 
@@ -25,12 +22,14 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 |------|------|------------|----------|----------|
 | Windows | x86_64 | Direct3D12 | 支持 | 使用加速渲染 |
 | Windows | x86_64 | Vulkan | 支持（基于 Hook） | 使用加速渲染 |
-| Windows | x86_64 | OpenGL | 不支持 | 回退到软件渲染 |
+| Windows | 任意 | OpenGL | 不支持 | 回退到软件渲染 |
+| Windows | ARM64 | Vulkan | 不支持 | 回退到软件渲染 |
 | macOS | 任意 | Metal | 支持 | 使用加速渲染 |
 | macOS | 任意 | Vulkan | 不支持 | 回退到软件渲染 |
 | macOS | 任意 | OpenGL | 不支持 | 回退到软件渲染 |
 | Linux | x86_64 | Vulkan | 支持（基于 Hook） | 使用加速渲染 |
-| Linux | x86_64 | OpenGL | 不支持 | 回退到软件渲染 |
+| Linux | 任意 | OpenGL | 不支持 | 回退到软件渲染 |
+| Linux | ARM64 | Vulkan | 不支持 | 回退到软件渲染 |
 
 ## 回退条件
 

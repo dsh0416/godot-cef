@@ -33,10 +33,19 @@ jobs:
             cef_cache_key: windows-x64
             can_run_tests: true
             msvc_arch: x64
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            cef_cache_key: windows-arm64
+            can_run_tests: false
+            msvc_arch: amd64_arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             cef_cache_key: linux-x64
             can_run_tests: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cef_cache_key: linux-arm64
+            can_run_tests: false
 
     runs-on: ${{ matrix.os }}
     name: Test (${{ matrix.target }})
@@ -106,10 +115,19 @@ jobs:
             name: Windows x64
             cef_cache_key: windows-x64
             msvc_arch: x64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            name: Windows ARM64
+            cef_cache_key: windows-arm64
+            msvc_arch: amd64_arm64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             name: Linux x64
             cef_cache_key: linux-x64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            name: Linux ARM64
+            cef_cache_key: linux-arm64
 
     runs-on: ${{ matrix.os }}
     name: Clippy (${{ matrix.name }})
