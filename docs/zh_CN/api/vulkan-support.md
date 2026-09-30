@@ -102,7 +102,6 @@ cat /sys/module/nvidia_drm/parameters/modeset
 
 钩子机制依赖于 [retour](https://github.com/darfink/retour-rs) 库进行运行时函数重定向。该库目前不支持 ARM64 架构，这意味着：
 
-- **Windows ARM64** — Vulkan 钩子不可用
 - **Linux ARM64** — Vulkan 钩子不可用
 - **macOS（Apple Silicon）** — Vulkan 钩子不可用
 
@@ -144,7 +143,6 @@ cat /sys/module/nvidia_drm/parameters/modeset
 | 平台 | 架构 | Vulkan 加速 OSR | 备注 |
 |------|------|-----------------|------|
 | Windows | x86_64 | ✅ 支持 | 通过 `vkCreateDevice` 扩展注入钩子 |
-| Windows | ARM64 | ❌ 不支持 | retour 不支持 ARM64 |
 | Linux | x86_64 | ✅ 支持 | 通过 `vkCreateDevice` 扩展注入钩子 |
 | Linux | ARM64 | ❌ 不支持 | retour 不支持 ARM64 |
 | macOS | 任意 | ❌ 不适用 | MoltenVK 静态链接阻止钩子；使用 Metal 后端 |

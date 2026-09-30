@@ -2,6 +2,12 @@
 
 该矩阵用于总结不同平台与渲染后端下，Godot CEF 的预期渲染行为。
 
+支持的架构：Windows x86_64、Linux x86_64/ARM64、macOS universal（x86_64/ARM64）。
+**破坏性变更：**已移除 Windows ARM64 原生构建、打包和 Godot 导出支持。
+依赖该架构的项目应暂时保留在支持它的旧版本，直至完成迁移。
+Windows 上通过模拟运行 x86_64 Godot 尚未验证，不能保证兼容。
+此变更可能需要发布新的主版本；发布规划见 [#238](https://github.com/dsh0416/godot-cef/issues/238)。
+
 ## 版本基线
 
 当前构建基于 `Cargo.lock` 中解析到的 Rust `cef` / `cef-dll-sys` crate 版本：`152.3.0+152.0.6`。匹配的 CEF 运行时版本已在 `mise.toml` 中固定为 `CEF_VERSION`；手动安装 CEF 二进制文件时请使用它：
@@ -19,8 +25,7 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 |------|------|------------|----------|----------|
 | Windows | x86_64 | Direct3D12 | 支持 | 使用加速渲染 |
 | Windows | x86_64 | Vulkan | 支持（基于 Hook） | 使用加速渲染 |
-| Windows | 任意 | OpenGL | 不支持 | 回退到软件渲染 |
-| Windows | ARM64 | Vulkan | 不支持 | 回退到软件渲染 |
+| Windows | x86_64 | OpenGL | 不支持 | 回退到软件渲染 |
 | macOS | 任意 | Metal | 支持 | 使用加速渲染 |
 | macOS | 任意 | Vulkan | 不支持 | 回退到软件渲染 |
 | macOS | 任意 | OpenGL | 不支持 | 回退到软件渲染 |

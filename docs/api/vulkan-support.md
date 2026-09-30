@@ -102,7 +102,6 @@ Vulkan hook-based acceleration is **only available on x86_64 (64-bit x86) archit
 
 The hooking mechanism relies on the [retour](https://github.com/darfink/retour-rs) library for runtime function detouring. This library currently does not support ARM64 architecture, which means:
 
-- **Windows ARM64** — Vulkan hooks not available
 - **Linux ARM64** — Vulkan hooks not available  
 - **macOS (Apple Silicon)** — Vulkan hooks not available
 
@@ -144,7 +143,6 @@ If you experience issues with accelerated rendering, try:
 | Platform | Architecture | Vulkan Accelerated OSR | Notes |
 |----------|--------------|------------------------|-------|
 | Windows  | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
-| Windows  | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
 | Linux    | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
 | Linux    | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
 | macOS    | Any          | ❌ Not applicable      | Static linking of MoltenVK prevents hooking; use Metal backend |

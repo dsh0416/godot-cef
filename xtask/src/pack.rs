@@ -101,3 +101,55 @@ pub fn run(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn pack_retains_supported_platforms_and_omits_windows_arm64()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "gdcef-pack-platforms-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+        ));
+        let artifacts = root.join("artifacts");
+        let output = root.join("addon");
+        let removed_target = "aarch64-pc-windows-msvc";
+        // Both an old CI artifact and a previously staged bundle must be excluded.
+        fs::create_dir_all(artifacts.join(format!("gdcef-{removed_target}")))?;
+        fs::create_dir_all(output.join("bin").join(removed_target))?;
+        for platform in PLATFORM_SPECS {
+            let source = artifacts.join(platform.artifact_name);
+            fs::create_dir_all(&source)?;
+            for file in platform.required_files {
+                fs::write(source.join(file), b"fixture")?;
+            }
+            for dir in platform.required_dirs {
+                fs::create_dir_all(source.join(dir))?;
+            }
+        }
+
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            run(&artifacts, &output, None)?;
+            crate::validate::run(&output)?;
+            for target in [
+                "universal-apple-darwin",
+                "x86_64-pc-windows-msvc",
+                "x86_64-unknown-linux-gnu",
+                "aarch64-unknown-linux-gnu",
+            ] {
+                assert!(output.join("bin").join(target).is_dir());
+            }
+            assert!(!output.join("bin").join(removed_target).exists());
+            let manifest = fs::read_to_string(output.join("godot_cef.gdextension"))?;
+            assert!(!manifest.contains("windows.arm64"));
+            assert!(!manifest.contains(removed_target));
+            Ok(())
+        })();
+        fs::remove_dir_all(&root)?;
+        result
+    }
+}

@@ -120,9 +120,6 @@ jobs:
           - target: x86_64-pc-windows-msvc
             cache_key: windows-x64
             msvc_arch: x64
-          - target: aarch64-pc-windows-msvc
-            cache_key: windows-arm64
-            msvc_arch: amd64_arm64
 
     steps:
       - name: Checkout repository

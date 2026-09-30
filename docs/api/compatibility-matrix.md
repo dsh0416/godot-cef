@@ -2,6 +2,13 @@
 
 This matrix summarizes the expected rendering mode behavior for each platform/backend combination.
 
+Supported architectures: Windows x86_64, Linux x86_64/ARM64, and macOS universal
+(x86_64/ARM64). **Breaking change:** native Windows ARM64 builds, packages, and
+Godot exports are no longer supported. Projects depending on this target should
+remain on a prior release that includes it until they can migrate. Running
+x86_64 Godot under Windows emulation is unverified. This removal may require a
+major release; see [#238](https://github.com/dsh0416/godot-cef/issues/238).
+
 ## Version Baseline
 
 Current builds are based on the Rust `cef` / `cef-dll-sys` crates resolved as `152.3.0+152.0.6` in `Cargo.lock`. The matching CEF runtime version is pinned as `CEF_VERSION` in `mise.toml`; use it when installing CEF binaries manually:
@@ -19,9 +26,7 @@ This keeps the downloaded runtime files aligned with the Rust bindings.
 |----------|--------------|---------------|-----------------|-----------------|
 | Windows  | x86_64       | Direct3D12    | Yes             | Accelerated |
 | Windows  | x86_64       | Vulkan        | Yes (hook-based) | Accelerated |
-| Windows  | ARM64        | Direct3D12    | Yes             | Accelerated |
-| Windows  | any          | OpenGL        | No              | Software fallback |
-| Windows  | ARM64        | Vulkan        | No (hooks unsupported) | Software fallback |
+| Windows  | x86_64          | OpenGL        | No              | Software fallback |
 | macOS    | any          | Metal         | Yes             | Accelerated |
 | macOS    | any          | Vulkan        | No              | Software fallback |
 | macOS    | any          | OpenGL        | No              | Software fallback |

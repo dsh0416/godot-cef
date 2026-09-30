@@ -15,7 +15,6 @@ pub struct RuntimeAssetSpec {
 
 pub const MACOS_UNIVERSAL_TARGET: &str = "universal-apple-darwin";
 pub const WINDOWS_X64_TARGET: &str = "x86_64-pc-windows-msvc";
-pub const WINDOWS_ARM64_TARGET: &str = "aarch64-pc-windows-msvc";
 pub const LINUX_X64_TARGET: &str = "x86_64-unknown-linux-gnu";
 pub const LINUX_ARM64_TARGET: &str = "aarch64-unknown-linux-gnu";
 
@@ -35,12 +34,6 @@ pub const PLATFORM_SPECS: &[PlatformSpec] = &[
     PlatformSpec {
         target: WINDOWS_X64_TARGET,
         artifact_name: "gdcef-x86_64-pc-windows-msvc",
-        required_files: WINDOWS_REQUIRED_FILES,
-        required_dirs: LOCALES_DIR,
-    },
-    PlatformSpec {
-        target: WINDOWS_ARM64_TARGET,
-        artifact_name: "gdcef-aarch64-pc-windows-msvc",
         required_files: WINDOWS_REQUIRED_FILES,
         required_dirs: LOCALES_DIR,
     },
@@ -165,7 +158,7 @@ mod tests {
 
     #[test]
     fn runtime_assets_include_pack_validation_requirements() {
-        for target in [WINDOWS_X64_TARGET, WINDOWS_ARM64_TARGET] {
+        for target in [WINDOWS_X64_TARGET] {
             let Some(spec) = platform_spec(target) else {
                 assert!(platform_spec(target).is_some(), "windows spec should exist");
                 continue;

@@ -4,26 +4,21 @@ use crate::bundle_common::{
     copy_directory, deploy_to_addon, get_cef_dir, get_target_dir, get_target_dir_for_target,
     run_cargo, validate_required_paths,
 };
-use crate::platform::{WINDOWS_ARM64_TARGET, WINDOWS_RUNTIME_ASSETS, WINDOWS_X64_TARGET};
+use crate::platform::{WINDOWS_RUNTIME_ASSETS, WINDOWS_X64_TARGET};
 use std::fs;
 use std::path::Path;
-
-fn default_platform_target() -> &'static str {
-    if cfg!(target_arch = "aarch64") {
-        WINDOWS_ARM64_TARGET
-    } else {
-        WINDOWS_X64_TARGET
-    }
-}
 
 fn resolve_platform_target(
     target: Option<&str>,
 ) -> Result<&'static str, Box<dyn std::error::Error>> {
     match target {
         Some(WINDOWS_X64_TARGET) => Ok(WINDOWS_X64_TARGET),
-        Some(WINDOWS_ARM64_TARGET) => Ok(WINDOWS_ARM64_TARGET),
         Some(other) => Err(format!("unsupported Windows target: {other}").into()),
-        None => Ok(default_platform_target()),
+        None if cfg!(target_arch = "x86_64") => Ok(WINDOWS_X64_TARGET),
+        None => Err(
+            "native Windows bundling requires x86_64; Windows ARM64 support has been removed"
+                .into(),
+        ),
     }
 }
 
@@ -101,4 +96,31 @@ pub fn run(
     bundle(&target_dir, platform_target)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn x64_target_is_supported() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(
+            resolve_platform_target(Some(WINDOWS_X64_TARGET))?,
+            WINDOWS_X64_TARGET
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn windows_arm64_target_is_rejected() {
+        assert!(resolve_platform_target(Some("aarch64-pc-windows-msvc")).is_err());
+    }
+
+    #[test]
+    fn native_target_requires_x64_host() {
+        assert_eq!(
+            resolve_platform_target(None).is_ok(),
+            cfg!(target_arch = "x86_64")
+        );
+    }
 }

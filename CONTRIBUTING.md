@@ -109,15 +109,9 @@ export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 $env:PATH="$env:PATH;$env:CEF_PATH"
 ```
 
-For Windows ARM64 cross builds from an x64 Windows machine, use the ARM64 CEF
-runtime and Rust target:
-
-```powershell
-$env:CEF_PATH="$env:USERPROFILE/.local/share/cef_arm64"
-export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
-rustup target add aarch64-pc-windows-msvc
-cargo xtask bundle --release --target aarch64-pc-windows-msvc
-```
+Windows builds support only `x86_64-pc-windows-msvc`. Native Windows ARM64
+builds and packages are no longer supported. Use an x64 build host and the x64
+CEF runtime.
 
 ### Building
 
