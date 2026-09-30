@@ -1,3 +1,5 @@
+use clap::ValueEnum;
+
 pub struct PlatformSpec {
     pub target: &'static str,
     pub artifact_name: &'static str,
@@ -11,6 +13,20 @@ pub struct RuntimeAssetSpec {
     pub cef_dirs: &'static [&'static str],
     pub deploy_files: &'static [&'static str],
     pub deploy_dirs: &'static [&'static str],
+}
+
+/// Full releases preserve every supported target; the Store bundle omits Windows/Linux ARM64.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum PackageVariant {
+    #[default]
+    Full,
+    Store,
+}
+
+impl PackageVariant {
+    pub fn includes(self, target: &str) -> bool {
+        self == Self::Full || ![WINDOWS_ARM64_TARGET, LINUX_ARM64_TARGET].contains(&target)
+    }
 }
 
 pub const MACOS_UNIVERSAL_TARGET: &str = "universal-apple-darwin";

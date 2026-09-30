@@ -1,10 +1,13 @@
 //! Validation command - checks packaged addon layout and required artifacts
 
 use crate::bundle_common::validate_required_paths;
-use crate::platform::PLATFORM_SPECS;
+use crate::platform::{PLATFORM_SPECS, PackageVariant};
 use std::path::Path;
 
-pub fn run(addon_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(
+    addon_dir: &Path,
+    variant: Option<PackageVariant>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let bin_dir = addon_dir.join("bin");
     if !bin_dir.exists() {
         return Err(format!(
@@ -14,9 +17,41 @@ pub fn run(addon_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
+    if let Some(variant) = variant {
+        let manifest = std::fs::read_to_string(addon_dir.join("godot_cef.gdextension"))?;
+        for platform in PLATFORM_SPECS {
+            if manifest.contains(platform.target) != variant.includes(platform.target) {
+                return Err(format!(
+                    "GDExtension manifest does not match {variant:?} target selection: {}",
+                    platform.target
+                )
+                .into());
+            }
+        }
+    }
+
     let mut validated = 0usize;
     for platform in PLATFORM_SPECS {
         let platform_dir = bin_dir.join(platform.target);
+        if let Some(variant) = variant {
+            if !variant.includes(platform.target) {
+                if platform_dir.exists() {
+                    return Err(format!(
+                        "excluded target present in {variant:?} addon: {}",
+                        platform.target
+                    )
+                    .into());
+                }
+                continue;
+            }
+            if !platform_dir.exists() {
+                return Err(format!(
+                    "missing required {variant:?} addon target: {}",
+                    platform.target
+                )
+                .into());
+            }
+        }
         if !platform_dir.exists() {
             println!("Skipping {} (not present)", platform.target);
             continue;

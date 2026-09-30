@@ -2,6 +2,9 @@
 
 本页面介绍 Godot CEF 如何通过运行时函数钩子在 Vulkan 后端启用 GPU 加速渲染，以及该方案的限制与注意事项。
 
+本页包含完整 GitHub Release 包支持的架构。精简的 Asset Store 包不含 Windows/Linux ARM64；
+需要这些架构时请选择完整包。详见[分发版本](./distribution-variants)。
+
 ## 背景
 
 CEF 中的 GPU 加速离屏渲染（OSR）需要在 CEF 渲染器进程和宿主应用程序（Godot）之间共享纹理。这通过平台特定的外部内存 API 实现：

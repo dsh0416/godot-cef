@@ -92,6 +92,14 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 
 ## Platform Support
 
+The default/full GitHub Release addon includes Windows x86_64/ARM64, Linux
+x86_64/ARM64, and macOS universal (x86_64/ARM64). A separate **Asset Store** addon
+includes Windows x86_64, Linux x86_64, and the same macOS universal framework to
+reduce download size. Both packages install as `addons/godot_cef`; choose one.
+ARM64 Windows/Linux users should use the full package. See
+[Distribution variants](https://godotcef.org/api/distribution-variants.html) for
+package names, local packaging commands and source-build instructions.
+
 | Platform | DirectX 12 | Metal | Vulkan | Software Rendering |
 |----------|------------|-------|--------|-------------------|
 | **Windows** | ✅ (Note 1) | n.a. | ✅ (Note 2) | ✅ |

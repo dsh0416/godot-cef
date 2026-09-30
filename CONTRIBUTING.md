@@ -295,6 +295,26 @@ For release or packaging changes, also run `cargo xtask pack` with the
 platform artifacts you changed and then `cargo xtask validate --addon` against
 the staged addon directory.
 
+### Distribution variants
+
+`cargo xtask pack` defaults to the full addon, preserving all five platform
+artifacts. For release packaging, stage and validate each variant independently:
+
+```bash
+cargo xtask pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
+cargo xtask validate --addon staging/full/dist/addons/godot_cef --variant full
+cargo xtask pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
+cargo xtask validate --addon staging/store/dist/addons/godot_cef --variant store
+```
+
+Variant validation requires every selected target and rejects excluded target
+directories. Omit `--variant` for the existing partial-addon validation behavior.
+The Store packer derives its descriptor from the full source manifest by removing
+Windows/Linux ARM64 entries; do not install both descriptors in one Godot project.
+See [Distribution variants](docs/api/distribution-variants.md) for archive layout,
+architecture coverage, and manual ARM64 builds. CI builds all architectures and
+publishes both package artifacts; this PR does not itself publish a release.
+
 ### Lifecycle Cleanup Checklist
 
 When changing browser lifecycle code, preserve these cleanup invariants for `CefTexture`:
