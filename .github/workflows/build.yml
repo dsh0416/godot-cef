@@ -160,8 +160,6 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             cache_key: linux-x64
-          - target: aarch64-unknown-linux-gnu
-            cache_key: linux-arm64
 
     steps:
       - name: Checkout repository

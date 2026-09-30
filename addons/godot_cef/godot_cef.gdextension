@@ -5,7 +5,6 @@ reloadable = true
 
 [libraries]
 linux.x86_64   = "bin/x86_64-unknown-linux-gnu/libgdcef.so"
-linux.arm64    = "bin/aarch64-unknown-linux-gnu/libgdcef.so"
 macos          = "bin/universal-apple-darwin/Godot CEF.framework"
 windows.x86_64 = "bin/x86_64-pc-windows-msvc/gdcef.dll"
 
@@ -52,21 +51,4 @@ linux.x86_64 = {
   "bin/x86_64-unknown-linux-gnu/chrome_100_percent.pak" : "",
   "bin/x86_64-unknown-linux-gnu/chrome_200_percent.pak" : "",
   "bin/x86_64-unknown-linux-gnu/locales" : ""
-}
-
-linux.arm64 = {
-  "bin/aarch64-unknown-linux-gnu/libgdcef.so" : "",
-  "bin/aarch64-unknown-linux-gnu/gdcef_helper" : "",
-
-  "bin/aarch64-unknown-linux-gnu/chrome-sandbox" : "",
-  "bin/aarch64-unknown-linux-gnu/libcef.so" : "",
-  "bin/aarch64-unknown-linux-gnu/libvk_swiftshader.so" : "",
-  "bin/aarch64-unknown-linux-gnu/libvulkan.so.1" : "",
-  "bin/aarch64-unknown-linux-gnu/v8_context_snapshot.bin" : "",
-  "bin/aarch64-unknown-linux-gnu/vk_swiftshader_icd.json" : "",
-  "bin/aarch64-unknown-linux-gnu/icudtl.dat" : "",
-  "bin/aarch64-unknown-linux-gnu/resources.pak" : "",
-  "bin/aarch64-unknown-linux-gnu/chrome_100_percent.pak" : "",
-  "bin/aarch64-unknown-linux-gnu/chrome_200_percent.pak" : "",
-  "bin/aarch64-unknown-linux-gnu/locales" : ""
 }

@@ -145,3 +145,31 @@ pub fn run(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linux_arm64_target_remains_available_for_self_builds()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(
+            resolve_platform_target(Some(LINUX_ARM64_TARGET))?,
+            LINUX_ARM64_TARGET
+        );
+        assert_eq!(
+            strip_tool_for_target(LINUX_ARM64_TARGET),
+            "aarch64-linux-gnu-strip"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn linux_x64_target_remains_supported() -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(
+            resolve_platform_target(Some(LINUX_X64_TARGET))?,
+            LINUX_X64_TARGET
+        );
+        Ok(())
+    }
+}

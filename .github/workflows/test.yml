@@ -37,10 +37,6 @@ jobs:
             os: ubuntu-latest
             cef_cache_key: linux-x64
             can_run_tests: true
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            cef_cache_key: linux-arm64
-            can_run_tests: false
 
     runs-on: ${{ matrix.os }}
     name: Test (${{ matrix.target }})
@@ -114,10 +110,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
             name: Linux x64
             cef_cache_key: linux-x64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            name: Linux ARM64
-            cef_cache_key: linux-arm64
 
     runs-on: ${{ matrix.os }}
     name: Clippy (${{ matrix.name }})

@@ -58,19 +58,8 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 export LD_LIBRARY_PATH="$CEF_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-For Linux ARM64 cross builds, download the matching CEF runtime and build with
-the ARM64 Rust target:
-
-```bash
-export CEF_PATH="$HOME/.local/share/cef_aarch64"
-export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
-rustup target add aarch64-unknown-linux-gnu
-cargo xtask bundle --release --target aarch64-unknown-linux-gnu
-```
-
-The repository config allows unresolved symbols from `libcef.so` during Linux
-ARM64 cross linking, because those CEF system dependencies are provided by the
-target ARM64 Linux runtime rather than the x64 build host.
+Official Linux builds support x86_64. For unsupported Linux ARM64 source builds,
+see [Building unsupported targets](docs/api/unsupported-targets.md).
 
 You'll also need system dependencies:
 
@@ -81,10 +70,6 @@ sudo apt-get install -y \
     libdrm-dev libxkbcommon-dev libxcomposite-dev \
     libxdamage-dev libxrandr-dev libgbm-dev \
     libpango1.0-dev libasound2-dev
-
-# Additional tools for Linux ARM64 cross builds
-sudo apt-get install -y \
-    gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
 ```
 
 #### macOS
@@ -109,9 +94,9 @@ export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 $env:PATH="$env:PATH;$env:CEF_PATH"
 ```
 
-Windows builds support only `x86_64-pc-windows-msvc`. Native Windows ARM64
-builds and packages are no longer supported. Use an x64 build host and the x64
-CEF runtime.
+Official Windows builds support x86_64. The bundler still accepts Windows ARM64
+for unsupported source builds; see [Building unsupported targets](docs/api/unsupported-targets.md).
+These local outputs are excluded from `cargo xtask pack` and official distributions.
 
 ### Building
 

@@ -2,12 +2,13 @@
 
 This matrix summarizes the expected rendering mode behavior for each platform/backend combination.
 
-Supported architectures: Windows x86_64, Linux x86_64/ARM64, and macOS universal
-(x86_64/ARM64). **Breaking change:** native Windows ARM64 builds, packages, and
-Godot exports are no longer supported. Projects depending on this target should
-remain on a prior release that includes it until they can migrate. Running
-x86_64 Godot under Windows emulation is unverified. This removal may require a
-major release; see [#238](https://github.com/dsh0416/godot-cef/issues/238).
+Official binary targets: Windows x86_64, Linux x86_64, and macOS universal
+(x86_64/ARM64). **Breaking change:** official Windows ARM64 and Linux ARM64 builds,
+packages, and Godot export registrations have been removed. Users can remain on
+an earlier release or follow the [unsupported source-build guide](./unsupported-targets),
+register their own manifest, and validate their results. Windows x86_64 emulation
+is unverified. This distribution change may require a major release; see
+[#238](https://github.com/dsh0416/godot-cef/issues/238).
 
 ## Version Baseline
 
@@ -31,8 +32,7 @@ This keeps the downloaded runtime files aligned with the Rust bindings.
 | macOS    | any          | Vulkan        | No              | Software fallback |
 | macOS    | any          | OpenGL        | No              | Software fallback |
 | Linux    | x86_64       | Vulkan        | Yes (hook-based) | Accelerated |
-| Linux    | any          | OpenGL        | No              | Software fallback |
-| Linux    | ARM64        | Vulkan        | No (hooks unsupported) | Software fallback |
+| Linux    | x86_64          | OpenGL        | No              | Software fallback |
 
 ## Fallback Conditions
 

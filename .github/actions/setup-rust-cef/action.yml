@@ -47,10 +47,7 @@ runs:
           libxrandr-dev \
           libgbm-dev \
           libpango1.0-dev \
-          libasound2-dev \
-          gcc-aarch64-linux-gnu \
-          g++-aarch64-linux-gnu \
-          binutils-aarch64-linux-gnu
+          libasound2-dev
 
     - name: Setup mise toolchain
       uses: jdx/mise-action@v4

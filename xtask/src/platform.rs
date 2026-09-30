@@ -14,8 +14,12 @@ pub struct RuntimeAssetSpec {
 }
 
 pub const MACOS_UNIVERSAL_TARGET: &str = "universal-apple-darwin";
+// Retained for unsupported source bundling.
+#[cfg(target_os = "windows")]
+pub const WINDOWS_ARM64_TARGET: &str = "aarch64-pc-windows-msvc";
 pub const WINDOWS_X64_TARGET: &str = "x86_64-pc-windows-msvc";
 pub const LINUX_X64_TARGET: &str = "x86_64-unknown-linux-gnu";
+#[cfg(target_os = "linux")]
 pub const LINUX_ARM64_TARGET: &str = "aarch64-unknown-linux-gnu";
 
 const MACOS_REQUIRED_FILES: &[&str] = &["Godot CEF.framework"];
@@ -24,6 +28,7 @@ const LINUX_REQUIRED_FILES: &[&str] = &["libgdcef.so", "gdcef_helper", "libcef.s
 const LOCALES_DIR: &[&str] = &["locales"];
 const NO_REQUIRED_DIRS: &[&str] = &[];
 
+// Only these targets are included in official packaging and layout validation.
 pub const PLATFORM_SPECS: &[PlatformSpec] = &[
     PlatformSpec {
         target: MACOS_UNIVERSAL_TARGET,
@@ -40,12 +45,6 @@ pub const PLATFORM_SPECS: &[PlatformSpec] = &[
     PlatformSpec {
         target: LINUX_X64_TARGET,
         artifact_name: "gdcef-x86_64-unknown-linux-gnu",
-        required_files: LINUX_REQUIRED_FILES,
-        required_dirs: LOCALES_DIR,
-    },
-    PlatformSpec {
-        target: LINUX_ARM64_TARGET,
-        artifact_name: "gdcef-aarch64-unknown-linux-gnu",
         required_files: LINUX_REQUIRED_FILES,
         required_dirs: LOCALES_DIR,
     },
@@ -171,7 +170,7 @@ mod tests {
             }
         }
 
-        for target in [LINUX_X64_TARGET, LINUX_ARM64_TARGET] {
+        for target in [LINUX_X64_TARGET] {
             let Some(spec) = platform_spec(target) else {
                 assert!(platform_spec(target).is_some(), "linux spec should exist");
                 continue;

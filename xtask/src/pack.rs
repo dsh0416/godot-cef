@@ -108,7 +108,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn pack_retains_supported_platforms_and_omits_windows_arm64()
+    fn pack_retains_supported_platforms_and_omits_unsupported_arm64()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = std::env::temp_dir().join(format!(
             "gdcef-pack-platforms-{}-{}",
@@ -117,10 +117,22 @@ mod tests {
         ));
         let artifacts = root.join("artifacts");
         let output = root.join("addon");
-        let removed_target = "aarch64-pc-windows-msvc";
+        let removed_targets = ["aarch64-pc-windows-msvc", "aarch64-unknown-linux-gnu"];
         // Both an old CI artifact and a previously staged bundle must be excluded.
-        fs::create_dir_all(artifacts.join(format!("gdcef-{removed_target}")))?;
-        fs::create_dir_all(output.join("bin").join(removed_target))?;
+        for target in removed_targets {
+            fs::create_dir_all(artifacts.join(format!("gdcef-{target}")))?;
+            fs::create_dir_all(output.join("bin").join(target))?;
+            fs::write(
+                artifacts
+                    .join(format!("gdcef-{target}"))
+                    .join("unsupported-binary"),
+                b"must not ship",
+            )?;
+            fs::write(
+                output.join("bin").join(target).join("unsupported-binary"),
+                b"must not ship",
+            )?;
+        }
         for platform in PLATFORM_SPECS {
             let source = artifacts.join(platform.artifact_name);
             fs::create_dir_all(&source)?;
@@ -139,14 +151,17 @@ mod tests {
                 "universal-apple-darwin",
                 "x86_64-pc-windows-msvc",
                 "x86_64-unknown-linux-gnu",
-                "aarch64-unknown-linux-gnu",
             ] {
                 assert!(output.join("bin").join(target).is_dir());
             }
-            assert!(!output.join("bin").join(removed_target).exists());
             let manifest = fs::read_to_string(output.join("godot_cef.gdextension"))?;
             assert!(!manifest.contains("windows.arm64"));
-            assert!(!manifest.contains(removed_target));
+            assert!(!manifest.contains("linux.arm64"));
+            assert_eq!(fs::read_dir(output.join("bin"))?.count(), 3);
+            for target in removed_targets {
+                assert!(!output.join("bin").join(target).exists());
+                assert!(!manifest.contains(target));
+            }
             Ok(())
         })();
         fs::remove_dir_all(&root)?;

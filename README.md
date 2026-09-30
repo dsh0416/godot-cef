@@ -92,13 +92,14 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 
 ## Platform Support
 
-Supported architectures: Windows x86_64, Linux x86_64/ARM64, and macOS universal
-(x86_64/ARM64). **Breaking change:** native Windows ARM64 support has been removed
-from builds, packages, and Godot exports. Projects using native ARM64 Windows
-Godot must remain on a prior release that includes this target until they can
-migrate. Running x86_64 Godot under Windows emulation is not a validated replacement.
-This support removal may require a major release; release planning is tracked in
-[#238](https://github.com/dsh0416/godot-cef/issues/238).
+Official binary targets: Windows x86_64, Linux x86_64, and macOS universal
+(x86_64/ARM64). **Breaking change:** official Windows ARM64 and Linux ARM64 builds,
+packages, and Godot export registrations have been removed. Users needing these
+targets can remain on an earlier release or follow the unsupported
+[source-build guide](https://godotcef.org/api/unsupported-targets.html); local builds
+require their own validation and manifest registration. Windows x86_64 emulation
+is not a validated replacement. This distribution change may require a major
+release; release planning is tracked in [#238](https://github.com/dsh0416/godot-cef/issues/238).
 
 | Platform | DirectX 12 | Metal | Vulkan | Software Rendering |
 |----------|------------|-------|--------|-------------------|
