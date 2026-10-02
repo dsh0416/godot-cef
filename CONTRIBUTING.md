@@ -247,6 +247,44 @@ cargo clippy --workspace --all-features -- -D warnings
 
 ## Testing
 
+### CI gates and caches
+
+`CI` is the only automatic entry workflow. It calls reusable Test, Build, and
+Documentation workflows and finishes with one stable **Gate** check that
+maintainers can require in branch protection. There are no workflow path
+filters, so every PR produces Gate. Gate runs with `always()` and checks both
+the reusable workflow results and their explicitly exported required job
+results. Failed, cancelled, or unexpectedly skipped required work cannot pass.
+
+On PRs, main pushes, and manual runs, Gate requires both five-target Test/Clippy
+matrices, formatting, version validation, macOS universal plus Windows/Linux x64
+and ARM64 packaging, packing/validating Full and Store addons, and the docs build.
+On `v*` tag pushes, Test and Documentation are intentionally skipped as before;
+Gate still requires all platform builds and both packages. Tag pushes and manual
+tag runs create draft releases with both archives after Gate. Main pushes and
+manual runs deploy Pages after Gate. Publication/deployment are downstream and
+are not PR requirements. This workflow change does not configure branch
+protection.
+
+Tool setup explicitly installs only the locked tools needed by each job and
+disables implicit tool installation in later commands. Its cache key includes
+the mise version, runner OS/architecture, selected tools, and both
+`mise.toml` and `mise.lock`. CEF caches use exact keys with the runner
+OS/architecture, target triple, and both mise files; no fallback can restore a
+different CEF runtime. The macOS ARM64 runtime path is shared between checking
+and universal packaging. The pnpm store is cached separately from `node_modules`,
+with the toolchain and dependency lock/configuration in the key; installs still
+use `--frozen-lockfile` and documentation is rebuilt.
+
+Cargo caches compiled dependencies for Test/Clippy only, separated by target,
+compiler, toolchain, Cargo configuration, and CEF environment. Packaging caches
+Cargo downloads instead of large release targets. CI disables incremental
+compilation so sccache can cache compiler work, and pins sccache itself to avoid
+unplanned cache invalidation. Only main and `v*` tag pushes write shared caches;
+PRs and manual runs restore them and use sccache in read-only mode. Cold-cache
+runs still download and compile normally. Cache hits and performance depend on
+available entries and repository cache quota.
+
 ### Running Tests
 
 ```bash

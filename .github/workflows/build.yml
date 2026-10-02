@@ -1,23 +1,19 @@
 name: Build
+on:
+  workflow_call:
+    outputs:
+      required-results:
+        description: Results of required jobs (build-macos, build-windows, build-linux, pack).
+        value: ${{ toJSON(jobs) }}
+
 permissions:
   contents: read
-
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   CEF_PATH: ${{ github.workspace }}/cef
-  SCCACHE_GHA_ENABLED: "true"
+  # Incremental rustc invocations cannot be cached by sccache.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   build-macos:
@@ -25,62 +21,37 @@ jobs:
     name: macOS
 
     env:
-      CEF_PATH_ARM64: ${{ github.workspace }}/cef-arm64
+      CEF_PATH_ARM64: ${{ github.workspace }}/cef
       CEF_PATH_X64: ${{ github.workspace }}/cef-x64
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup mise toolchain
-        uses: jdx/mise-action@v5
+        uses: ./.github/actions/setup-toolchain
         with:
-          version: 2026.10.0
-          cache: true
+          tools: rust cargo:export-cef-dir
 
       - name: Install Rust targets
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+        run: mise exec -- rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Setup Cargo caches
+        uses: ./.github/actions/setup-cargo-cache
 
-      - name: Cache Cargo registry and build
-        uses: actions/cache@v6
+      - name: Setup CEF runtime (ARM64)
+        uses: ./.github/actions/setup-cef
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: macos-universal-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
-          restore-keys: |
-            macos-universal-cargo-
-
-      - name: Cache CEF binaries (ARM64)
-        uses: actions/cache@v6
-        id: cef-cache-arm64
-        with:
+          target: aarch64-apple-darwin
           path: ${{ env.CEF_PATH_ARM64 }}
-          key: cef-${{ hashFiles('mise.toml') }}-macos-arm64
 
-      - name: Download CEF binaries (ARM64)
-        if: steps.cef-cache-arm64.outputs.cache-hit != 'true'
-        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target aarch64-apple-darwin "$CEF_PATH_ARM64"'
-      
-      - name: Copy CEF binaries (ARM64)
-        run: |
-          mkdir -p ${{ env.CEF_PATH }}
-          cp -R ${{ env.CEF_PATH_ARM64 }}/* ${{ env.CEF_PATH }}/
-
-      - name: Cache CEF binaries (X64)
-        uses: actions/cache@v6
-        id: cef-cache-x64
+      - name: Setup CEF runtime (X64)
+        uses: ./.github/actions/setup-cef
         with:
+          target: x86_64-apple-darwin
           path: ${{ env.CEF_PATH_X64 }}
-          key: cef-${{ hashFiles('mise.toml') }}-macos-x64
-
-      - name: Download CEF binaries (X64)
-        if: steps.cef-cache-x64.outputs.cache-hit != 'true'
-        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target x86_64-apple-darwin "$CEF_PATH_X64"'
 
       - name: Build and bundle for macOS (Universal)
         env:
@@ -119,22 +90,20 @@ jobs:
       matrix:
         include:
           - target: x86_64-pc-windows-msvc
-            cache_key: windows-x64
             msvc_arch: x64
           - target: aarch64-pc-windows-msvc
-            cache_key: windows-arm64
             msvc_arch: amd64_arm64
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust and CEF
         uses: ./.github/actions/setup-rust-cef
         with:
           target: ${{ matrix.target }}
-          cef-cache-key: ${{ matrix.cache_key }}
-          cargo-cache-prefix: windows
           msvc-arch: ${{ matrix.msvc_arch }}
 
       - name: Build and bundle for Windows
@@ -163,20 +132,18 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            cache_key: linux-x64
           - target: aarch64-unknown-linux-gnu
-            cache_key: linux-arm64
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust and CEF
         uses: ./.github/actions/setup-rust-cef
         with:
           target: ${{ matrix.target }}
-          cef-cache-key: ${{ matrix.cache_key }}
-          cargo-cache-prefix: linux
           install-linux-deps: "true"
 
       - name: Build and bundle for Linux
@@ -204,19 +171,21 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup mise toolchain
-        uses: jdx/mise-action@v5
+        uses: ./.github/actions/setup-toolchain
         with:
-          version: 2026.10.0
-          cache: true
+          tools: rust
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Setup Cargo caches
+        uses: ./.github/actions/setup-cargo-cache
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
+          pattern: gdcef-*
           path: artifacts
 
       - name: Pack full and Asset Store addons
@@ -249,41 +218,3 @@ jobs:
           name: godot_cef-store-addon
           path: godot_cef-store.zip
           retention-days: 30
-
-  release:
-    needs: [pack]
-    runs-on: ubuntu-latest
-    name: Publish Release
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download packed addon
-        uses: actions/download-artifact@v8
-        with:
-          name: godot_cef-addon
-          path: .
-
-      - name: Download Asset Store addon
-        uses: actions/download-artifact@v8
-        with:
-          name: godot_cef-store-addon
-          path: .
-
-      - name: Rename addons with version
-        run: |
-          mv godot_cef.zip godot_cef-${{ github.ref_name }}.zip
-          mv godot_cef-store.zip godot_cef-store-${{ github.ref_name }}.zip
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          name: Godot CEF ${{ github.ref_name }}
-          draft: true # release is draft until it is manually published
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-          files: |
-            godot_cef-${{ github.ref_name }}.zip
-            godot_cef-store-${{ github.ref_name }}.zip

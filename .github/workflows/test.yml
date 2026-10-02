@@ -1,22 +1,19 @@
 name: Test
+on:
+  workflow_call:
+    outputs:
+      required-results:
+        description: Results of required jobs (test, clippy, fmt, validate-versions).
+        value: ${{ toJSON(jobs) }}
+
 permissions:
   contents: read
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   CEF_PATH: ${{ github.workspace }}/cef
-  SCCACHE_GHA_ENABLED: "true"
+  # Incremental rustc invocations cannot be cached by sccache.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   test:
@@ -26,25 +23,20 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            cef_cache_key: macos-arm64
             can_run_tests: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            cef_cache_key: windows-x64
             can_run_tests: true
             msvc_arch: x64
           - target: aarch64-pc-windows-msvc
             os: windows-latest
-            cef_cache_key: windows-arm64
             can_run_tests: false
             msvc_arch: amd64_arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            cef_cache_key: linux-x64
             can_run_tests: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            cef_cache_key: linux-arm64
             can_run_tests: false
 
     runs-on: ${{ matrix.os }}
@@ -53,13 +45,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust and CEF
         uses: ./.github/actions/setup-rust-cef
         with:
           target: ${{ matrix.target }}
-          cef-cache-key: ${{ matrix.cef_cache_key }}
-          cargo-cache-prefix: ${{ runner.os }}
+          cache-rust-build: "true"
           msvc-arch: ${{ matrix.msvc_arch }}
           install-linux-deps: "true"
 
@@ -109,25 +102,20 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             name: macOS ARM64
-            cef_cache_key: macos-arm64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             name: Windows x64
-            cef_cache_key: windows-x64
             msvc_arch: x64
           - os: windows-latest
             target: aarch64-pc-windows-msvc
             name: Windows ARM64
-            cef_cache_key: windows-arm64
             msvc_arch: amd64_arm64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             name: Linux x64
-            cef_cache_key: linux-x64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             name: Linux ARM64
-            cef_cache_key: linux-arm64
 
     runs-on: ${{ matrix.os }}
     name: Clippy (${{ matrix.name }})
@@ -135,13 +123,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust and CEF
         uses: ./.github/actions/setup-rust-cef
         with:
           target: ${{ matrix.target }}
-          cef-cache-key: ${{ matrix.cef_cache_key }}
-          cargo-cache-prefix: ${{ runner.os }}
+          cache-rust-build: "true"
           msvc-arch: ${{ matrix.msvc_arch }}
           install-clippy: "true"
           install-linux-deps: "true"
@@ -158,12 +147,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup mise toolchain
-        uses: jdx/mise-action@v5
+        uses: ./.github/actions/setup-toolchain
         with:
-          version: 2026.10.0
-          cache: true
+          tools: rust
 
       - name: Install Rustfmt component
         run: mise exec -- rustup component add rustfmt
@@ -178,12 +168,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup mise toolchain
-        uses: jdx/mise-action@v5
+        uses: ./.github/actions/setup-toolchain
         with:
-          version: 2026.10.0
-          cache: true
+          tools: rust
+
+      - name: Setup Cargo caches
+        uses: ./.github/actions/setup-cargo-cache
 
       - name: Validate version pins
         run: mise exec -- cargo xtask validate-versions

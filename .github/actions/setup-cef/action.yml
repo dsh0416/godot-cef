@@ -1,0 +1,36 @@
+name: Setup CEF runtime
+description: Restore the exact CEF runtime for a target, or download it on a miss.
+
+inputs:
+  target:
+    description: Rust target triple for the CEF runtime.
+    required: true
+  path:
+    description: Destination directory for the runtime.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore CEF runtime
+      id: cache
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ inputs.path }}
+        # Never restore a different CEF version or architecture.
+        key: godot-cef-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ hashFiles('mise.toml', 'mise.lock') }}
+
+    - name: Download CEF runtime
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        CEF_TARGET: ${{ inputs.target }}
+        CEF_DESTINATION: ${{ inputs.path }}
+      run: mise exec -- export-cef-dir --version "$CEF_VERSION" --force --target "$CEF_TARGET" "$CEF_DESTINATION"
+
+    - name: Save CEF runtime
+      if: ${{ steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}
