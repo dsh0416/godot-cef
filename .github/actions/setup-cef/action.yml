@@ -12,12 +12,21 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Resolve CEF runtime from Cargo.lock
-      id: version
+    - name: Resolve CEF runtime from Cargo.lock (Linux/macOS)
+      if: runner.os != 'Windows'
       shell: bash
       run: |
         version=$(mise exec -- cargo run --locked --quiet -p xtask -- cef-version)
-        echo "runtime=$version" >> "$GITHUB_OUTPUT"
+        echo "CEF_VERSION=$version" >> "$GITHUB_ENV"
+
+    - name: Resolve CEF runtime from Cargo.lock (Windows)
+      if: runner.os == 'Windows'
+      # Git Bash puts its coreutils link.exe ahead of the MSVC linker.
+      shell: pwsh
+      run: |
+        $version = mise exec -- cargo run --locked --quiet -p xtask -- cef-version
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        "CEF_VERSION=$version" >> $env:GITHUB_ENV
 
     - name: Restore CEF runtime
       id: cache
@@ -25,13 +34,12 @@ runs:
       with:
         path: ${{ inputs.path }}
         # Never restore a different CEF version or architecture.
-        key: godot-cef-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.version.outputs.runtime }}-${{ hashFiles('mise.toml', 'mise.lock') }}
+        key: godot-cef-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ env.CEF_VERSION }}-${{ hashFiles('mise.toml', 'mise.lock') }}
 
     - name: Download CEF runtime
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
-        CEF_VERSION: ${{ steps.version.outputs.runtime }}
         CEF_TARGET: ${{ inputs.target }}
         CEF_DESTINATION: ${{ inputs.path }}
       run: mise exec -- export-cef-dir --version "$CEF_VERSION" --force --target "$CEF_TARGET" "$CEF_DESTINATION"
