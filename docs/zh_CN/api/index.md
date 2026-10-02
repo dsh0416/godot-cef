@@ -62,6 +62,7 @@ func _ready():
 | `godot_cef/security/ignore_certificate_errors` | 忽略 SSL/TLS 证书错误 |
 | `godot_cef/security/disable_web_security` | 禁用网页安全（CORS、同源策略） |
 | `godot_cef/security/default_permission_policy` | 默认权限策略（`0` 全拒绝，`1` 全允许，`2` 发信号） |
+| `godot_cef/security/permission_request_timeout_seconds` | 未回答权限请求的期限（默认 `60` 秒，最小 `1`） |
 | `godot_cef/audio/enable_audio_capture` | 将浏览器音频通过 Godot 音频系统路由（默认：`false`） |
 | `godot_cef/debug/remote_devtools_port` | Chrome DevTools 远程调试端口（默认：`9229`） |
 | `godot_cef/performance/max_frame_rate` | 浏览器最大帧率（默认：`0` = 跟随 Godot FPS） |
@@ -70,7 +71,9 @@ func _ready():
 | `godot_cef/network/proxy_bypass_list` | 不走代理的主机列表（默认：空） |
 | `godot_cef/advanced/custom_command_line_switches` | 自定义 CEF 命令行开关（每行一个） |
 
-这些参数会在初始化期间以命令行开关的形式传递给 CEF 子进程，运行时无法修改。如需更改这些设置，请重启 Godot 应用程序。
+请在初始化之前配置 CEF 全局设置；更改启动设置需要重启应用。
+权限决定由集成层处理，两种浏览器类型都提供可在运行时修改的 `permission_policy`
+覆盖属性。应用提示和超时规则见[权限](./permissions.md)。
 
 ::: warning
 安全相关选项风险较高，只应在明确的场景下启用。如果启用了任何安全选项，启动时会打印警告日志。
@@ -111,6 +114,7 @@ func _ready():
 - [**属性**](./properties.md) - 节点属性和配置
 - [**方法**](./methods.md) - 控制浏览器的可用方法
 - [**信号**](./signals.md) - CefTexture 节点发出的事件
+- [**权限**](./permissions.md) - 摄像头、麦克风、局域网访问、应用权限对话框与配置查询
 - [**IPC 检查器**](./ipc-inspector.md) - 用于查看 IPC 流量的调试工具
 - [**音频捕获**](./audio-capture.md) - 将浏览器音频接入 Godot 音频系统
 - [**输入法（IME）支持**](./ime-support.md) - 输入法（IME）集成

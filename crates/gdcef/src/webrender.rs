@@ -10,9 +10,7 @@ use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
     AudioState, ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo,
     DragEvent, EventQueues, EventQueuesHandle, FindResultEvent, ImeCompositionRange,
-    LoadingStateEvent, PendingPermissionAggregates, PendingPermissionDecision,
-    PendingPermissionRequests, PermissionPolicyFlag, PermissionRequestEvent,
-    PermissionRequestIdCounter,
+    LoadingStateEvent,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -54,38 +52,27 @@ pub(crate) struct ClientQueues {
     pub audio_shutdown_flag: AudioShutdownFlag,
     /// Whether audio capture is enabled.
     pub enable_audio_capture: bool,
-    /// Default permission policy shared with the permission handler.
-    pub permission_policy: PermissionPolicyFlag,
-    /// Monotonic request-id counter for permission events.
-    pub permission_request_counter: PermissionRequestIdCounter,
-    /// Pending permission callback map keyed by request id.
-    pub pending_permission_requests: PendingPermissionRequests,
-    /// Aggregated permission decision state keyed by callback token.
-    pub pending_permission_aggregates: PendingPermissionAggregates,
+    pub permissions: crate::permissions::PermissionController,
 }
 
 impl ClientQueues {
-    pub fn new(
-        sample_rate: f32,
-        enable_audio_capture: bool,
-        permission_policy: PermissionPolicyFlag,
-        permission_request_counter: PermissionRequestIdCounter,
-        pending_permission_requests: PendingPermissionRequests,
-        pending_permission_aggregates: PendingPermissionAggregates,
-    ) -> Self {
+    pub fn new(sample_rate: f32, enable_audio_capture: bool, permission_policy: i32) -> Self {
         use std::sync::atomic::AtomicBool;
+        let event_queues = Arc::new(Mutex::new(EventQueues::new()));
+        let permissions = crate::permissions::PermissionController::new(
+            event_queues.clone(),
+            permission_policy,
+            crate::settings::get_permission_request_timeout(),
+        );
         Self {
-            event_queues: Arc::new(Mutex::new(EventQueues::new())),
+            event_queues,
             source_drag: Arc::new(Mutex::new(crate::drag::SourceDragState::default())),
             audio_packet_queue: Arc::new(Mutex::new(VecDeque::new())),
             audio_params: Arc::new(Mutex::new(None)),
             audio_sample_rate: Arc::new(Mutex::new(sample_rate)),
             audio_shutdown_flag: Arc::new(AtomicBool::new(false)),
             enable_audio_capture,
-            permission_policy,
-            permission_request_counter,
-            pending_permission_requests,
-            pending_permission_aggregates,
+            permissions,
         }
     }
 
@@ -196,16 +183,6 @@ fn handle_popup_size(popup_state: &Arc<Mutex<cef_app::PopupState>>, rect: Option
 /// Helper to convert DragOperationsMask to u32 in a cross-platform way.
 fn drag_ops_to_u32(ops: DragOperationsMask) -> u32 {
     crate::cef_raw_to_u32!(ops.as_ref().0)
-}
-
-/// Helper to convert MediaAccessPermissionTypes bitmask to u32 in a cross-platform way.
-fn media_permission_to_u32(permission: cef::MediaAccessPermissionTypes) -> u32 {
-    crate::cef_raw_to_u32!(permission.get_raw())
-}
-
-/// Helper to convert PermissionRequestTypes bitmask to u32 in a cross-platform way.
-fn prompt_permission_to_u32(permission: cef::PermissionRequestTypes) -> u32 {
-    crate::cef_raw_to_u32!(permission.get_raw())
 }
 
 fn cef_resource_type_to_adblock_request_type(resource_type: ResourceType) -> &'static str {
@@ -711,9 +688,14 @@ wrap_life_span_handler! {
     pub(crate) struct LifeSpanHandlerImpl {
         event_queues: EventQueuesHandle,
         popup_policy: crate::browser::PopupPolicyFlag,
+        permissions: crate::permissions::PermissionController,
     }
 
     impl LifeSpanHandler {
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            self.permissions.invalidate("browser_closed");
+        }
+
         fn on_before_popup(
             &self,
             browser: Option<&mut Browser>,
@@ -775,12 +757,14 @@ wrap_life_span_handler! {
 impl_build_new!(
     pub LifeSpanHandlerImpl => cef::LifeSpanHandler;
     event_queues: EventQueuesHandle,
-    popup_policy: crate::browser::PopupPolicyFlag
+    popup_policy: crate::browser::PopupPolicyFlag,
+    permissions: crate::permissions::PermissionController
 );
 
 wrap_load_handler! {
     pub(crate) struct LoadHandlerImpl {
         event_queues: EventQueuesHandle,
+        permissions: crate::permissions::PermissionController,
     }
 
     impl LoadHandler {
@@ -790,6 +774,13 @@ wrap_load_handler! {
             frame: Option<&mut Frame>,
             _transition_type: TransitionType,
         ) {
+            if let Some(frame) = frame.as_ref() {
+                if frame.is_main() != 0 {
+                    self.permissions.cancel_all("navigation");
+                } else {
+                    self.permissions.cancel_frame(&CefStringUtf16::from(&frame.identifier()).to_string());
+                }
+            }
             if let Some(frame) = frame
                 && frame.is_main() != 0
             {
@@ -850,7 +841,10 @@ wrap_load_handler! {
     }
 }
 
-impl_build_new!(pub LoadHandlerImpl => cef::LoadHandler; event_queues: EventQueuesHandle);
+impl_build_new!(pub LoadHandlerImpl => cef::LoadHandler;
+    event_queues: EventQueuesHandle,
+    permissions: crate::permissions::PermissionController
+);
 
 wrap_find_handler! {
     pub(crate) struct FindHandlerImpl {
@@ -1103,9 +1097,28 @@ impl_build_new!(pub DownloadHandlerImpl => cef::DownloadHandler; event_queues: E
 wrap_request_handler! {
     pub(crate) struct RequestHandlerImpl {
         event_queues: EventQueuesHandle,
+        permissions: crate::permissions::PermissionController,
     }
 
     impl RequestHandler {
+        fn on_before_browse(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _request: Option<&mut Request>,
+            _user_gesture: ::std::os::raw::c_int,
+            _is_redirect: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            if let Some(frame) = frame {
+                if frame.is_main() != 0 {
+                    self.permissions.cancel_all("navigation");
+                } else {
+                    self.permissions.cancel_frame(&CefStringUtf16::from(&frame.identifier()).to_string());
+                }
+            }
+            false as _
+        }
+
         fn on_render_process_terminated(
             &self,
             _browser: Option<&mut Browser>,
@@ -1113,6 +1126,7 @@ wrap_request_handler! {
             _error_code: i32,
             _error_string: Option<&cef::CefStringUtf16>,
         ) {
+            self.permissions.invalidate("renderer_terminated");
             let reason = match status {
                 cef::TerminationStatus::ABNORMAL_TERMINATION => "Abnormal Termination",
                 cef::TerminationStatus::PROCESS_WAS_KILLED => "Process Was Killed",
@@ -1128,222 +1142,34 @@ wrap_request_handler! {
     }
 }
 
-impl_build_new!(pub RequestHandlerImpl => cef::RequestHandler; event_queues: EventQueuesHandle);
+impl_build_new!(pub RequestHandlerImpl => cef::RequestHandler;
+    event_queues: EventQueuesHandle,
+    permissions: crate::permissions::PermissionController
+);
 
-fn push_permission_request(
-    event_queues: &EventQueuesHandle,
-    pending_permission_requests: &PendingPermissionRequests,
-    permission_request_counter: &PermissionRequestIdCounter,
-    pending_decision: PendingPermissionDecision,
-    permission_type: String,
-    url: String,
-) {
-    use std::sync::atomic::Ordering;
-
-    let request_id = permission_request_counter.fetch_add(1, Ordering::Relaxed) + 1;
-
-    if let Ok(mut pending) = pending_permission_requests.lock() {
-        pending.insert(request_id, pending_decision);
-    } else {
-        return;
-    }
-
-    let queued = with_event_queues(event_queues, |queues| {
-        queues
-            .permission_requests
-            .push_back(PermissionRequestEvent {
-                permission_type,
-                url,
-                request_id,
-            });
-    });
-    if !queued && let Ok(mut pending) = pending_permission_requests.lock() {
-        pending.remove(&request_id);
-    }
-}
-
-fn map_permission_bits(
-    requested: u32,
-    mappings: &[(u32, &'static str)],
-    unknown_label: &'static str,
-) -> Vec<(u32, &'static str)> {
-    let mut out = Vec::new();
-    let mut known_mask = 0u32;
-    for &(bit, label) in mappings {
-        known_mask |= bit;
-        if requested & bit != 0 {
-            out.push((bit, label));
-        }
-    }
-    let unknown = requested & !known_mask;
-    if unknown != 0 {
-        out.push((unknown, unknown_label));
-    }
-    if out.is_empty() {
-        out.push((requested, unknown_label));
-    }
-    out
-}
-
-fn map_media_permission_types(requested_permissions: u32) -> Vec<(u32, &'static str)> {
-    map_permission_bits(
-        requested_permissions,
-        &[
-            (
-                media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE),
-                "microphone",
-            ),
-            (
-                media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE),
-                "camera",
-            ),
-            (
-                media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE),
-                "desktop_audio_capture",
-            ),
-            (
-                media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE),
-                "desktop_video_capture",
-            ),
-        ],
-        "unknown_media_permission",
-    )
-}
-
-fn map_prompt_permission_types(requested_permissions: u32) -> Vec<&'static str> {
-    map_permission_bits(
-        requested_permissions,
-        &[
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::CAMERA_STREAM),
-                "camera",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::MIC_STREAM),
-                "microphone",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::GEOLOCATION),
-                "geolocation",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::CLIPBOARD),
-                "clipboard",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::NOTIFICATIONS),
-                "notifications",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::MIDI_SYSEX),
-                "midi_sysex",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::POINTER_LOCK),
-                "pointer_lock",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::KEYBOARD_LOCK),
-                "keyboard_lock",
-            ),
-        ],
-        "unknown_permission",
-    )
-    .into_iter()
-    .map(|(_, label)| label)
-    .collect()
-}
-
-#[cfg(test)]
-mod permission_mapping_tests {
-    use super::*;
-
-    #[test]
-    fn prompt_permissions_empty_defaults_to_unknown() {
-        let res = map_prompt_permission_types(0);
-        assert_eq!(res, vec!["unknown_permission"]);
-    }
-
-    #[test]
-    fn prompt_permissions_unknown_bit_includes_unknown() {
-        // Use a high bit that is very unlikely to collide with known permission bits.
-        let res = map_prompt_permission_types(1u32 << 31);
-        assert!(res.contains(&"unknown_permission"));
-    }
-
-    #[test]
-    fn media_permissions_empty_defaults_to_unknown() {
-        let res = map_media_permission_types(0);
-        assert_eq!(res, vec![(0, "unknown_media_permission")]);
-    }
-
-    #[test]
-    fn media_permissions_unknown_bit_includes_unknown() {
-        // Use a high bit that is very unlikely to collide with known permission bits.
-        let res = map_media_permission_types(1u32 << 31);
-        assert!(
-            res.iter()
-                .any(|(_, label)| *label == "unknown_media_permission")
-        );
-    }
-}
 wrap_permission_handler! {
     pub(crate) struct PermissionHandlerImpl {
-        event_queues: EventQueuesHandle,
-        pending_permission_requests: PendingPermissionRequests,
-        pending_permission_aggregates: PendingPermissionAggregates,
-        permission_request_counter: PermissionRequestIdCounter,
-        permission_policy: PermissionPolicyFlag,
+        permissions: crate::permissions::PermissionController,
     }
 
     impl PermissionHandler {
         fn on_request_media_access_permission(
             &self,
             _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             requesting_origin: Option<&CefString>,
             requested_permissions: u32,
             callback: Option<&mut MediaAccessCallback>,
         ) -> ::std::os::raw::c_int {
-            use crate::browser::permission_policy;
-            use std::sync::atomic::Ordering;
-
             let Some(callback) = callback else {
                 return false as _;
             };
-            let callback = callback.clone();
-            let policy = self.permission_policy.load(Ordering::Relaxed);
-
-            if policy == permission_policy::ALLOW_ALL {
-                callback.cont(requested_permissions);
-                return true as _;
-            }
-
-            if policy == permission_policy::DENY_ALL {
-                callback.cont(media_permission_to_u32(cef::MediaAccessPermissionTypes::NONE));
-                return true as _;
-            }
-
-            let url = requesting_origin
-                .map(|origin| origin.to_string())
-                .unwrap_or_default();
-            let callback_token = callback.get_raw() as usize;
-
-            for (permission_bit, permission_type) in map_media_permission_types(requested_permissions) {
-                push_permission_request(
-                    &self.event_queues,
-                    &self.pending_permission_requests,
-                    &self.permission_request_counter,
-                    PendingPermissionDecision::Media {
-                        callback: callback.clone(),
-                        permission_bit,
-                        callback_token,
-                    },
-                    permission_type.to_string(),
-                    url.clone(),
-                );
-            }
-
+            self.permissions.request_media(
+                callback.clone(),
+                requested_permissions,
+                requesting_origin.map(|origin| origin.to_string()).unwrap_or_default(),
+                frame.map(|frame| CefStringUtf16::from(&frame.identifier()).to_string()).unwrap_or_default(),
+            );
             true as _
         }
 
@@ -1355,44 +1181,13 @@ wrap_permission_handler! {
             requested_permissions: u32,
             callback: Option<&mut PermissionPromptCallback>,
         ) -> ::std::os::raw::c_int {
-            use crate::browser::permission_policy;
-            use std::sync::atomic::Ordering;
-
             let Some(callback) = callback else {
                 return false as _;
             };
-            let callback = callback.clone();
-            let policy = self.permission_policy.load(Ordering::Relaxed);
-
-            if policy == permission_policy::ALLOW_ALL {
-                callback.cont(cef::PermissionRequestResult::ACCEPT);
-                return true as _;
-            }
-
-            if policy == permission_policy::DENY_ALL {
-                callback.cont(cef::PermissionRequestResult::DENY);
-                return true as _;
-            }
-
-            let url = requesting_origin
-                .map(|origin| origin.to_string())
-                .unwrap_or_default();
-            let callback_token = callback.get_raw() as usize;
-            for permission_type in map_prompt_permission_types(requested_permissions) {
-                push_permission_request(
-                    &self.event_queues,
-                    &self.pending_permission_requests,
-                    &self.permission_request_counter,
-                    PendingPermissionDecision::Prompt {
-                        callback: callback.clone(),
-                        prompt_id,
-                        callback_token,
-                    },
-                    permission_type.to_string(),
-                    url.clone(),
-                );
-            }
-
+            self.permissions.request_prompt(
+                callback.clone(), prompt_id, requested_permissions,
+                requesting_origin.map(|origin| origin.to_string()).unwrap_or_default(),
+            );
             true as _
         }
 
@@ -1400,43 +1195,16 @@ wrap_permission_handler! {
             &self,
             _browser: Option<&mut Browser>,
             prompt_id: u64,
-            _result: PermissionRequestResult,
+            result: PermissionRequestResult,
         ) {
-            if let Ok(mut pending) = self.pending_permission_requests.lock() {
-                let mut callback_tokens = Vec::new();
-                pending.retain(
-                    |_, entry| match entry {
-                        PendingPermissionDecision::Prompt {
-                            prompt_id: id,
-                            callback_token,
-                            ..
-                        } if *id == prompt_id => {
-                            callback_tokens.push(*callback_token);
-                            false
-                        }
-                        _ => true,
-                    },
-                );
-
-                if !callback_tokens.is_empty()
-                    && let Ok(mut aggregates) = self.pending_permission_aggregates.lock()
-                {
-                    for token in callback_tokens {
-                        aggregates.remove(&token);
-                    }
-                }
-            }
+            self.permissions.dismiss(prompt_id, result);
         }
     }
 }
 
 impl_build_new!(
     pub PermissionHandlerImpl => cef::PermissionHandler;
-    event_queues: EventQueuesHandle,
-    pending_permission_requests: PendingPermissionRequests,
-    pending_permission_aggregates: PendingPermissionAggregates,
-    permission_request_counter: PermissionRequestIdCounter,
-    permission_policy: PermissionPolicyFlag
+    permissions: crate::permissions::PermissionController
 );
 
 #[derive(Clone)]
@@ -1549,20 +1317,24 @@ fn build_client_handlers(
         render_handler,
         display_handler: DisplayHandlerImpl::build(cursor_type, queues.event_queues.clone()),
         context_menu_handler: ContextMenuHandlerImpl::build(),
-        life_span_handler: LifeSpanHandlerImpl::build(queues.event_queues.clone(), popup_policy),
-        load_handler: LoadHandlerImpl::build(queues.event_queues.clone()),
+        life_span_handler: LifeSpanHandlerImpl::build(
+            queues.event_queues.clone(),
+            popup_policy,
+            queues.permissions.clone(),
+        ),
+        load_handler: LoadHandlerImpl::build(
+            queues.event_queues.clone(),
+            queues.permissions.clone(),
+        ),
         find_handler: FindHandlerImpl::build(queues.event_queues.clone()),
         drag_handler: DragHandlerImpl::build(queues.event_queues.clone()),
         audio_handler,
         download_handler: DownloadHandlerImpl::build(queues.event_queues.clone()),
-        request_handler: RequestHandlerImpl::build(queues.event_queues.clone()),
-        permission_handler: PermissionHandlerImpl::build(
+        request_handler: RequestHandlerImpl::build(
             queues.event_queues.clone(),
-            queues.pending_permission_requests.clone(),
-            queues.pending_permission_aggregates.clone(),
-            queues.permission_request_counter.clone(),
-            queues.permission_policy.clone(),
+            queues.permissions.clone(),
         ),
+        permission_handler: PermissionHandlerImpl::build(queues.permissions.clone()),
     }
 }
 

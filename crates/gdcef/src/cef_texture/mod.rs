@@ -4,7 +4,6 @@ mod cookie_ops;
 mod focus_state;
 mod ime;
 mod input_routing;
-mod permission_ops;
 mod pointer_state;
 mod rendering;
 mod signals;
@@ -52,6 +51,11 @@ pub struct CefTexture {
     /// Redirect: navigate the current browser to the popup URL.
     /// SignalOnly: emit `popup_requested` signal and let GDScript decide.
     popup_policy: i32,
+
+    #[export(enum = (ProjectDefault = -1, DenyAll = 0, AllowAll = 1, Signal = 2))]
+    #[var(get = get_permission_policy, set = set_permission_policy)]
+    /// Browser permission handling. ProjectDefault inherits the project setting at creation.
+    permission_policy: i32,
 
     #[export]
     #[var(get = get_preload_script, set = set_preload_script)]
@@ -110,6 +114,7 @@ impl ITextureRect for CefTexture {
             enable_accelerated_osr: true,
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
             popup_policy: crate::browser::popup_policy::BLOCK,
+            permission_policy: -1,
             preload_script: GString::new(),
             preload_script_path: GString::new(),
             ime_position: Vector2i::new(0, 0),
@@ -283,6 +288,9 @@ impl CefTexture {
 
     #[signal]
     fn permission_requested(permission_type: GString, url: GString, request_id: i64);
+
+    #[signal]
+    fn permission_request_finished(request_id: i64, result: GString);
 
     /// Emitted after a find-in-page operation completes or is updated.
     ///
@@ -801,12 +809,52 @@ impl CefTexture {
 
     #[func]
     pub fn grant_permission(&self, request_id: i64) -> bool {
-        self.with_app(|app| permission_ops::resolve_permission_request(app, request_id, true))
+        self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
+            .is_some_and(|permissions| permissions.resolve(request_id, true))
     }
 
     #[func]
     pub fn deny_permission(&self, request_id: i64) -> bool {
-        self.with_app(|app| permission_ops::resolve_permission_request(app, request_id, false))
+        self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
+            .is_some_and(|permissions| permissions.resolve(request_id, false))
+    }
+
+    #[func]
+    pub fn is_permission_pending(&self, request_id: i64) -> bool {
+        self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
+            .is_some_and(|permissions| permissions.is_pending(request_id))
+    }
+
+    /// Read the profile's content setting; this is not a device-access check.
+    #[func]
+    pub fn get_permission_setting(
+        &self,
+        permission_type: GString,
+        requesting_url: GString,
+        top_level_url: GString,
+    ) -> GString {
+        self.with_app(|app| {
+            crate::permission_query::query(
+                app,
+                &permission_type.to_string(),
+                &requesting_url.to_string(),
+                &top_level_url.to_string(),
+            )
+        })
+        .into()
+    }
+
+    #[func]
+    pub fn get_permission_policy(&self) -> i32 {
+        self.permission_policy
+    }
+
+    #[func]
+    pub fn set_permission_policy(&mut self, policy: i32) {
+        self.permission_policy = policy.clamp(-1, 2);
+        self.texture2d_helper
+            .bind_mut()
+            .set_permission_policy(self.permission_policy);
     }
 
     /// Retrieves all cookies. Results are emitted via `cookies_received` signal.

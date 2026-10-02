@@ -47,6 +47,7 @@ pub(crate) fn ensure_installed() -> Result<(), String> {
         // from_fn is bound to the creating thread. No Godot callable is invoked
         // by OnScheduleMessagePumpWork, which only touches the Rust scheduler.
         let callable = Callable::from_fn("gdcef_message_pump", |_| {
+            crate::permissions::expire_pending();
             MESSAGE_PUMP.run_due(cef::do_message_loop_work);
         });
         let error = tree.connect("process_frame", &callable);

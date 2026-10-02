@@ -63,6 +63,7 @@ Navigate to **Project > Project Settings > godot_cef** to configure:
 | `godot_cef/security/ignore_certificate_errors` | Ignore SSL/TLS certificate errors |
 | `godot_cef/security/disable_web_security` | Disable web security (CORS, same-origin policy) |
 | `godot_cef/security/default_permission_policy` | Default permission policy (`0` deny-all, `1` allow-all, `2` signal) |
+| `godot_cef/security/permission_request_timeout_seconds` | Deadline for unanswered permission requests (default: `60` seconds, minimum: `1`) |
 | `godot_cef/audio/enable_audio_capture` | Route browser audio through Godot's audio system (default: `false`) |
 | `godot_cef/debug/remote_devtools_port` | Port for Chrome DevTools remote debugging (default: `9229`) |
 | `godot_cef/performance/max_frame_rate` | Maximum browser frame rate (default: `0` = follow Godot FPS) |
@@ -71,7 +72,10 @@ Navigate to **Project > Project Settings > godot_cef** to configure:
 | `godot_cef/network/proxy_bypass_list` | Hosts to bypass proxy (default: empty) |
 | `godot_cef/advanced/custom_command_line_switches` | Custom CEF command-line switches (one per line) |
 
-These parameters are passed as command-line switches to the CEF subprocess during initialization and cannot be modified at runtime. If you need to change these settings, you must restart your Godot application.
+Configure global CEF settings before initialization; changing startup settings
+requires restarting the application. Permission decisions are handled by the
+integration: both browser types expose a runtime `permission_policy` override.
+See [Permissions](./permissions.md) for the application prompt and timeout rules.
 
 ::: warning
 Security settings are dangerous and should only be enabled for specific use cases. Warnings will be logged at startup if any security settings are enabled.
@@ -112,6 +116,7 @@ When remote debugging is enabled, CEF listens on the configured port (default: *
 - [**Properties**](./properties.md) - Node properties and configuration
 - [**Methods**](./methods.md) - Available methods for controlling the browser
 - [**Signals**](./signals.md) - Events emitted by the CefTexture node
+- [**Permissions**](./permissions.md) - Camera, microphone, local network access, application dialogs, and profile setting queries
 - [**IPC Inspector**](./ipc-inspector.md) - Visual inspector for IPC traffic during development
 - [**Audio Capture**](./audio-capture.md) - Route browser audio through Godot's audio system
 - [**IME Support**](./ime-support.md) - Input Method Editor integration

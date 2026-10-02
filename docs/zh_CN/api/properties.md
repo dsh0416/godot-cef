@@ -17,6 +17,7 @@
 | `enable_accelerated_osr` | `bool` | `true` | 启用 GPU 加速渲染 |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色。将 alpha 设为 0 表示透明背景，或使用实色以禁用透明效果。 |
 | `popup_policy` | `int` | `0` | 控制弹出窗口的处理方式。`0` = BLOCK（静默阻止），`1` = REDIRECT（在当前浏览器中导航到弹出 URL），`2` = SIGNAL_ONLY（触发 `popup_requested` 信号）。可在运行时更改。 |
+| `permission_policy` | `int` | `-1` | `-1` 继承项目权限策略，`0` 拒绝，`1` 允许已知请求，`2` 发出权限信号。运行时更改会取消待处理请求，参见[权限](./permissions.md)。 |
 | `preload_script` | `String` | `""` | 在 JS Bridge 注册之后、document 加载之前，为浏览器主 Frame 执行的 JavaScript 源码。与 `preload_script_path` 互斥。 |
 | `preload_script_path` | `String` | `""` | 要预加载的 JavaScript 文件路径。支持 `res://`、`user://` 等 Godot 路径。与 `preload_script` 互斥。 |
 
@@ -28,11 +29,16 @@
 | `enable_accelerated_osr` | `bool` | `true` | 在支持的平台启用加速 OSR，否则自动回退到软件渲染。 |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色（支持透明）。 |
 | `popup_policy` | `int` | `0` | 弹窗策略：BLOCK / REDIRECT / SIGNAL_ONLY。 |
+| `permission_policy` | `int` | `-1` | 与 `CefTexture` 使用相同的权限策略和信号；运行时更改会取消待处理请求，参见[权限](./permissions.md)。 |
 | `preload_script` | `String` | `""` | 在 JS Bridge 注册之后、document 加载之前，为浏览器主 Frame 执行的 JavaScript 源码。与 `preload_script_path` 互斥。 |
 | `preload_script_path` | `String` | `""` | 要预加载的 JavaScript 文件路径。支持 `res://`、`user://` 等 Godot 路径。与 `preload_script` 互斥。 |
 | `texture_size` | `Vector2i` | `Vector2i(1024, 1024)` | 浏览器纹理逻辑尺寸（像素）。 |
 
-`CefTexture2D` 的 v1 版本刻意保持为仅渲染：不包含内置的 3D 表面输入映射/射线投射路由。
+`CefTexture2D` 仍以渲染为主，不包含内置的 3D 表面输入映射/射线投射路由。
+它提供 `permission_requested`、`permission_request_finished` 信号，
+以及与 `CefTexture` 相同的权限应答方法；不提供 `load_finished`、`title_changed`、
+`console_message` 或 `popup_requested` 等其他浏览器事件信号。
+需要加载事件时，请使用 `CefTexture` 节点并连接其信号。
 
 `CefTexture2D` 也提供可选的底层 `forward_*` 输入辅助方法。
 这些方法不会自动进行节点坐标映射；调用方需要自行提供已映射的位置和缩放参数。
@@ -116,6 +122,10 @@ IPC。它不是安全隔离边界，也不应包含不允许被页面读取的�
 | `godot_cef/security/ignore_certificate_errors` | `bool` | `false` | 跳过 SSL/TLS 证书验证 |
 | `godot_cef/security/disable_web_security` | `bool` | `false` | 禁用 CORS 和同源策略 |
 | `godot_cef/security/default_permission_policy` | `int` | `0` | 默认权限策略。`0` = DENY_ALL，`1` = ALLOW_ALL，`2` = SIGNAL（触发 `permission_requested`） |
+| `godot_cef/security/permission_request_timeout_seconds` | `int` | `60` | 未回答权限请求的期限，单位为秒，最小 `1`。请在创建浏览器之前配置。 |
+
+浏览器可通过 `permission_policy` 覆盖项目权限策略。
+请求分组、失效清理和完整示例见[权限](./permissions.md)。
 
 ### 调试设置
 

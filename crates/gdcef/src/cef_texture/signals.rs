@@ -156,6 +156,14 @@ impl CefTexture {
         self.emit_console_message_signals(&events.console_messages);
         self.emit_drag_event_signals(&events.drag_events);
         self.emit_popup_request_signals(&events.popup_requests);
+        for (request_id, result) in &events.permission_request_finished {
+            emit_signal_variants!(
+                self,
+                "permission_request_finished",
+                *request_id,
+                GString::from(result)
+            );
+        }
         self.emit_permission_request_signals(&events.permission_requests);
         self.emit_find_result_signals(&events.find_results);
         self.emit_cookie_event_signals(&events.cookie_events);
@@ -329,6 +337,21 @@ impl CefTexture {
         events: &VecDeque<crate::browser::PermissionRequestEvent>,
     ) {
         for event in events {
+            if !self.is_permission_pending(event.request_id) {
+                continue;
+            }
+            if self
+                .base()
+                .get_signal_connection_list("permission_requested")
+                .is_empty()
+            {
+                if let Some(permissions) =
+                    self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
+                {
+                    permissions.dismiss_request(event.request_id);
+                }
+                continue;
+            }
             emit_signal_variants!(
                 self,
                 "permission_requested",
