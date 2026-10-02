@@ -53,8 +53,9 @@ runs:
           binutils-aarch64-linux-gnu
 
     - name: Setup mise toolchain
-      uses: jdx/mise-action@v4
+      uses: jdx/mise-action@v5
       with:
+        version: 2026.10.0
         cache: true
 
     - name: Install Clippy component
