@@ -48,12 +48,13 @@ The commands below assume mise shell integration is active. If your shell is not
 
 ### Installing CEF Binaries
 
-`mise install` installs the `export-cef-dir` tool and exposes the pinned `CEF_VERSION` from `mise.toml`. Download CEF binaries for your platform:
+`mise install` installs the `export-cef-dir` tool. After activating the toolchain, derive the matching runtime version from the `cef` / `cef-dll-sys` build metadata in `Cargo.lock` and pass it explicitly to the exporter. Download CEF binaries for your platform:
 
 #### Linux
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"
+CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 export LD_LIBRARY_PATH="$CEF_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
@@ -63,6 +64,7 @@ the ARM64 Rust target:
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef_aarch64"
+CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
 rustup target add aarch64-unknown-linux-gnu
 cargo xtask bundle --release --target aarch64-unknown-linux-gnu
@@ -92,6 +94,7 @@ sudo apt-get install -y \
 ```bash
 # Native architecture
 export CEF_PATH="$HOME/.local/share/cef"
+CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 
 # For universal builds (optional)
@@ -105,6 +108,8 @@ export-cef-dir --version "$CEF_VERSION" --target aarch64-apple-darwin --force "$
 
 ```powershell
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef"
+$env:CEF_VERSION = cargo run --locked --quiet -p xtask -- cef-version
+if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 $env:PATH="$env:PATH;$env:CEF_PATH"
 ```
@@ -114,6 +119,8 @@ runtime and Rust target:
 
 ```powershell
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef_arm64"
+$env:CEF_VERSION = cargo run --locked --quiet -p xtask -- cef-version
+if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
 rustup target add aarch64-pc-windows-msvc
 cargo xtask bundle --release --target aarch64-pc-windows-msvc
@@ -270,9 +277,9 @@ Tool setup explicitly installs only the locked tools needed by each job and
 disables implicit tool installation in later commands. Its cache key includes
 the mise version, runner OS/architecture, selected tools, and both
 `mise.toml` and `mise.lock`. CEF caches use exact keys with the runner
-OS/architecture, target triple, and both mise files; no fallback can restore a
-different CEF runtime. The macOS ARM64 runtime path is shared between checking
-and universal packaging. The pnpm store is cached separately from `node_modules`,
+OS/architecture, target triple, derived runtime version, and both mise files;
+no fallback can restore a different CEF runtime. The macOS ARM64 runtime path is
+shared between checking and universal packaging. The pnpm store is cached separately from `node_modules`,
 with the toolchain and dependency lock/configuration in the key; installs still
 use `--frozen-lockfile` and documentation is rebuilt.
 
@@ -310,9 +317,11 @@ $env:PATH="$env:CEF_PATH;$env:PATH"
 cargo test --workspace --all-features
 ```
 
-Use `cargo xtask validate-versions` after bumping Rust crate versions, CEF
-runtime pins, the docs package version, or `mise.toml`. It checks that
-`Cargo.toml`, `Cargo.lock`, `package.json`, and `mise.toml` agree.
+Use `cargo xtask validate-versions` after bumping Rust crate versions, the CEF
+exporter, the docs package version, or `mise.toml`. It checks that
+`Cargo.toml`, `Cargo.lock`, `package.json`, and `mise.toml` agree. The CEF crates
+must have the same complete version. The exporter must match their major,
+minor, and patch versions, plus the runtime metadata when present in its pin.
 
 ### Writing Tests
 

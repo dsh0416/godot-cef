@@ -3,6 +3,13 @@
   "extends": ["config:recommended", "group:all"],
   "timezone": "Asia/Singapore",
   "schedule": ["* 2-3 * * *"],
+  "packageRules": [
+    {
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["cef", "cef-dll-sys"],
+      "rangeStrategy": "bump"
+    }
+  ],
   "lockFileMaintenance": {
     "enabled": true,
     "groupName": "all dependencies",

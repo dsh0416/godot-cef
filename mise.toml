@@ -12,8 +12,3 @@ pnpm = "latest"
 
 [settings]
 lockfile = true
-
-[env]
-# Keep this in sync with the resolved cef / cef-dll-sys version in Cargo.lock,
-# using the CEF runtime build version after the '+'.
-CEF_VERSION = "154.0.28"

@@ -12,18 +12,26 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Resolve CEF runtime from Cargo.lock
+      id: version
+      shell: bash
+      run: |
+        version=$(mise exec -- cargo run --locked --quiet -p xtask -- cef-version)
+        echo "runtime=$version" >> "$GITHUB_OUTPUT"
+
     - name: Restore CEF runtime
       id: cache
       uses: actions/cache/restore@v6
       with:
         path: ${{ inputs.path }}
         # Never restore a different CEF version or architecture.
-        key: godot-cef-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ hashFiles('mise.toml', 'mise.lock') }}
+        key: godot-cef-runtime-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target }}-${{ steps.version.outputs.runtime }}-${{ hashFiles('mise.toml', 'mise.lock') }}
 
     - name: Download CEF runtime
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
+        CEF_VERSION: ${{ steps.version.outputs.runtime }}
         CEF_TARGET: ${{ inputs.target }}
         CEF_DESTINATION: ${{ inputs.path }}
       run: mise exec -- export-cef-dir --version "$CEF_VERSION" --force --target "$CEF_TARGET" "$CEF_DESTINATION"
