@@ -23,10 +23,6 @@ impl CefTextureRuntime {
         self.runtime_enabled
     }
 
-    pub(crate) fn set_runtime_enabled(&mut self, enabled: bool) {
-        self.runtime_enabled = enabled;
-    }
-
     pub(crate) fn set_url(&self, url: GString) {
         if let Some(state) = self.app.state.as_ref()
             && let Some(frame) = state.browser.main_frame()

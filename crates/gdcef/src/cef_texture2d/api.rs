@@ -93,8 +93,28 @@ impl CefTexture2D {
     }
 
     #[func]
-    fn _on_frame_pre_draw(&mut self) {
+    fn _connect_runtime_hooks(&mut self) {
+        self.connect_runtime_hooks();
+    }
+
+    #[func]
+    fn _on_process_frame(&mut self) {
         self.tick();
+    }
+
+    #[func]
+    fn _on_frame_pre_draw(&mut self) {
+        if self.runtime.runtime_enabled() {
+            self.update_texture();
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            if self.runtime.app().state.as_ref().is_some_and(|state| {
+                matches!(state.render_mode, RenderMode::Accelerated { .. })
+            }) {
+                // Finish the pending GPU copy before asking CEF for its next
+                // accelerated frame, preserving the renderer's ordering.
+                self.runtime.request_external_begin_frame();
+            }
+        }
     }
 
     #[func]
