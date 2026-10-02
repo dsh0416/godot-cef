@@ -1,0 +1,26 @@
+name: Setup locked toolchain
+description: Install selected mise tools with a shared, read-only-on-PR cache.
+
+inputs:
+  tools:
+    description: Space-separated tools to install; empty installs all locked tools.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Disable implicit installation of unselected tools
+      shell: bash
+      run: echo "MISE_AUTO_INSTALL=0" >> "$GITHUB_ENV"
+
+    - name: Install locked tools
+      uses: jdx/mise-action@v5
+      with:
+        # Pin mise independently of the action's major-tag updates.
+        version: 2026.10.0
+        install_args: ${{ inputs.tools }}
+        cache: true
+        github_token: ${{ github.event_name != 'pull_request' && github.token || '' }}
+        cache_save: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+        cache_key: godot-cef-mise-v2-{{version}}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.tools }}-${{ hashFiles('mise.toml', 'mise.lock') }}

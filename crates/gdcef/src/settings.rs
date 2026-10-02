@@ -9,6 +9,7 @@ const SETTING_ALLOW_INSECURE_CONTENT: &str = "godot_cef/security/allow_insecure_
 const SETTING_IGNORE_CERTIFICATE_ERRORS: &str = "godot_cef/security/ignore_certificate_errors";
 const SETTING_DISABLE_WEB_SECURITY: &str = "godot_cef/security/disable_web_security";
 const SETTING_DEFAULT_PERMISSION_POLICY: &str = "godot_cef/security/default_permission_policy";
+const SETTING_PERMISSION_TIMEOUT: &str = "godot_cef/security/permission_request_timeout_seconds";
 const SETTING_ENABLE_AUDIO_CAPTURE: &str = "godot_cef/audio/enable_audio_capture";
 const SETTING_REMOTE_DEVTOOLS_PORT: &str = "godot_cef/debug/remote_devtools_port";
 const SETTING_MAX_FRAME_RATE: &str = "godot_cef/performance/max_frame_rate";
@@ -71,6 +72,14 @@ pub fn register_project_settings() {
         DEFAULT_PERMISSION_POLICY,
         PropertyHint::ENUM,
         "DenyAll:0,AllowAll:1,Signal:2",
+    );
+
+    register_int_setting(
+        &mut settings,
+        SETTING_PERMISSION_TIMEOUT,
+        60,
+        PropertyHint::RANGE,
+        "1,3600,or_greater",
     );
 
     register_bool_setting(
@@ -286,6 +295,18 @@ pub fn get_default_permission_policy() -> i32 {
         crate::browser::permission_policy::DENY_ALL,
         crate::browser::permission_policy::SIGNAL,
     )
+}
+
+pub fn resolve_permission_policy(policy: i32) -> i32 {
+    if policy == -1 {
+        get_default_permission_policy()
+    } else {
+        policy.clamp(0, 2)
+    }
+}
+
+pub fn get_permission_request_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(get_setting_or(SETTING_PERMISSION_TIMEOUT, 60i64).max(1) as u64)
 }
 
 pub fn get_remote_devtools_port() -> u16 {

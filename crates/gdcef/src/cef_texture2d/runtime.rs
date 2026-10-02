@@ -63,6 +63,7 @@ impl CefTextureRuntime {
             enable_accelerated_osr,
             background_color,
             popup_policy,
+            permission_policy,
             preload_script,
             preload_script_path,
             software_target_texture,
@@ -84,6 +85,7 @@ impl CefTextureRuntime {
             enable_accelerated_osr,
             background_color,
             popup_policy,
+            permission_policy,
             preload_script: preload_script.to_string(),
             preload_script_path: preload_script_path.to_string(),
             software_target_texture,
@@ -134,9 +136,9 @@ impl CefTextureRuntime {
         backend::cleanup_runtime(&mut self.app, popup_texture_2d_rd);
     }
 
-    pub(crate) fn drain_event_queues(&self, log_prefix: &str) {
+    pub(crate) fn drain_event_queues(&self, log_prefix: &str) -> crate::browser::EventQueues {
         let Some(event_queues) = self.app.state.as_ref().map(|state| &state.event_queues) else {
-            return;
+            return Default::default();
         };
 
         let Ok(mut queues) = event_queues.lock() else {
@@ -144,9 +146,9 @@ impl CefTextureRuntime {
                 "[{}] Failed to lock event queues while draining events",
                 log_prefix
             );
-            return;
+            return Default::default();
         };
 
-        let _ = std::mem::take(&mut *queues);
+        std::mem::take(&mut *queues)
     }
 }

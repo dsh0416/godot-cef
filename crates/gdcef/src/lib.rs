@@ -13,6 +13,8 @@ mod error;
 mod godot_protocol;
 mod input;
 mod ipc_data;
+mod permission_query;
+mod permissions;
 mod profile_dir;
 mod render;
 mod settings;

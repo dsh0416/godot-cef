@@ -3,7 +3,7 @@
 //! Usage:
 //!   cargo xtask bundle [--release] [--target <triple>] # Bundle for current platform and deploy to addons/
 //!   cargo xtask bundle-framework [--release] # Bundle framework (macOS only)
-//!   cargo xtask pack <artifacts> <output>    # Pack CI artifacts into distributable addon
+//!   cargo xtask pack --artifacts <path> --output <path> [--variant full|store]    # Pack CI artifacts into distributable addon
 //!   cargo xtask validate --addon <path>      # Validate addon artifact completeness
 //!   cargo xtask validate-versions            # Validate workspace/toolchain version pins
 
@@ -22,6 +22,7 @@ mod validate;
 mod validate_versions;
 
 use clap::{Parser, Subcommand};
+use platform::PackageVariant;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -73,6 +74,10 @@ enum Commands {
         /// Path to addon source files (gdextension, icons)
         #[arg(long)]
         addon_src: Option<PathBuf>,
+
+        /// Distribution variant (full includes every supported architecture)
+        #[arg(long, value_enum, default_value_t = PackageVariant::Full)]
+        variant: PackageVariant,
     },
 
     /// Validate addon artifact completeness
@@ -80,6 +85,10 @@ enum Commands {
         /// Path to addon directory containing bin/<platform> outputs
         #[arg(long)]
         addon: PathBuf,
+
+        /// Require all targets for this variant and reject excluded targets
+        #[arg(long, value_enum)]
+        variant: Option<PackageVariant>,
     },
 
     /// Validate version and toolchain pins across workspace files
@@ -132,11 +141,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             artifacts,
             output,
             addon_src,
+            variant,
         } => {
-            pack::run(&artifacts, &output, addon_src.as_deref())?;
+            pack::run(&artifacts, &output, addon_src.as_deref(), variant)?;
         }
-        Commands::Validate { addon } => {
-            validate::run(&addon)?;
+        Commands::Validate { addon, variant } => {
+            validate::run(&addon, variant)?;
         }
         Commands::ValidateVersions => {
             validate_versions::run()?;

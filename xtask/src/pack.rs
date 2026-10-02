@@ -1,7 +1,7 @@
 //! Pack command - assembles all platform artifacts into a single Godot addon
 
 use crate::bundle_common::{copy_directory, validate_required_paths};
-use crate::platform::{PLATFORM_SPECS, PlatformSpec};
+use crate::platform::{PLATFORM_SPECS, PackageVariant, PlatformSpec};
 use std::fs;
 use std::path::Path;
 
@@ -32,10 +32,48 @@ fn copy_platform_artifacts(
     Ok(true)
 }
 
-fn copy_addon_files(addon_src: &Path, output_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn manifest_for_variant(
+    manifest: &str,
+    variant: PackageVariant,
+) -> Result<String, Box<dyn std::error::Error>> {
+    if variant == PackageVariant::Full {
+        return Ok(manifest.to_owned());
+    }
+
+    let mut result = String::new();
+    let mut skipping_dictionary = false;
+    for line in manifest.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if skipping_dictionary {
+            if trimmed == "}" {
+                skipping_dictionary = false;
+            }
+            continue;
+        }
+        if let Some((key, value)) = trimmed.split_once('=')
+            && ["windows.arm64", "linux.arm64"].contains(&key.trim())
+        {
+            // The source descriptor uses one-line library paths and multiline dependency dictionaries.
+            skipping_dictionary = value.trim() == "{";
+            continue;
+        }
+        result.push_str(line);
+    }
+    if skipping_dictionary {
+        return Err("unterminated ARM64 dependency dictionary in GDExtension manifest".into());
+    }
+    Ok(result)
+}
+
+fn copy_addon_files(
+    addon_src: &Path,
+    output_dir: &Path,
+    variant: PackageVariant,
+) -> Result<(), Box<dyn std::error::Error>> {
     let gdext_src = addon_src.join("godot_cef.gdextension");
     if gdext_src.exists() {
-        fs::copy(&gdext_src, output_dir.join("godot_cef.gdextension"))?;
+        let manifest = manifest_for_variant(&fs::read_to_string(&gdext_src)?, variant)?;
+        fs::write(output_dir.join("godot_cef.gdextension"), manifest)?;
         println!("  Copied: godot_cef.gdextension");
     }
 
@@ -56,8 +94,10 @@ pub fn run(
     artifacts_dir: &Path,
     output_dir: &Path,
     addon_src: Option<&Path>,
+    variant: PackageVariant,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Packing Godot addon from artifacts...");
+    println!("  Variant: {variant:?}");
     println!("  Artifacts: {}", artifacts_dir.display());
     println!("  Output: {}", output_dir.display());
 
@@ -68,7 +108,7 @@ pub fn run(
     fs::create_dir_all(&bin_dir)?;
 
     if let Some(addon_path) = addon_src {
-        copy_addon_files(addon_path, output_dir)?;
+        copy_addon_files(addon_path, output_dir, variant)?;
     } else {
         let workspace_addon = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -78,12 +118,15 @@ pub fn run(
             )
             .join("addons/godot_cef");
         if workspace_addon.exists() {
-            copy_addon_files(&workspace_addon, output_dir)?;
+            copy_addon_files(&workspace_addon, output_dir, variant)?;
         }
     }
 
     let mut platforms_found = 0;
     for platform in PLATFORM_SPECS {
+        if !variant.includes(platform.target) {
+            continue;
+        }
         if copy_platform_artifacts(artifacts_dir, &bin_dir, platform)? {
             platforms_found += 1;
         }

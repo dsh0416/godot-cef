@@ -5,12 +5,10 @@ inputs:
   target:
     description: Rust target triple to install and download CEF for.
     required: true
-  cef-cache-key:
-    description: Platform-specific CEF cache suffix.
-    required: true
-  cargo-cache-prefix:
-    description: Prefix used for the Cargo cache key.
-    required: true
+  cache-rust-build:
+    description: Cache compiled Cargo dependencies for test and Clippy jobs.
+    required: false
+    default: "false"
   msvc-arch:
     description: MSVC developer prompt architecture for Windows runners.
     required: false
@@ -53,9 +51,9 @@ runs:
           binutils-aarch64-linux-gnu
 
     - name: Setup mise toolchain
-      uses: jdx/mise-action@v4
+      uses: ./.github/actions/setup-toolchain
       with:
-        cache: true
+        tools: rust cargo:export-cef-dir
 
     - name: Install Clippy component
       if: ${{ inputs.install-clippy == 'true' }}
@@ -64,7 +62,7 @@ runs:
 
     - name: Install Rust target
       shell: bash
-      run: rustup target add "${{ inputs.target }}"
+      run: mise exec -- rustup target add "${{ inputs.target }}"
 
     - name: Select MSVC toolchain
       if: ${{ runner.os == 'Windows' }}
@@ -72,33 +70,14 @@ runs:
       with:
         arch: ${{ inputs.msvc-arch }}
 
-    - name: Setup sccache
-      uses: mozilla-actions/sccache-action@v0.0.11
-
-    - name: Cache Cargo registry and build
-      uses: actions/cache@v6
+    - name: Setup Cargo caches
+      uses: ./.github/actions/setup-cargo-cache
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ inputs.cargo-cache-prefix }}-${{ inputs.target }}-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
-        restore-keys: |
-          ${{ inputs.cargo-cache-prefix }}-${{ inputs.target }}-cargo-
+        target: ${{ inputs.target }}
+        cache-targets: ${{ inputs.cache-rust-build }}
 
-    - name: Cache CEF binaries
-      uses: actions/cache@v6
-      id: cef-cache
+    - name: Setup CEF runtime
+      uses: ./.github/actions/setup-cef
       with:
+        target: ${{ inputs.target }}
         path: ${{ env.CEF_PATH }}
-        key: cef-${{ hashFiles('mise.toml') }}-${{ inputs.cef-cache-key }}
-
-    - name: Download CEF binaries (Linux/macOS)
-      if: ${{ steps.cef-cache.outputs.cache-hit != 'true' && runner.os != 'Windows' }}
-      shell: bash
-      run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target "${{ inputs.target }}" "$CEF_PATH"'
-
-    - name: Download CEF binaries (Windows)
-      if: ${{ steps.cef-cache.outputs.cache-hit != 'true' && runner.os == 'Windows' }}
-      shell: pwsh
-      run: mise exec -- pwsh -NoProfile -Command 'export-cef-dir --version $env:CEF_VERSION --force --target "${{ inputs.target }}" $env:CEF_PATH'

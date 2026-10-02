@@ -17,6 +17,7 @@ foundation for runtime/settings behavior. It can be assigned directly to
 | `enable_accelerated_osr` | `bool` | `true` | Enable GPU-accelerated rendering |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | Background color for the browser. Set alpha to 0 for transparent background, or use a solid color to disable transparency. |
 | `popup_policy` | `int` | `0` | Controls how popup windows are handled. `0` = BLOCK (suppress silently), `1` = REDIRECT (navigate current browser to popup URL), `2` = SIGNAL_ONLY (emit `popup_requested` signal). Can be changed at runtime. |
+| `permission_policy` | `int` | `-1` | Inherit the project permission policy (`-1`), deny (`0`), allow known requests (`1`), or emit permission signals (`2`). Runtime changes cancel pending requests. See [Permissions](./permissions.md). |
 | `preload_script` | `String` | `""` | JavaScript source executed once for the browser's main frame after the JS bridge is registered and before the document loads. Mutually exclusive with `preload_script_path`. |
 | `preload_script_path` | `String` | `""` | Godot file path for JavaScript source to preload. Supports Godot paths such as `res://` and `user://`. Mutually exclusive with `preload_script`. |
 
@@ -28,22 +29,18 @@ foundation for runtime/settings behavior. It can be assigned directly to
 | `enable_accelerated_osr` | `bool` | `true` | Enables accelerated OSR when supported, otherwise falls back to software rendering. |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | Browser background color (supports transparency). |
 | `popup_policy` | `int` | `0` | Popup behavior policy: BLOCK/REDIRECT/SIGNAL_ONLY. |
+| `permission_policy` | `int` | `-1` | Same permission policy and signals as `CefTexture`; runtime changes cancel pending requests. See [Permissions](./permissions.md). |
 | `preload_script` | `String` | `""` | JavaScript source executed once for the browser's main frame after the JS bridge is registered and before the document loads. Mutually exclusive with `preload_script_path`. |
 | `preload_script_path` | `String` | `""` | Godot file path for JavaScript source to preload. Supports Godot paths such as `res://` and `user://`. Mutually exclusive with `preload_script`. |
 | `texture_size` | `Vector2i` | `Vector2i(1024, 1024)` | Logical browser texture size in pixels. |
 
-`CefTexture2D` v1 is intentionally render-only: it does not include built-in
-3D surface input mapping/raycast routing, and it exposes no signals or event
-queues (it does **not** emit `loading_state_changed`, `title_changed`,
-`console_message`, `popup_requested`, or any other `CefTexture` signals).
-As a result, there is no direct notification from `CefTexture2D` to GDScript
-when the underlying browser instance is initialized or when a page has
-finished loading its first frame. If you need lifecycle notifications (for
-example, to know when it is safe to interact with the page or reveal it to
-the user), use a `CefTexture` node in the scene tree instead and connect to
-its signals (such as `loading_state_changed`). The node-based `CefTexture`
-can be assigned anywhere a `Texture2D` is accepted (e.g. `Sprite2D.texture`
-or material texture slots) whenever you require those events.
+`CefTexture2D` remains focused on rendering and does not include built-in
+3D surface input mapping/raycast routing. It exposes `permission_requested` and
+`permission_request_finished`, with the same permission methods as `CefTexture`.
+It does not expose the node's other browser event signals, such as
+`load_finished`, `title_changed`, `console_message`, or `popup_requested`.
+For loading notifications, use a `CefTexture` node and connect to its signals.
+Its `texture` property can be used by a `Sprite2D` or material when needed.
 
 `CefTexture2D` does provide optional low-level `forward_*` input helper methods.
 These helpers do not perform node-space coordinate mapping; callers must provide
@@ -131,6 +128,10 @@ These settings are dangerous and should only be enabled for specific use cases (
 | `godot_cef/security/ignore_certificate_errors` | `bool` | `false` | Skip SSL/TLS certificate validation |
 | `godot_cef/security/disable_web_security` | `bool` | `false` | Disable CORS and same-origin policy |
 | `godot_cef/security/default_permission_policy` | `int` | `0` | Default permission behavior. `0` = DENY_ALL, `1` = ALLOW_ALL, `2` = SIGNAL (emit `permission_requested`) |
+| `godot_cef/security/permission_request_timeout_seconds` | `int` | `60` | Deadline for unanswered permission requests, in seconds (minimum `1`). Configure before browser creation. |
+
+The permission policy can be overridden per browser with `permission_policy`.
+See [Permissions](./permissions.md) for request grouping, cleanup, and examples.
 
 ### Debug Settings
 

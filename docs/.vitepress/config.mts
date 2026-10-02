@@ -45,12 +45,14 @@ export default withMermaid(defineConfig({
                 { text: '属性', link: '/zh_CN/api/properties' },
                 { text: '方法', link: '/zh_CN/api/methods' },
                 { text: '信号', link: '/zh_CN/api/signals' },
+                { text: '权限', link: '/zh_CN/api/permissions' },
                 { text: 'IPC 检查器', link: '/zh_CN/api/ipc-inspector' },
                 { text: '音频捕获', link: '/zh_CN/api/audio-capture' },
                 { text: '输入法（IME）支持', link: '/zh_CN/api/ime-support' },
                 { text: '拖放', link: '/zh_CN/api/drag-and-drop' },
                 { text: '下载', link: '/zh_CN/api/downloads' },
                 { text: 'Vulkan 支持', link: '/zh_CN/api/vulkan-support' },
+                { text: '分发版本与源码构建', link: '/zh_CN/api/distribution-variants' },
                 { text: 'GPU 设备绑定', link: '/zh_CN/api/gpu-device-pinning' }
               ]
             }
@@ -93,12 +95,14 @@ export default withMermaid(defineConfig({
             { text: 'Properties', link: '/api/properties' },
             { text: 'Methods', link: '/api/methods' },
             { text: 'Signals', link: '/api/signals' },
+            { text: 'Permissions', link: '/api/permissions' },
             { text: 'IPC Inspector', link: '/api/ipc-inspector' },
             { text: 'Audio Capture', link: '/api/audio-capture' },
             { text: 'IME Support', link: '/api/ime-support' },
             { text: 'Drag and Drop', link: '/api/drag-and-drop' },
             { text: 'Downloads', link: '/api/downloads' },
             { text: 'Vulkan Support', link: '/api/vulkan-support' },
+            { text: 'Distribution Variants', link: '/api/distribution-variants' },
             { text: 'GPU Device Pinning', link: '/api/gpu-device-pinning' }
           ]
         }

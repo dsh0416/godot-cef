@@ -2,6 +2,9 @@
 
 该矩阵用于总结不同平台与渲染后端下，Godot CEF 的预期渲染行为。
 
+本页包含完整 GitHub Release 包支持的架构。精简的 Asset Store 包不含 Windows/Linux ARM64；
+需要这些架构时请选择完整包。详见[分发版本](./distribution-variants)。
+
 ## 版本基线
 
 当前构建基于 `Cargo.lock` 中解析到的 Rust `cef` / `cef-dll-sys` crate 版本：`152.3.0+152.0.6`。匹配的 CEF 运行时版本已在 `mise.toml` 中固定为 `CEF_VERSION`；手动安装 CEF 二进制文件时请使用它：

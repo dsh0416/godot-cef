@@ -11,10 +11,9 @@ use godot::classes::image::Format as ImageFormat;
 use godot::classes::{AudioServer, DisplayServer, Engine, ImageTexture, Texture2Drd};
 use godot::prelude::*;
 use software_render::{DestBuffer, PopupBuffer, composite_popup};
-use std::collections::HashMap;
 use std::fs;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::accelerated_osr::{
@@ -36,6 +35,7 @@ pub(crate) struct BackendCreateParams {
     pub enable_accelerated_osr: bool,
     pub background_color: Color,
     pub popup_policy: i32,
+    pub permission_policy: i32,
     pub preload_script: String,
     pub preload_script_path: String,
     pub software_target_texture: Option<Gd<ImageTexture>>,
@@ -50,10 +50,7 @@ struct BrowserCreateParams {
     url: String,
     preload_script: Option<String>,
     popup_policy: PopupPolicyFlag,
-    permission_policy: crate::browser::PermissionPolicyFlag,
-    permission_request_counter: crate::browser::PermissionRequestIdCounter,
-    pending_permission_requests: crate::browser::PendingPermissionRequests,
-    pending_permission_aggregates: crate::browser::PendingPermissionAggregates,
+    permission_policy: i32,
 }
 
 fn color_to_cef_color(color: Color) -> u32 {
@@ -455,15 +452,7 @@ pub(crate) fn try_create_browser(
         should_use_accelerated_osr(params.enable_accelerated_osr, params.log_prefix);
 
     let popup_policy: PopupPolicyFlag = Arc::new(AtomicI32::new(params.popup_policy));
-    let default_permission_policy = crate::settings::get_default_permission_policy();
-    let permission_policy: crate::browser::PermissionPolicyFlag =
-        Arc::new(AtomicI32::new(default_permission_policy));
-    let permission_request_counter: crate::browser::PermissionRequestIdCounter =
-        Arc::new(AtomicI64::new(0));
-    let pending_permission_requests: crate::browser::PendingPermissionRequests =
-        Arc::new(Mutex::new(HashMap::new()));
-    let pending_permission_aggregates: crate::browser::PendingPermissionAggregates =
-        Arc::new(Mutex::new(HashMap::new()));
+    let permission_policy = crate::settings::resolve_permission_policy(params.permission_policy);
 
     let window_info = WindowInfo {
         bounds: cef::Rect {
@@ -495,9 +484,6 @@ pub(crate) fn try_create_browser(
         preload_script,
         popup_policy,
         permission_policy,
-        permission_request_counter,
-        pending_permission_requests,
-        pending_permission_aggregates,
     };
 
     if use_accelerated {
@@ -537,15 +523,8 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
         state.finish_source_drag(None, None, 0);
     }
 
-    if let Some(state) = &app.state
-        && let Ok(mut pending) = state.pending_permission_requests.lock()
-    {
-        pending.clear();
-    }
-    if let Some(state) = &app.state
-        && let Ok(mut pending) = state.pending_permission_aggregates.lock()
-    {
-        pending.clear();
+    if let Some(state) = &app.state {
+        state.permissions.close("browser_closed");
     }
 
     if let Some(state) = &app.state
@@ -600,9 +579,6 @@ fn create_software_browser(
         preload_script,
         popup_policy,
         permission_policy,
-        permission_request_counter,
-        pending_permission_requests,
-        pending_permission_aggregates,
     } = params;
     godot::global::godot_print!(
         "[{}] Creating browser in software rendering mode",
@@ -632,14 +608,7 @@ fn create_software_browser(
     let popup_state: PopupStateQueue = render_handler.get_popup_state();
     let sample_rate = AudioServer::singleton().get_mix_rate();
     let enable_audio_capture = crate::settings::is_audio_capture_enabled();
-    let queues = webrender::ClientQueues::new(
-        sample_rate,
-        enable_audio_capture,
-        permission_policy.clone(),
-        permission_request_counter.clone(),
-        pending_permission_requests.clone(),
-        pending_permission_aggregates.clone(),
-    );
+    let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture, permission_policy);
 
     let mut texture = software_target_texture.unwrap_or_else(ImageTexture::new_gd);
     // Avoid Godot's magenta placeholder while waiting for the first CEF paint.
@@ -679,11 +648,13 @@ fn create_software_browser(
         context,
     )
     .ok_or_else(|| {
+        queues.permissions.close("browser_closed");
         CefError::BrowserCreationFailed("browser_host_create_browser_sync returned None".into())
     })?;
 
     let event_queues = queues.event_queues.clone();
     let source_drag = queues.source_drag.clone();
+    let permissions = queues.permissions.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Software {
@@ -698,8 +669,7 @@ fn create_software_browser(
         audio: queues.into_audio_state(),
         source_drag,
         popup_policy,
-        pending_permission_requests,
-        pending_permission_aggregates,
+        permissions,
     });
 
     Ok(())
@@ -743,9 +713,6 @@ fn create_accelerated_browser(
         preload_script,
         popup_policy,
         permission_policy,
-        permission_request_counter,
-        pending_permission_requests,
-        pending_permission_aggregates,
     } = params;
 
     let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height)?;
@@ -768,14 +735,7 @@ fn create_accelerated_browser(
     let popup_state: PopupStateQueue = render_handler.get_popup_state();
     let sample_rate = AudioServer::singleton().get_mix_rate();
     let enable_audio_capture = crate::settings::is_audio_capture_enabled();
-    let queues = webrender::ClientQueues::new(
-        sample_rate,
-        enable_audio_capture,
-        permission_policy.clone(),
-        permission_request_counter.clone(),
-        pending_permission_requests.clone(),
-        pending_permission_aggregates.clone(),
-    );
+    let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture, permission_policy);
 
     let cef_render_handler = webrender::AcceleratedOsrHandler::build(
         render_handler,
@@ -801,6 +761,7 @@ fn create_accelerated_browser(
     ) {
         Some(browser) => browser,
         None => {
+            queues.permissions.close("browser_closed");
             render::free_rd_texture(rd_texture_rid);
             return Err(CefError::BrowserCreationFailed(
                 "browser_host_create_browser_sync returned None (accelerated)".into(),
@@ -810,6 +771,7 @@ fn create_accelerated_browser(
 
     let event_queues = queues.event_queues.clone();
     let source_drag = queues.source_drag.clone();
+    let permissions = queues.permissions.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Accelerated {
@@ -824,8 +786,7 @@ fn create_accelerated_browser(
         audio: queues.into_audio_state(),
         source_drag,
         popup_policy,
-        pending_permission_requests,
-        pending_permission_aggregates,
+        permissions,
     });
     Ok(())
 }

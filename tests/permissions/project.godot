@@ -1,0 +1,21 @@
+config_version=5
+
+[application]
+config/name="Godot CEF permission integration"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/size/window_width_override=640
+window/size/window_height_override=360
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+
+[godot_cef]
+security/default_permission_policy=0
+security/permission_request_timeout_seconds=1
+advanced/custom_command_line_switches="use-fake-device-for-media-stream\ndisable-gpu\ndisable-background-networking\ndisable-component-update\nno-first-run"
