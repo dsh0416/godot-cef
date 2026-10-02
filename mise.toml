@@ -1,3 +1,5 @@
+min_version = '2026.10.0'
+
 # Install toolchain dependencies with:
 #   mise install
 
