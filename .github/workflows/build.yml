@@ -151,6 +151,54 @@ jobs:
           RUSTC_WRAPPER: sccache
         run: mise exec -- cargo xtask bundle --release --target ${{ matrix.target }}
 
+      - name: Setup integration test toolchain
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: ./.github/actions/setup-toolchain
+        with:
+          tools: node
+
+      - name: Install headless integration runtime
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth
+          mkdir -p target/godot
+          curl --fail --location --retry 3 \
+            https://github.com/godotengine/godot-builds/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip \
+            --output target/godot/godot.zip
+          echo 'b5bd5d8a4dd3f44de1d123361beabaafa4825dd05b5e20fd2bfa540f32594f81d82e7c4e86fae420f4faee77d9def573b570f8b156e9c84a4dc2d5123d09e852  target/godot/godot.zip' | sha512sum --check --strict
+          unzip -j target/godot/godot.zip Godot_v4.5-stable_linux.x86_64 -d target/godot
+          chmod +x target/godot/Godot_v4.5-stable_linux.x86_64
+
+      - name: Validate integration runner failure handling
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: mise exec -- node --test tests/integration/process.test.mjs tests/integration/server.test.mjs
+
+      - name: Run Godot headless integration tests
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        timeout-minutes: 20
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          # Xvfb supplies CEF's X11 backend; Godot itself uses its dummy renderer.
+          # Reuse the complete native bundle above and build only the test addon.
+          xvfb-run -a -s '-screen 0 1024x768x24' mise exec -- cargo xtask integration \
+            --release --target x86_64-unknown-linux-gnu \
+            --godot "$PWD/target/godot/Godot_v4.5-stable_linux.x86_64"
+
+      - name: Upload integration evidence
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-linux-x64
+          path: |
+            target/integration/**/summary.json
+            target/integration/**/junit.xml
+            target/integration/**/result.json
+            target/integration/**/godot.log
+          retention-days: 14
+          if-no-files-found: warn
+
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts/${{ matrix.target }}

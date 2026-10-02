@@ -6,6 +6,7 @@
 //!   cargo xtask pack --artifacts <path> --output <path> [--variant full|store]    # Pack CI artifacts into distributable addon
 //!   cargo xtask validate --addon <path>      # Validate addon artifact completeness
 //!   cargo xtask validate-versions            # Validate workspace/toolchain version pins
+//!   cargo xtask integration --godot <executable> # Build and run the test-only addon
 //!   cargo xtask cef-version                  # Print the locked CEF runtime version
 
 #[cfg(target_os = "macos")]
@@ -17,6 +18,7 @@ mod bundle_framework;
 mod bundle_linux;
 #[cfg(target_os = "windows")]
 mod bundle_windows;
+mod integration;
 mod pack;
 mod platform;
 mod validate;
@@ -36,6 +38,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Build the test-only addon and run headless tests against a complete addon
+    Integration(integration::Options),
+
     /// Bundle for the current platform and deploy to addons/godot_cef/bin/
     Bundle {
         /// Build in release mode
@@ -103,6 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Integration(options) => integration::run(options)?,
         Commands::Bundle {
             release,
             target_dir,

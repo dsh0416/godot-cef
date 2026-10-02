@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Godot CEF integration fixture</title>
+<p>Loopback integration fixture with synthetic media devices.</p>
+<script>
+  const params = new URL(location.href).searchParams;
+  const run = params.get("run");
+  window.report = (event) => fetch(`/event?run=${encodeURIComponent(run)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event), keepalive: true,
+  }).then((response) => {
+    if (!response.ok) throw new Error(`Fixture report failed: ${response.status}`);
+  });
+  let attempts = 0;
+  window.requestPermissionFixture = async () => {
+    const attempt = ++attempts;
+    if (!isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      await report({ type: "unsupported", attempt, secureContext: isSecureContext });
+      return;
+    }
+    await report({ type: "started", attempt });
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      const tracks = stream.getTracks().map((track) => ({ kind: track.kind, label: track.label }));
+      stream.getTracks().forEach((track) => track.stop());
+      await report({ type: "media", attempt, result: "resolved", tracks });
+    } catch (error) {
+      await report({ type: "media", attempt, result: "rejected", name: error.name, message: error.message });
+    }
+  };
+  const fail = (error) => report({ type: "fixture_error", message: String(error) });
+  async function start() {
+    switch (location.pathname) {
+      case "/case":
+        await requestPermissionFixture();
+        break;
+      case "/blank":
+        await report({ type: "navigated" });
+        break;
+      case "/js":
+        window.onIpcMessage = (value) => {
+          report({ type: "ipc_received", lane: "text", value }).catch(fail);
+          window.sendIpcMessage(value);
+        };
+        window.onIpcBinaryMessage = (value) => {
+          report({ type: "ipc_received", lane: "binary", value: Array.from(new Uint8Array(value)) }).catch(fail);
+          window.sendIpcBinaryMessage(value);
+        };
+        window.onIpcDataMessage = (value) => {
+          report({ type: "ipc_received", lane: "data", value }).catch(fail);
+          window.sendIpcData(value);
+        };
+        await report({ type: "js_ready", preload: window.__gdcef_preload === true });
+        break;
+      case "/lifecycle":
+        await report({ type: "lifecycle_ready", generation: Number(params.get("generation")), preload: window.__gdcef_preload === true });
+        break;
+    }
+  }
+  start().catch(fail);
+</script>
