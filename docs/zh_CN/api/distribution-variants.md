@@ -65,7 +65,7 @@ cargo xtask validate --addon staging/store/dist/addons/godot_cef --variant store
 
 使用需要自行维护的确切 tag 或提交的干净 checkout。安装 Git 和 mise，并在仓库根目录运行命令。
 `mise install` 安装 `mise.toml` 固定的 Rust nightly 和 `export-cef-dir`。
-使用该 checkout 的 `CEF_VERSION`，不要随意换用较新的 CEF 运行时。
+激活工具链后，以下命令从该 checkout 的 `Cargo.lock` 提取 `CEF_VERSION`，确保运行时与 Rust 绑定一致。
 还需要 C++ 编译器、CMake，以及目标系统/架构的 Godot 4.5+。构建可能占用较多磁盘和内存。
 
 `cargo xtask bundle` 按**宿主操作系统**选择打包器：Windows 构建应在 Windows 上运行，
@@ -90,6 +90,8 @@ mise install
 mise exec -- pwsh -NoProfile
 # The following commands run inside this mise environment.
 $env:CEF_PATH = "$env:USERPROFILE/.local/share/cef_windows_arm64"
+$env:CEF_VERSION = cargo run --locked --quiet -p xtask -- cef-version
+if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
 rustup target add aarch64-pc-windows-msvc
 cargo xtask bundle --release --target aarch64-pc-windows-msvc
@@ -118,6 +120,7 @@ mise exec -- bash
 export CEF_PATH="$HOME/.local/share/cef_linux_arm64"
 export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
 export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
 rustup target add aarch64-unknown-linux-gnu
 cargo xtask bundle --release --target aarch64-unknown-linux-gnu

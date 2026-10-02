@@ -192,10 +192,11 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 3. **Install CEF binaries**:
    ```bash
    export CEF_PATH="$HOME/.local/share/cef"
+   CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
    export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
    ```
 
-   `CEF_VERSION` is pinned in `mise.toml` to the CEF runtime build version from the resolved `cef` / `cef-dll-sys` crate in `Cargo.lock`. For example, crate version `152.0.0+152.0.5` uses CEF runtime `152.0.5`.
+   `cargo xtask cef-version` reads the matching CEF runtime version from the `cef` / `cef-dll-sys` build metadata in `Cargo.lock`. The command above uses quiet output and preserves the lockfile while capturing that version.
 
 4. **Build**:
    ```bash

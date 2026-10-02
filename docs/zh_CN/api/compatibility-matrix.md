@@ -7,10 +7,11 @@
 
 ## 版本基线
 
-当前构建基于 `Cargo.lock` 中解析到的 Rust `cef` / `cef-dll-sys` crate 版本：`152.3.0+152.0.6`。匹配的 CEF 运行时版本已在 `mise.toml` 中固定为 `CEF_VERSION`；手动安装 CEF 二进制文件时请使用它：
+CEF 运行时版本由 `Cargo.lock` 中 Rust `cef` / `cef-dll-sys` crate 的构建元数据确定。按[开发环境配置](https://github.com/dsh0416/godot-cef/blob/main/CONTRIBUTING.md#development-setup)安装并激活项目工具链后，在仓库根目录提取该版本，用于手动安装 CEF 二进制文件：
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"
+CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 ```
 

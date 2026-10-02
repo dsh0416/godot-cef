@@ -8,10 +8,11 @@ targets. See [Distribution variants](./distribution-variants).
 
 ## Version Baseline
 
-Current builds are based on the Rust `cef` / `cef-dll-sys` crates resolved as `152.3.0+152.0.6` in `Cargo.lock`. The matching CEF runtime version is pinned as `CEF_VERSION` in `mise.toml`; use it when installing CEF binaries manually:
+The Rust `cef` / `cef-dll-sys` crates in `Cargo.lock` define the CEF runtime version through their build metadata. After installing and activating the project toolchain as described in [Development Setup](https://github.com/dsh0416/godot-cef/blob/main/CONTRIBUTING.md#development-setup), derive that version from the repository root when installing CEF binaries manually:
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"
+CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 ```
 

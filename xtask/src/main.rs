@@ -6,6 +6,7 @@
 //!   cargo xtask pack --artifacts <path> --output <path> [--variant full|store]    # Pack CI artifacts into distributable addon
 //!   cargo xtask validate --addon <path>      # Validate addon artifact completeness
 //!   cargo xtask validate-versions            # Validate workspace/toolchain version pins
+//!   cargo xtask cef-version                  # Print the locked CEF runtime version
 
 #[cfg(target_os = "macos")]
 mod bundle_app;
@@ -93,6 +94,9 @@ enum Commands {
 
     /// Validate version and toolchain pins across workspace files
     ValidateVersions,
+
+    /// Print the CEF runtime version from Cargo.lock
+    CefVersion,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -150,6 +154,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::ValidateVersions => {
             validate_versions::run()?;
+        }
+        Commands::CefVersion => {
+            validate_versions::print_cef_version()?;
         }
     }
 
