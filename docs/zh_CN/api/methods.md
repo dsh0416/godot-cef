@@ -41,6 +41,7 @@ func _unhandled_input(event: InputEvent) -> void:
 - `set_audio_muted(...)`, `is_audio_muted()`
 - `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
+- `grant_permission(...)`, `deny_permission(...)`, `is_permission_pending(...)`
 
 为保持 API 一致性，这些核心控制在命名上与 `CefTexture` 保持一致（也包括
 `url`、`enable_accelerated_osr`、`background_color`、`popup_policy` 等共享属性）。
@@ -376,17 +377,23 @@ if cef_texture.is_drag_over():
 
 ## 权限处理
 
-当 `godot_cef/security/default_permission_policy` 设为 `SIGNAL` 时，可通过以下方法处理 `permission_requested` 信号。
+以下方法同时适用于 `CefTexture` 与 `CefTexture2D`。浏览器实际使用的
+`permission_policy` 为 `SIGNAL` 时，可用应答方法回答 `permission_requested`；
+配置查询适用于任何策略。
+策略、超时和界面清理示例见[权限](./permissions.md)。
 
 ### `grant_permission(request_id: int) -> bool`
 
-根据 `request_id` 允许一个待处理的权限请求。
+为此 ID 记录允许决定。如果一次 CEF 请求包含多项权限，必须允许所有 ID
+后才向 CEF 授权。
 
-如果请求成功处理返回 `true`；若 ID 已失效/不存在或当前无活动浏览器，返回 `false`。
+成功记录回答时返回 `true`，不代表整组已经获准。
+ID 已超时、不存在、已失效或已经回答时返回 `false`。
+未知权限类型不可授权，尝试允许仍会使整组以 `denied` 结束。
 
 ```gdscript
 func _on_permission_requested(permission_type: String, url: String, request_id: int):
-    if permission_type == "geolocation" and url.begins_with("https://maps.example"):
+    if permission_type == "geolocation" and url == "https://maps.example/":
         cef_texture.grant_permission(request_id)
     else:
         cef_texture.deny_permission(request_id)
@@ -394,9 +401,29 @@ func _on_permission_requested(permission_type: String, url: String, request_id: 
 
 ### `deny_permission(request_id: int) -> bool`
 
-根据 `request_id` 拒绝一个待处理的权限请求。
+立即拒绝此请求，以及同一 CEF 请求中的其他权限。
 
-如果请求成功处理返回 `true`；若 ID 已失效/不存在或当前无活动浏览器，返回 `false`。
+成功接受回答时返回 `true`；ID 已超时、不存在、已失效或已经回答时返回 `false`。
+
+### `is_permission_pending(request_id: int) -> bool`
+
+返回此 ID 是否仍可回答。某个 ID 的允许决定记录后，就不能再次回答，
+即使同组请求仍在等待其他权限的决定。通过 `permission_request_finished`
+获知整组最终结果并清理对话框。
+
+### `get_permission_setting(permission_type: String, requesting_url: String, top_level_url: String) -> String`
+
+从浏览器共享的请求上下文同步读取支持的权限内容设置。浏览器准备好后，
+在 Godot 主线程调用，并显式提供请求页面与顶层页面的绝对 HTTP(S) URL。
+不接受空 URL 或含用户名、密码的 URL。
+
+CEF 值返回为 `allow`、`block`、`ask`、`default`、`session_only` 或 `unknown`；
+无法查询时返回 `unsupported`、`unavailable` 或 `invalid_url`。
+`default` 不代表 `ask`。
+
+此方法查询配置值，不判断应用、浏览器与操作系统合并后的实际授权状态，
+也不修改策略或回答待处理请求。支持的标签、URL 范围及摄像头和麦克风的限制见
+[查询配置中的权限设置](./permissions.md#查询配置中的权限设置)。
 
 ## Cookie 与会话管理
 

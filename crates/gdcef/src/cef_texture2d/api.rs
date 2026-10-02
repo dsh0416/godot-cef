@@ -2,6 +2,60 @@ use crate::utils::should_enable_ipc_inspector;
 
 #[godot_api]
 impl CefTexture2D {
+    #[signal]
+    fn permission_requested(permission_type: GString, url: GString, request_id: i64);
+
+    #[signal]
+    fn permission_request_finished(request_id: i64, result: GString);
+
+    #[func]
+    pub fn grant_permission(&self, request_id: i64) -> bool {
+        self.runtime.app().state.as_ref()
+            .is_some_and(|state| state.permissions.resolve(request_id, true))
+    }
+
+    #[func]
+    pub fn deny_permission(&self, request_id: i64) -> bool {
+        self.runtime.app().state.as_ref()
+            .is_some_and(|state| state.permissions.resolve(request_id, false))
+    }
+
+    #[func]
+    pub fn is_permission_pending(&self, request_id: i64) -> bool {
+        self.runtime.app().state.as_ref()
+            .is_some_and(|state| state.permissions.is_pending(request_id))
+    }
+
+    /// Read the profile's content setting; this is not a device-access check.
+    #[func]
+    pub fn get_permission_setting(
+        &self,
+        permission_type: GString,
+        requesting_url: GString,
+        top_level_url: GString,
+    ) -> GString {
+        crate::permission_query::query(
+            self.runtime.app(),
+            &permission_type.to_string(),
+            &requesting_url.to_string(),
+            &top_level_url.to_string(),
+        )
+        .into()
+    }
+
+    #[func]
+    pub fn get_permission_policy(&self) -> i32 {
+        self.permission_policy
+    }
+
+    #[func]
+    pub fn set_permission_policy(&mut self, policy: i32) {
+        self.permission_policy = policy.clamp(-1, 2);
+        if let Some(state) = self.runtime.app().state.as_ref() {
+            state.permissions.set_policy(crate::settings::resolve_permission_policy(self.permission_policy));
+        }
+    }
+
     pub(crate) fn runtime_app(&self) -> &App {
         self.runtime.app()
     }
@@ -106,8 +160,19 @@ impl CefTexture2D {
 
     #[func]
     pub fn shutdown(&mut self) {
+        let event_queues = self.runtime.app().state.as_ref().map(|state| state.event_queues.clone());
         self.runtime.shutdown();
         self.cleanup_instance();
+        // Explicit shutdown can close a permission dialog while the resource is
+        // still alive. Drop/PREDELETE cleanup must not emit Godot signals.
+        let finished = event_queues.and_then(|queues| {
+            queues.lock().ok().map(|mut queues| std::mem::take(&mut queues.permission_request_finished))
+        }).unwrap_or_default();
+        for (request_id, result) in finished {
+            self.base_mut().emit_signal("permission_request_finished", &[
+                request_id.to_variant(), GString::from(&result).to_variant(),
+            ]);
+        }
     }
 
     #[func]

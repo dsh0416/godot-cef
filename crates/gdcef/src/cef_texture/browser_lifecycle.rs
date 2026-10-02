@@ -73,6 +73,7 @@ impl CefTexture {
             enable_accelerated_osr: self.enable_accelerated_osr,
             background_color: self.background_color,
             popup_policy: self.popup_policy,
+            permission_policy: self.permission_policy,
             preload_script: self.preload_script.to_string(),
             preload_script_path: self.preload_script_path.to_string(),
             software_target_texture: None,

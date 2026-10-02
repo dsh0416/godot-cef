@@ -32,6 +32,7 @@ impl CefTexture2D {
             enable_accelerated_osr: self.enable_accelerated_osr,
             background_color: self.background_color,
             popup_policy: self.popup_policy,
+            permission_policy: self.permission_policy,
             preload_script: self.preload_script.clone(),
             preload_script_path: self.preload_script_path.clone(),
             software_target_texture: Some(self.fallback_texture.clone()),
@@ -74,8 +75,37 @@ impl CefTexture2D {
         self.runtime.cleanup_runtime(None);
     }
 
-    pub(super) fn drain_event_queues(&self) {
-        self.runtime.drain_event_queues("CefTexture2D");
+    pub(super) fn drain_event_queues(&mut self) {
+        let events = self.runtime.drain_event_queues("CefTexture2D");
+        for (request_id, result) in events.permission_request_finished {
+            self.base_mut().emit_signal(
+                "permission_request_finished",
+                &[request_id.to_variant(), GString::from(&result).to_variant()],
+            );
+        }
+        for event in events.permission_requests {
+            if !self.is_permission_pending(event.request_id) {
+                continue;
+            }
+            if self
+                .base()
+                .get_signal_connection_list("permission_requested")
+                .is_empty()
+            {
+                if let Some(state) = self.runtime.app().state.as_ref() {
+                    state.permissions.cancel_all("dismissed");
+                }
+                continue;
+            }
+            self.base_mut().emit_signal(
+                "permission_requested",
+                &[
+                    GString::from(&event.permission_type).to_variant(),
+                    GString::from(&event.url).to_variant(),
+                    event.request_id.to_variant(),
+                ],
+            );
+        }
     }
 
     pub(super) fn tick(&mut self) {

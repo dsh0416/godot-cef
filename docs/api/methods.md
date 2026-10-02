@@ -43,6 +43,7 @@ uses internally and advanced users can call directly:
 - `set_audio_muted(...)`, `is_audio_muted()`
 - `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
+- `grant_permission(...)`, `deny_permission(...)`, `is_permission_pending(...)`
 
 For API consistency, these core controls intentionally keep the same names as
 their `CefTexture` counterparts (including shared properties such as `url`,
@@ -476,17 +477,23 @@ if cef_texture.is_drag_over():
 
 ## Permission Handling
 
-These methods let you respond to `permission_requested` signals when `godot_cef/security/default_permission_policy` is set to `SIGNAL`.
+These methods are available on `CefTexture` and `CefTexture2D`. Answer methods
+handle `permission_requested` when the browser's effective `permission_policy`
+is `SIGNAL`; the profile query is available under any policy.
+See [Permissions](./permissions.md) for policies, timeouts, and UI cleanup.
 
 ### `grant_permission(request_id: int) -> bool`
 
-Grants a pending permission request by `request_id`.
+Records an allow answer for this ID. If CEF grouped several permissions together,
+all IDs must be granted before CEF receives an allow decision.
 
-Returns `true` if the request was resolved, `false` if the ID is stale/unknown or no browser is active.
+Returns `true` if the answer was accepted, not necessarily if the whole group was
+granted. Returns `false` for expired, unknown, invalidated, or already answered IDs.
+Unknown permission types cannot be granted and end the group as `denied`.
 
 ```gdscript
 func _on_permission_requested(permission_type: String, url: String, request_id: int):
-    if permission_type == "geolocation" and url.begins_with("https://maps.example"):
+    if permission_type == "geolocation" and url == "https://maps.example/":
         cef_texture.grant_permission(request_id)
     else:
         cef_texture.deny_permission(request_id)
@@ -494,9 +501,33 @@ func _on_permission_requested(permission_type: String, url: String, request_id: 
 
 ### `deny_permission(request_id: int) -> bool`
 
-Denies a pending permission request by `request_id`.
+Denies this request and all permissions in its CEF group immediately.
 
-Returns `true` if the request was resolved, `false` if the ID is stale/unknown or no browser is active.
+Returns `true` if the answer was accepted, `false` for expired, unknown,
+invalidated, or already answered IDs.
+
+### `is_permission_pending(request_id: int) -> bool`
+
+Returns whether this ID still accepts an answer. An individual ID becomes
+unanswerable after its allow choice is recorded, even while its group waits for
+other answers. Use `permission_request_finished` to observe the group's final
+result and clear pending dialogs.
+
+### `get_permission_setting(permission_type: String, requesting_url: String, top_level_url: String) -> String`
+
+Synchronously reads a supported permission's content setting from the browser's
+shared request context. Call on Godot's main thread after the browser is ready,
+with explicit absolute HTTP(S) URLs for the requesting and top-level pages.
+Empty URLs and URLs containing credentials are rejected.
+
+Returns `allow`, `block`, `ask`, `default`, `session_only`, or `unknown` for a
+CEF value; `unsupported`, `unavailable`, or `invalid_url` when the query cannot
+be performed. `default` does not imply `ask`.
+
+This is a profile lookup, not a check of effective application, browser, and OS
+authorization. It does not modify policy or answer pending requests. See
+[Querying profile settings](./permissions.md#querying-profile-settings) for
+supported labels, URL scope, and the camera/microphone limitation.
 
 ## Cookie & Session Management
 
