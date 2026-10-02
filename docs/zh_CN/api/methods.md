@@ -42,6 +42,7 @@ func _unhandled_input(event: InputEvent) -> void:
 - `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
 - `grant_permission(...)`, `deny_permission(...)`, `is_permission_pending(...)`
+- `get_permission_setting(...)`
 
 为保持 API 一致性，这些核心控制在命名上与 `CefTexture` 保持一致（也包括
 `url`、`enable_accelerated_osr`、`background_color`、`popup_policy` 等共享属性）。

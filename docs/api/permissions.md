@@ -19,7 +19,8 @@ The project default is `0`. Connect the signals before setting the policy to `2`
 or loading content that requests permissions. A request without a connected
 `permission_requested` listener is canceled without authorization, with a
 `dismissed` finished result. This dismisses a CEF prompt without recording an
-explicit site denial. Unknown permission bits are denied,
+explicit site denial. Only that request's permission group is canceled; unrelated
+groups already delivered to the application remain pending. Unknown permission bits are denied,
 including under policy `1`.
 
 `godot_cef/security/permission_request_timeout_seconds` sets the response deadline
@@ -32,7 +33,8 @@ closure, and renderer termination invalidate outstanding requests as well.
 
 For CEF permission prompts, timeout and lifecycle cancellation dismiss the prompt
 instead of recording an explicit deny decision. Explicit rejection uses CEF's
-deny result. Media requests are canceled in both cases. Neither action clears
+deny result. Media requests are canceled for timeouts and lifecycle changes, and
+denied when explicitly rejected. Neither action clears
 permission decisions that Chromium has already stored.
 
 CEF can combine several permissions into one request. The signal is emitted once

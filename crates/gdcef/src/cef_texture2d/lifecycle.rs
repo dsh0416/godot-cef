@@ -93,7 +93,7 @@ impl CefTexture2D {
                 .is_empty()
             {
                 if let Some(state) = self.runtime.app().state.as_ref() {
-                    state.permissions.cancel_all("dismissed");
+                    state.permissions.dismiss_request(event.request_id);
                 }
                 continue;
             }

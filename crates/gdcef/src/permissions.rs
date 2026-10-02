@@ -45,6 +45,9 @@ impl CefCallback {
             return;
         };
         match self {
+            Self::Media(callback) if !allowed && is_temporary_cancellation(reason) => {
+                callback.cancel()
+            }
             Self::Media(callback) => callback.cont(if allowed { requested } else { 0 }),
             Self::Prompt(callback) => callback.cont(prompt_result(allowed, reason)),
         }
@@ -127,6 +130,12 @@ impl PermissionController {
 
     pub(crate) fn resolve(&self, id: i64, grant: bool) -> bool {
         self.update(|state| state.resolve(id, grant, Instant::now()))
+    }
+
+    /// Dismiss one unanswered request's entire CEF callback group. Other groups
+    /// may already have been delivered to an asynchronous permission consumer.
+    pub(crate) fn dismiss_request(&self, request_id: i64) -> bool {
+        self.update(|state| state.dismiss_request(request_id, Instant::now()))
     }
 
     pub(crate) fn is_pending(&self, id: i64) -> bool {
@@ -243,13 +252,17 @@ fn normalize_policy(policy: i32) -> i32 {
     }
 }
 
+fn is_temporary_cancellation(reason: &str) -> bool {
+    matches!(
+        reason,
+        "dismissed" | "timed_out" | "navigation" | "policy_changed" | "browser_closed"
+    )
+}
+
 fn prompt_result(allowed: bool, reason: &str) -> cef::PermissionRequestResult {
     if allowed {
         cef::PermissionRequestResult::ACCEPT
-    } else if matches!(
-        reason,
-        "dismissed" | "timed_out" | "navigation" | "policy_changed" | "browser_closed"
-    ) {
+    } else if is_temporary_cancellation(reason) {
         // Lifecycle cancellation must not become a persistent site-level DENY.
         cef::PermissionRequestResult::DISMISS
     } else {
@@ -418,6 +431,15 @@ impl<C> PermissionState<C> {
                 self.finish(decision.group, Some(true), "allowed", &mut update);
             }
         }
+        (true, update)
+    }
+
+    fn dismiss_request(&mut self, id: i64, now: Instant) -> (bool, Update<C>) {
+        let mut update = self.expire(now);
+        let Some(decision) = self.requests.get(&id) else {
+            return (false, update);
+        };
+        self.finish(decision.group, Some(false), "dismissed", &mut update);
         (true, update)
     }
 
@@ -689,6 +711,79 @@ mod tests {
         reentered_without_locks: Arc<AtomicBool>,
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum MediaCall {
+        Continue(u32),
+        Cancel,
+    }
+
+    type MediaCalls = Arc<Mutex<Vec<MediaCall>>>;
+
+    struct MediaProbe {
+        controller: Weak<ControllerInner>,
+        calls: MediaCalls,
+        called_without_locks: Arc<AtomicBool>,
+    }
+
+    impl MediaProbe {
+        fn record(&self, call: MediaCall) {
+            lock(&self.calls).push(call);
+            if let Some(inner) = self.controller.upgrade() {
+                let state_unlocked = inner.state.try_lock().is_ok();
+                let queues_unlocked = inner.event_queues.try_lock().is_ok();
+                self.called_without_locks
+                    .fetch_and(state_unlocked && queues_unlocked, Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn media_probe(
+        controller: &PermissionController,
+    ) -> (cef::MediaAccessCallback, MediaCalls, Arc<AtomicBool>) {
+        unsafe extern "C" fn continue_media(
+            this: *mut cef::sys::cef_media_access_callback_t,
+            allowed: u32,
+        ) {
+            let probe = unsafe {
+                &(*this.cast::<RcImpl<cef::sys::cef_media_access_callback_t, MediaProbe>>())
+                    .interface
+            };
+            probe.record(MediaCall::Continue(allowed));
+        }
+
+        unsafe extern "C" fn cancel_media(this: *mut cef::sys::cef_media_access_callback_t) {
+            let probe = unsafe {
+                &(*this.cast::<RcImpl<cef::sys::cef_media_access_callback_t, MediaProbe>>())
+                    .interface
+            };
+            probe.record(MediaCall::Cancel);
+        }
+
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let called_without_locks = Arc::new(AtomicBool::new(true));
+        let raw = cef::sys::cef_media_access_callback_t {
+            // As with PromptProbe, RcImpl owns the callback and refcount.
+            base: unsafe { std::mem::zeroed() },
+            cont: Some(continue_media),
+            cancel: Some(cancel_media),
+        };
+        let pointer = RcImpl::new(
+            raw,
+            MediaProbe {
+                controller: Arc::downgrade(&controller.inner),
+                calls: calls.clone(),
+                called_without_locks: called_without_locks.clone(),
+            },
+        );
+        (
+            pointer
+                .cast::<cef::sys::cef_media_access_callback_t>()
+                .wrap_result(),
+            calls,
+            called_without_locks,
+        )
+    }
+
     // CEF allocates this callback type itself, so cef-rs intentionally has no
     // wrap_* macro for it. A Rust-owned CEF refcount/vtable tests the actual
     // controller continuation without initializing either CEF or Godot.
@@ -850,6 +945,173 @@ mod tests {
         assert_eq!(denied.completions[0].allowed, Some(false));
         assert_eq!(denied.completions[0].ids, ids);
         assert!(!state.resolve(ids[1], true, now).0);
+    }
+
+    #[test]
+    fn dismissing_an_unhandled_group_preserves_a_partially_answered_group() {
+        let queues = Arc::new(Mutex::new(crate::browser::EventQueues::new()));
+        let controller = PermissionController::new(
+            queues.clone(),
+            permission_policy::SIGNAL,
+            Duration::from_secs(30),
+        );
+        let (first, first_calls, _) = media_probe(&controller);
+        controller.request_media(first, 3, "https://example.test".into(), "main".into());
+        // These requests have already reached an asynchronous consumer, which
+        // disconnects its signal listener before answering the second one.
+        let delivered: Vec<_> = lock(&queues)
+            .permission_requests
+            .drain(..)
+            .map(|event| event.request_id)
+            .collect();
+        assert!(controller.resolve(delivered[0], true));
+        assert!(lock(&first_calls).is_empty());
+        let (second, second_calls, _) = media_probe(&controller);
+        controller.request_media(second, 3, "https://example.test".into(), "main".into());
+        let unhandled: Vec<_> = lock(&queues)
+            .permission_requests
+            .iter()
+            .map(|event| event.request_id)
+            .collect();
+
+        assert!(controller.dismiss_request(unhandled[0]));
+        assert!(!controller.dismiss_request(unhandled[1]));
+        assert!(!controller.dismiss_request(delivered[0]));
+        assert!(controller.is_pending(delivered[1]));
+        assert!(lock(&first_calls).is_empty());
+        assert_eq!(*lock(&second_calls), [MediaCall::Cancel]);
+        {
+            let events = lock(&queues);
+            assert!(events.permission_requests.is_empty());
+            assert_eq!(
+                events
+                    .permission_request_finished
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                unhandled
+                    .iter()
+                    .map(|id| (*id, "dismissed".to_owned()))
+                    .collect::<Vec<_>>()
+            );
+        }
+        assert!(controller.resolve(delivered[1], true));
+        assert_eq!(*lock(&first_calls), [MediaCall::Continue(3)]);
+        assert!(!controller.resolve(unhandled[0], true));
+        assert!(!controller.dismiss_request(delivered[1]));
+        assert_eq!(*lock(&second_calls), [MediaCall::Cancel]);
+        let finished: Vec<_> = lock(&queues)
+            .permission_request_finished
+            .iter()
+            .skip(unhandled.len())
+            .cloned()
+            .collect();
+        assert_eq!(
+            finished,
+            delivered
+                .iter()
+                .map(|id| (*id, "allowed".to_owned()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn expired_ids_cannot_dismiss_a_new_group() {
+        let now = Instant::now();
+        let mut state = PermissionState::new(permission_policy::SIGNAL, Duration::from_secs(1));
+        let expired = pending_media(&mut state, now, "main", 3);
+        let later = now + Duration::from_secs(1);
+        let (dismissed, update) = state.dismiss_request(expired[0], later);
+        assert!(!dismissed);
+        assert_eq!(update.completions.len(), 1);
+        assert_eq!(update.completions[0].reason, "timed_out");
+        assert_eq!(update.completions[0].ids, expired);
+        let current = pending_media(&mut state, later, "main", 3);
+        assert!(current.iter().all(|id| !expired.contains(id)));
+        assert!(!state.dismiss_request(expired[1], later).0);
+        assert!(current.iter().all(|id| state.requests.contains_key(id)));
+        let (dismissed, update) = state.dismiss_request(current[1], later);
+        assert!(dismissed);
+        assert_eq!(update.completions.len(), 1);
+        assert_eq!(update.completions[0].ids, current);
+        assert_eq!(update.completions[0].reason, "dismissed");
+        assert!(!state.dismiss_request(current[0], later).0);
+    }
+
+    #[test]
+    fn media_callbacks_distinguish_decisions_from_cancellation_and_invalidation() {
+        for reason in [
+            "allowed",
+            "denied",
+            "dismissed",
+            "timed_out",
+            "navigation",
+            "policy_changed",
+            "browser_closed",
+            "renderer_terminated",
+        ] {
+            let queues = Arc::new(Mutex::new(crate::browser::EventQueues::new()));
+            let timeout = if reason == "timed_out" {
+                Duration::ZERO
+            } else {
+                Duration::from_secs(30)
+            };
+            let controller =
+                PermissionController::new(queues.clone(), permission_policy::SIGNAL, timeout);
+            let (callback, calls, unlocked) = media_probe(&controller);
+            controller.request_media(callback, 3, "https://example.test".into(), "main".into());
+            let ids: Vec<_> = lock(&queues)
+                .permission_requests
+                .iter()
+                .map(|event| event.request_id)
+                .collect();
+            let expected = match reason {
+                "allowed" => {
+                    assert!(controller.resolve(ids[0], true));
+                    assert!(lock(&calls).is_empty());
+                    assert!(controller.resolve(ids[1], true));
+                    vec![MediaCall::Continue(3)]
+                }
+                "denied" => {
+                    assert!(controller.resolve(ids[0], false));
+                    vec![MediaCall::Continue(0)]
+                }
+                "renderer_terminated" => {
+                    controller.invalidate(reason);
+                    Vec::new()
+                }
+                _ => {
+                    match reason {
+                        "dismissed" => assert!(controller.dismiss_request(ids[0])),
+                        "timed_out" => expire_pending(),
+                        "navigation" => controller.cancel_frame("main"),
+                        "policy_changed" => controller.set_policy(permission_policy::DENY_ALL),
+                        "browser_closed" => controller.close(reason),
+                        _ => unreachable!(),
+                    }
+                    vec![MediaCall::Cancel]
+                }
+            };
+            assert_eq!(*lock(&calls), expected, "{reason}");
+            assert!(unlocked.load(Ordering::Relaxed), "{reason}");
+            for id in &ids {
+                assert!(!controller.resolve(*id, true));
+                assert!(!controller.dismiss_request(*id));
+            }
+            assert_eq!(*lock(&calls), expected, "{reason}: duplicate callback");
+            let events = lock(&queues);
+            assert!(events.permission_requests.is_empty());
+            assert_eq!(
+                events
+                    .permission_request_finished
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                ids.iter()
+                    .map(|id| (*id, reason.to_owned()))
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]

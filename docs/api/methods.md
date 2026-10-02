@@ -44,6 +44,7 @@ uses internally and advanced users can call directly:
 - `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
 - `grant_permission(...)`, `deny_permission(...)`, `is_permission_pending(...)`
+- `get_permission_setting(...)`
 
 For API consistency, these core controls intentionally keep the same names as
 their `CefTexture` counterparts (including shared properties such as `url`,

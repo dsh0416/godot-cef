@@ -348,7 +348,7 @@ impl CefTexture {
                 if let Some(permissions) =
                     self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
                 {
-                    permissions.cancel_all("dismissed");
+                    permissions.dismiss_request(event.request_id);
                 }
                 continue;
             }
