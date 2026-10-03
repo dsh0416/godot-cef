@@ -16,7 +16,9 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::accelerated_osr::{self, AcceleratedRenderState, PlatformAcceleratedRenderHandler};
+use crate::accelerated_osr::{
+    self, AcceleratedInitializationError, AcceleratedRenderState, PlatformAcceleratedRenderHandler,
+};
 use crate::browser::{App, BrowserState, PopupPolicyFlag, PopupStateQueue, RenderMode};
 use crate::error::CefError;
 use crate::utils::get_display_scale_factor;
@@ -125,6 +127,26 @@ fn shared_request_context(log_prefix: &str) -> Result<cef::RequestContext, CefEr
     godot_protocol::register_user_scheme_handler_on_context(&mut context);
     *shared = Some(context.clone());
     Ok(context)
+}
+
+pub(crate) fn should_use_accelerated_osr(enable_accelerated_osr: bool, log_prefix: &str) -> bool {
+    if !enable_accelerated_osr {
+        godot::global::godot_print!(
+            "[{}] Accelerated OSR disabled by `enable_accelerated_osr = false`; using software rendering",
+            log_prefix
+        );
+        return false;
+    }
+
+    let (supported, reason) = accelerated_osr::accelerated_osr_support_diagnostic();
+    if !supported {
+        godot::global::godot_warn!(
+            "[{}] Accelerated OSR unavailable: {}. Falling back to software rendering.",
+            log_prefix,
+            reason
+        );
+    }
+    supported
 }
 
 fn resolve_preload_script(script: &str, path: &str) -> Result<Option<String>, CefError> {
@@ -434,7 +456,8 @@ pub(crate) fn try_create_browser(
 
     let pixel_width = (params.logical_size.x * params.dpi) as i32;
     let pixel_height = (params.logical_size.y * params.dpi) as i32;
-    let use_accelerated = params.enable_accelerated_osr;
+    let use_accelerated =
+        should_use_accelerated_osr(params.enable_accelerated_osr, params.log_prefix);
 
     let popup_policy: PopupPolicyFlag = Arc::new(AtomicI32::new(params.popup_policy));
     let permission_policy = crate::settings::resolve_permission_policy(params.permission_policy);
@@ -478,6 +501,7 @@ pub(crate) fn try_create_browser(
             &browser_settings,
             context.as_mut(),
             create_params,
+            params.software_target_texture.clone(),
             params.log_prefix,
         )?;
     } else {
@@ -662,25 +686,48 @@ fn create_accelerated_browser(
     browser_settings: &BrowserSettings,
     context: Option<&mut cef::RequestContext>,
     params: BrowserCreateParams,
+    software_target_texture: Option<Gd<ImageTexture>>,
     log_prefix: &str,
 ) -> Result<(), CefError> {
     godot::global::godot_print!(
         "[{}] Creating browser in accelerated rendering mode",
         log_prefix
     );
+    let mut extra_info = build_browser_extra_info(params.preload_script.as_deref())?;
+    let render_state = match AcceleratedRenderState::create(
+        params.pixel_width as u32,
+        params.pixel_height as u32,
+    ) {
+        Ok(state) => state,
+        Err(AcceleratedInitializationError::Importer(error)) => {
+            godot::global::godot_warn!(
+                "[{}] Failed to create GPU texture importer ({}), falling back to software rendering",
+                log_prefix,
+                error
+            );
+            return create_software_browser(
+                app,
+                browser_settings,
+                context,
+                params,
+                software_target_texture,
+                log_prefix,
+            );
+        }
+        Err(AcceleratedInitializationError::Resources(error)) => {
+            return Err(CefError::GpuDeviceError(error));
+        }
+    };
     let BrowserCreateParams {
         dpi,
         pixel_width,
         pixel_height,
         url,
-        preload_script,
+        preload_script: _,
         popup_policy,
         permission_policy,
     } = params;
 
-    let mut extra_info = build_browser_extra_info(preload_script.as_deref())?;
-    let render_state = AcceleratedRenderState::create(pixel_width as u32, pixel_height as u32)
-        .map_err(CefError::GpuDeviceError)?;
     let rd_texture_rid = render_state
         .lock()
         .map_err(|_| CefError::GpuDeviceError("Snapshot state lock poisoned".into()))?
@@ -758,16 +805,22 @@ fn create_accelerated_browser(
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn create_accelerated_browser(
-    _app: &mut App,
+    app: &mut App,
     _window_info: &WindowInfo,
-    _browser_settings: &BrowserSettings,
-    _context: Option<&mut cef::RequestContext>,
-    _params: BrowserCreateParams,
-    _log_prefix: &str,
+    browser_settings: &BrowserSettings,
+    context: Option<&mut cef::RequestContext>,
+    params: BrowserCreateParams,
+    software_target_texture: Option<Gd<ImageTexture>>,
+    log_prefix: &str,
 ) -> Result<(), CefError> {
-    Err(CefError::GpuDeviceError(
-        "Accelerated OSR is unsupported on this platform; no software fallback is performed".into(),
-    ))
+    create_software_browser(
+        app,
+        browser_settings,
+        context,
+        params,
+        software_target_texture,
+        log_prefix,
+    )
 }
 
 #[cfg(test)]

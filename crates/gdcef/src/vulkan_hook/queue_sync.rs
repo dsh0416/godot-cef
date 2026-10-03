@@ -6,10 +6,12 @@
 //! exported entry points, then serialize operations on each real VkQueue and
 //! exclude every queue during device idle. This is CPU synchronization only.
 //!
-//! Godot 4.5 initializes extensions at Core before creating DisplayServer
-//! (main/main.cpp). Its volkLoadInstance loads device commands through GIPA
-//! (thirdparty/volk/volk.c); swapchain presentation is also loaded through GDPA
-//! (drivers/vulkan/rendering_device_driver_vulkan.cpp). Both routes matter.
+//! Godot 4.6 initializes extensions at Core before creating DisplayServer.
+//! Its volkLoadInstance loads device commands through GIPA; swapchain
+//! presentation is also loaded through GDPA. Both routes matter.
+//! <https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/main/main.cpp#L2071-L2073>
+//! <https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/thirdparty/volk/volk.c#L148-L153>
+//! <https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/vulkan/rendering_device_driver_vulkan.cpp#L1189-L1195>
 
 #[cfg(target_arch = "x86_64")]
 pub(crate) use hooks::{ensure_queue_synchronization, install, register_created_device};

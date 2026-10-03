@@ -1,7 +1,7 @@
 //! Browser-local capture/publication ownership. No CEF frame survives paint.
 
 use super::publication::{Publication, SharedPublication};
-use super::{GodotTextureImporter, NativeCaptureTarget, RenderBackend, SnapshotFormat};
+use super::{GodotTextureImporter, NativeCaptureTarget, SnapshotFormat};
 use crate::render;
 use cef::{AcceleratedPaintInfo, PaintElementType};
 use godot::prelude::*;
@@ -67,13 +67,10 @@ fn pool_info(pool: &SharedPublication) -> Result<(Rid, (u32, u32, SnapshotFormat
     ))
 }
 
-fn create_publication(
-    size: (u32, u32, SnapshotFormat),
-    backend: RenderBackend,
-) -> Result<SharedPublication, String> {
+fn create_publication(size: (u32, u32, SnapshotFormat)) -> Result<SharedPublication, String> {
     let display = render::create_rd_texture_rid(size.0 as i32, size.1 as i32, size.2.rd_format())
         .map_err(|error| error.to_string())?;
-    match Publication::create(display, size.0, size.1, size.2, backend) {
+    match Publication::create(display, size.0, size.1, size.2) {
         Ok(pool) => Ok(pool),
         Err(error) => {
             render::free_rd_texture(display);
@@ -83,9 +80,9 @@ fn create_publication(
 }
 
 impl Stream {
-    fn new(size: (u32, u32, SnapshotFormat), backend: RenderBackend) -> Result<Self, String> {
+    fn new(size: (u32, u32, SnapshotFormat)) -> Result<Self, String> {
         Ok(Self {
-            active: create_publication(size, backend)?,
+            active: create_publication(size)?,
             previous: None,
             active_published: false,
             active_retiring: false,
@@ -94,7 +91,7 @@ impl Stream {
         })
     }
 
-    fn prepare_resize(&mut self, backend: RenderBackend) -> Result<(), String> {
+    fn prepare_resize(&mut self) -> Result<(), String> {
         self.check_completion_failures()?;
         if let Some(previous) = &self.previous {
             let (previous_rid, _) = pool_info(previous)?;
@@ -117,7 +114,7 @@ impl Stream {
         ) {
             ResizeAction::Keep | ResizeAction::WaitForBinding => return Ok(()),
             ResizeAction::ReplaceAndKeepPrevious => {
-                let replacement = create_publication(self.requested_size, backend)?;
+                let replacement = create_publication(self.requested_size)?;
                 self.previous = Some(std::mem::replace(&mut self.active, replacement));
                 self.active_published = false;
                 return Ok(());
@@ -140,7 +137,7 @@ impl Stream {
         }
         // Allocation failure leaves the old pool marked retiring. Neither its
         // invalid display nor its retired slots may be revived by another size.
-        let replacement = create_publication(self.requested_size, backend)?;
+        let replacement = create_publication(self.requested_size)?;
         self.active = replacement;
         self.active_retiring = false;
         self.active_published = false;
@@ -176,7 +173,6 @@ impl Stream {
 
 pub struct AcceleratedRenderState {
     importer: Option<GodotTextureImporter>,
-    backend: RenderBackend,
     view: Stream,
     popup: Option<Stream>,
     popup_requested_size: Option<(u32, u32, SnapshotFormat)>,
@@ -193,6 +189,74 @@ pub struct AcceleratedRenderState {
     closed: bool,
     failure: Option<String>,
     repaint_requests: Arc<AtomicU8>,
+}
+
+/// Only native importer initialization can select the software renderer. Once
+/// resources are being created, failures remain accelerated initialization errors.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AcceleratedInitializationError {
+    Importer(String),
+    Resources(String),
+}
+
+fn initialize_render_state<I, T>(
+    create_importer: impl FnOnce() -> Result<I, String>,
+    create_resources: impl FnOnce(I) -> Result<T, String>,
+) -> Result<T, AcceleratedInitializationError> {
+    let importer = create_importer().map_err(AcceleratedInitializationError::Importer)?;
+    create_resources(importer).map_err(AcceleratedInitializationError::Resources)
+}
+
+#[cfg(test)]
+mod initialization_tests {
+    use super::{AcceleratedInitializationError, initialize_render_state};
+    use std::cell::Cell;
+
+    #[test]
+    fn importer_failure_selects_fallback_before_any_snapshot_allocation() {
+        let resource_creation_attempted = Cell::new(false);
+        let result = initialize_render_state(
+            || Err::<(), _>("external memory unavailable".into()),
+            |()| {
+                resource_creation_attempted.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(
+            result,
+            Err(AcceleratedInitializationError::Importer(
+                "external memory unavailable".into()
+            ))
+        );
+        assert!(!resource_creation_attempted.get());
+    }
+
+    #[test]
+    fn resource_failure_drops_the_single_importer_without_selecting_fallback() {
+        struct Importer<'a>(&'a Cell<bool>);
+        impl Drop for Importer<'_> {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+        let creations = Cell::new(0);
+        let dropped = Cell::new(false);
+        let result = initialize_render_state(
+            || {
+                creations.set(creations.get() + 1);
+                Ok(Importer(&dropped))
+            },
+            |_importer| Err::<(), _>("snapshot allocation failed".into()),
+        );
+        assert_eq!(
+            result,
+            Err(AcceleratedInitializationError::Resources(
+                "snapshot allocation failed".into()
+            ))
+        );
+        assert_eq!(creations.get(), 1);
+        assert!(dropped.get());
+    }
 }
 
 #[cfg(test)]
@@ -262,34 +326,37 @@ mod resize_tests {
 
 impl AcceleratedRenderState {
     /// Initialization occurs before browser construction, never in paint.
-    pub fn create(width: u32, height: u32) -> Result<Arc<Mutex<Self>>, String> {
+    pub fn create(
+        width: u32,
+        height: u32,
+    ) -> Result<Arc<Mutex<Self>>, AcceleratedInitializationError> {
         render::on_render_thread_sync(move || {
-            let backend = RenderBackend::detect();
-            let importer = GodotTextureImporter::new()?;
-            let mut view = Stream::new((width, height, SnapshotFormat::Bgra8), backend)?;
-            let dst_rd_rid = pool_info(&view.active)?.0;
-            view.bound_display = dst_rd_rid;
-            Ok(Arc::new(Mutex::new(Self {
-                importer: Some(importer),
-                backend,
-                view,
-                popup: None,
-                popup_requested_size: None,
-                dst_rd_rid,
-                dst_width: width,
-                dst_height: height,
-                popup_rd_rid: None,
-                popup_width: 0,
-                popup_height: 0,
-                popup_dirty: false,
-                popup_has_content: false,
-                has_pending_copy: false,
-                frame_queued: false,
-                closed: false,
-                failure: None,
-                repaint_requests: Arc::new(AtomicU8::new(0)),
-            })))
-        })?
+            initialize_render_state(GodotTextureImporter::new, |importer| {
+                let mut view = Stream::new((width, height, SnapshotFormat::Bgra8))?;
+                let dst_rd_rid = pool_info(&view.active)?.0;
+                view.bound_display = dst_rd_rid;
+                Ok(Arc::new(Mutex::new(Self {
+                    importer: Some(importer),
+                    view,
+                    popup: None,
+                    popup_requested_size: None,
+                    dst_rd_rid,
+                    dst_width: width,
+                    dst_height: height,
+                    popup_rd_rid: None,
+                    popup_width: 0,
+                    popup_height: 0,
+                    popup_dirty: false,
+                    popup_has_content: false,
+                    has_pending_copy: false,
+                    frame_queued: false,
+                    closed: false,
+                    failure: None,
+                    repaint_requests: Arc::new(AtomicU8::new(0)),
+                })))
+            })
+        })
+        .map_err(AcceleratedInitializationError::Resources)?
     }
 
     /// CEF UI callback. Never calls Godot/RD and never waits for pool capacity.
@@ -431,13 +498,13 @@ impl AcceleratedRenderState {
     }
 
     fn publish_frame(&mut self) -> Result<(), String> {
-        self.view.prepare_resize(self.backend)?;
+        self.view.prepare_resize()?;
         if let Some(size) = self.popup_requested_size {
             if let Some(popup) = &mut self.popup {
                 popup.requested_size = size;
-                popup.prepare_resize(self.backend)?;
+                popup.prepare_resize()?;
             } else {
-                self.popup = Some(Stream::new(size, self.backend)?);
+                self.popup = Some(Stream::new(size)?);
             }
         }
         let Some(importer) = &self.importer else {

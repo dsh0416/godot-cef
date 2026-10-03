@@ -66,7 +66,7 @@ cargo xtask validate --addon staging/store/dist/addons/godot_cef --variant store
 使用需要自行维护的确切 tag 或提交的干净 checkout。安装 Git 和 mise，并在仓库根目录运行命令。
 `mise install` 安装 `mise.toml` 固定的 Rust nightly 和 `export-cef-dir`。
 激活工具链后，以下命令从该 checkout 的 `Cargo.lock` 提取 `CEF_VERSION`，确保运行时与 Rust 绑定一致。
-还需要 C++ 编译器、CMake，以及目标系统/架构的 Godot 4.5+。构建可能占用较多磁盘和内存。
+还需要 C++ 编译器、CMake，以及目标系统/架构的 Godot 4.6+。构建可能占用较多磁盘和内存。
 
 `cargo xtask bundle` 按**宿主操作系统**选择打包器：Windows 构建应在 Windows 上运行，
 Linux 构建应在 Linux 上运行。在 macOS 上传入 Windows/Linux 目标并不能跨系统构建。

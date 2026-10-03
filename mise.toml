@@ -12,7 +12,7 @@ pnpm = "latest"
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 
 [tools.godot]
-version = "4.5-stable"
+version = "4.6-stable"
 # Select the standard editor, excluding Mono and export-template archives.
 matching_regex = '^Godot_v[^_]+_(linux\.|macos\.|win64|windows_arm64)'
 

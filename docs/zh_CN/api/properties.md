@@ -26,7 +26,7 @@
 | 属性 | 类型 | 默认值 | 描述 |
 |------|------|--------|------|
 | `url` | `String` | `"https://google.com"` | 该资源实例加载的 URL。 |
-| `enable_accelerated_osr` | `bool` | `true` | 启用 GPU 加速 OSR。设为 `false` 时使用软件渲染。 |
+| `enable_accelerated_osr` | `bool` | `true` | 在支持的平台启用加速 OSR，否则自动回退到软件渲染。 |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色（支持透明）。 |
 | `popup_policy` | `int` | `0` | 弹窗策略：BLOCK / REDIRECT / SIGNAL_ONLY。 |
 | `permission_policy` | `int` | `-1` | 与 `CefTexture` 使用相同的权限策略和信号；运行时更改会取消待处理请求，参见[权限](./permissions.md)。 |
@@ -217,12 +217,12 @@ print("Currently at: ", cef_texture.url)
 # Enable GPU-accelerated rendering (recommended for performance)
 cef_texture.enable_accelerated_osr = true
 
-# 使用软件渲染
+# Use software rendering (fallback for unsupported platforms)
 cef_texture.enable_accelerated_osr = false
 ```
 
 ::: tip
-支持范围见[后端矩阵](./compatibility-matrix)，原生 GPU 同步与资源生命周期详见[加速帧交接](./accelerated-handoff)。
+GPU 加速可显著提升性能，但并非所有平台都可用；当不可用时系统会自动回退为软件渲染。
 :::
 
 ## 背景颜色

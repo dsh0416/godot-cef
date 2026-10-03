@@ -7,6 +7,8 @@
 
 ## 版本基线
 
+要求 Godot 4.6 或更高版本。
+
 CEF 运行时版本由 `Cargo.lock` 中 Rust `cef` / `cef-dll-sys` crate 的构建元数据确定。按[开发环境配置](https://github.com/dsh0416/godot-cef/blob/main/CONTRIBUTING.md#development-setup)安装并激活项目工具链后，在仓库根目录提取该版本，用于手动安装 CEF 二进制文件：
 
 ```bash
@@ -26,14 +28,22 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 | macOS | x86_64、ARM64 | Metal | 原生 IOSurface 共享 |
 | Linux | x86_64 | Vulkan | 扩展与队列钩子 |
 
-设置 `enable_accelerated_osr = false` 可使用软件渲染，包括无界面测试。
-原生 GPU 同步与资源生命周期详见[加速帧交接](./accelerated-handoff)。
+## 回退条件
+
+即使平台理论上支持加速，以下情况也会回退到软件渲染：
+
+- `CefTexture` 上关闭了 `enable_accelerated_osr`。
+- 平台纹理导入器初始化失败。
+- Vulkan 外部内存扩展注入失败或目标设备不支持。
+
+上述条件适用于浏览器初始化阶段。加速渲染启动后，捕获或发布失败时保留最后成功发布的帧。
+GPU 完成条件与资源生命周期详见[加速帧交接](./accelerated-handoff)。
 
 ## 诊断日志
 
 启动时会输出：
 
 - 当前检测到的后端，以及是否支持加速 OSR。
-- 原生导入器初始化或 GPU 交接错误。
+- 无法使用加速时的明确回退原因。
 
 在创建浏览器实例时，还会输出当前实例使用的是加速渲染还是软件渲染。

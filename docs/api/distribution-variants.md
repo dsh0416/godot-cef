@@ -80,7 +80,7 @@ Git and mise, then run commands from the repository root. `mise install` provide
 the Rust nightly and `export-cef-dir` pinned by `mise.toml`. After activating
 the toolchain, the commands below derive `CEF_VERSION` from that checkout's
 `Cargo.lock` so the runtime matches the Rust bindings. A C++ compiler, CMake, and
-Godot 4.5+ for the target OS/architecture are also required. Builds can consume
+Godot 4.6+ for the target OS/architecture are also required. Builds can consume
 substantial disk space and memory.
 
 `cargo xtask bundle` dispatches by the **host OS**: use Windows for Windows

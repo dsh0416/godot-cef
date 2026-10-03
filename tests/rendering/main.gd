@@ -332,9 +332,9 @@ func run() -> void:
 		if finished:
 			return
 		if retained_texture != null:
-			# Godot 4.5 clears the backing texture and size on detach but leaves
+			# Godot 4.6 clears the backing texture and size on detach but leaves
 			# get_texture_rd_rid() cached; inspect the actual empty texture instead.
-			# https://github.com/godotengine/godot/blob/4.5-stable/scene/resources/texture_rd.cpp#L69-L80
+			# https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/scene/resources/texture_rd.cpp#L70-L81
 			if retained_texture.get_width() != 0 or retained_texture.get_height() != 0:
 				fail("Destroyed node left its retained Texture2DRD populated")
 				return

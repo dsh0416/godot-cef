@@ -1,6 +1,6 @@
 use super::super::{NativeCaptureTarget, SnapshotFormat};
+use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
-use godot::classes::{Engine, RenderingServer};
 use godot::global::{godot_print, godot_warn};
 use godot::prelude::*;
 use std::ffi::{CStr, c_void};
@@ -81,8 +81,9 @@ impl D3D12TextureImporter {
                 .map_err(|e| format!("Create fence event failed: {e}"))?,
         );
 
-        // This matches Godot 4.5-4.7's D3D12 feature selection. Enhanced and legacy
+        // This matches Godot 4.6's D3D12 feature selection. Enhanced and legacy
         // COPY_SOURCE are NOT interchangeable: interop requires a COMMON bridge.
+        // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/d3d12/rendering_device_driver_d3d12.cpp#L5574-L5578
         // https://microsoft.github.io/DirectX-Specs/d3d/D3D12EnhancedBarriers.html#interop-with-legacy-resourcebarrier
         let mut options = D3D12_FEATURE_DATA_D3D12_OPTIONS12::default();
         let enhanced = unsafe {
@@ -619,39 +620,10 @@ fn godot_command_queue(
     driver_handle: u64,
     device: &ID3D12Device,
 ) -> Result<ID3D12CommandQueue, String> {
-    let version = Engine::singleton().get_version_info();
-    let part = |name: &str| {
-        version
-            .get(name)
-            .and_then(|value| value.try_to::<i64>().ok())
-    };
-    let version = (part("major"), part("minor"), part("patch"));
-    let pointer = match version {
-        (Some(4), Some(5), Some(0..=2)) => {
-            // Godot 4.5.0-4.5.2 exposes CommandQueueInfo*, not a COM interface.
-            // Its complete definition is one ComPtr<ID3D12CommandQueue> member.
-            // This is a deliberately version-gated private engine bridge: read
-            // that pointer-sized member only, then own a normal COM reference.
-            // https://github.com/godotengine/godot/blob/4.5-stable/drivers/d3d12/rendering_device_driver_d3d12.h#L362-L364
-            if driver_handle == 0 {
-                return Err("Godot returned a null D3D12 queue wrapper".into());
-            }
-            unsafe { (driver_handle as *const *mut c_void).read() as u64 }
-        }
-        (Some(4), Some(6 | 7), Some(_)) => {
-            // Godot 4.6+ fixes COMMAND_QUEUE to expose d3d_queue.Get() directly.
-            // https://github.com/godotengine/godot/blob/4.6-stable/drivers/d3d12/rendering_device_driver_d3d12.cpp#L5143-L5145
-            // Also audited in 4.6.3 and 4.7.2, including OPTIONS12 selection:
-            // https://github.com/godotengine/godot/blob/4.7.2-stable/drivers/d3d12/rendering_device_driver_d3d12.cpp#L5234-L5236
-            driver_handle
-        }
-        _ => {
-            return Err(format!(
-                "D3D12 native queue bridge has not been audited for Godot {version:?}"
-            ));
-        }
-    };
-    let queue: ID3D12CommandQueue = unsafe { clone_native_interface(pointer) }?;
+    // Godot 4.6's public COMMAND_QUEUE resource is ID3D12CommandQueue*.
+    // Take our own COM reference and verify it belongs to the logical device.
+    // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/d3d12/rendering_device_driver_d3d12.cpp#L5143-L5146
+    let queue: ID3D12CommandQueue = unsafe { clone_native_interface(driver_handle) }?;
     let mut queue_device: Option<ID3D12Device> = None;
     unsafe { queue.GetDevice(&mut queue_device) }
         .map_err(|error| format!("Get Godot queue device failed: {error}"))?;

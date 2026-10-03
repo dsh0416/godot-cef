@@ -4,8 +4,8 @@
 //! only borrows a preallocated native target, completes its native capture, and
 //! changes CPU metadata. No capture ever waits for a future Godot frame.
 
+use super::SnapshotFormat;
 use super::snapshot_pool::{SnapshotPool, SnapshotToken};
-use super::{RenderBackend, SnapshotFormat};
 use godot::classes::rendering_device::{
     DriverResource, TextureSamples, TextureType, TextureUsageBits,
 };
@@ -55,7 +55,6 @@ impl Publication {
         width: u32,
         height: u32,
         format: SnapshotFormat,
-        backend: RenderBackend,
     ) -> Result<SharedPublication, String> {
         if !display.is_valid() || width == 0 || height == 0 {
             return Err("Invalid snapshot display or dimensions".to_string());
@@ -63,7 +62,7 @@ impl Publication {
         let mut rd = rendering_device()?;
         let mut resources = Vec::with_capacity(SNAPSHOT_SLOTS);
         for _ in 0..SNAPSHOT_SLOTS {
-            match create_slot(&mut rd, width, height, format, backend) {
+            match create_slot(&mut rd, width, height, format) {
                 Ok(slot) => resources.push(slot),
                 Err(error) => {
                     for slot in resources {
@@ -247,7 +246,6 @@ fn create_slot(
     width: u32,
     height: u32,
     format: SnapshotFormat,
-    backend: RenderBackend,
 ) -> Result<SlotTextures, String> {
     let staging = create_texture(rd, width, height, format)?;
     let sentinel = match create_texture(rd, 1, 1, format) {
@@ -257,14 +255,10 @@ fn create_slot(
             return Err(error);
         }
     };
-    // Godot 4.5's D3D12 TEXTURE is an internal TextureInfo*, whereas TEXTURE_VIEW
-    // returns ID3D12Resource*. Vulkan and Metal expose their native image through
-    // TEXTURE. These are borrowed handles; the RD RIDs own the resources.
-    let resource = match backend {
-        RenderBackend::D3D12 => DriverResource::TEXTURE_VIEW,
-        _ => DriverResource::TEXTURE,
-    };
-    let native_handle = rd.get_driver_resource(resource, staging, 0);
+    // Godot 4.6 exposes each backend's native texture through TEXTURE. These
+    // handles are borrowed; the RD RIDs keep their resources alive.
+    // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/d3d12/rendering_device_driver_d3d12.cpp#L5150-L5156
+    let native_handle = rd.get_driver_resource(DriverResource::TEXTURE, staging, 0);
     if native_handle == 0 {
         rd.free_rid(staging);
         rd.free_rid(sentinel);

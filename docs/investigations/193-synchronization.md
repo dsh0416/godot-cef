@@ -1,10 +1,15 @@
 # Rendering and input synchronization investigation
 
+> Historical baseline: this investigation describes the dated revision below,
+> including its Godot 4.5 API constraints and implementation plan. Current
+> development requires Godot 4.6+. See [Accelerated frame handoff](../api/accelerated-handoff)
+> for the implemented GPU contract; the original source links remain unchanged.
+
 Investigated 2026-09-19 against `e78587f43863d4b454461148cbfc8f1e664389df`
 (v1.16.0). The dependency lock resolves `cef` and `cef-dll-sys` to
 `152.3.0+152.0.6`; the underlying CEF revision is
 `708dc140cbc3286826a8abef89dc23a44ff9ea72`, Chromium `152.0.7977.83`.
-Godot bindings target API 4.5.
+The investigated revision's Godot bindings target API 4.5.
 
 This records the baseline diagnosis and implementation design; local source
 line numbers refer to the revision above. The Windows reports have not been
@@ -327,8 +332,8 @@ Required regression evidence:
 | Lifetime | Continuous resize, popup show/hide/resize, navigation, create/destroy and close with copies pending | Old generations never publish; every source/destination is retired before destruction |
 | Scheduling | 30/60/144 Hz, uncapped, low-FPS/minimized/paused scene, multiple browsers | Pump not multiplied by browser count; deadlines serviced; input/pump/presentation latency measured separately |
 
-Run Windows 11 D3D12, Vulkan and software paths first, on Godot 4.5 and the
-reporters' 4.6 line, with D3D/Vulkan validation enabled. Then validate macOS
+For current regression testing, run Windows 11 D3D12, Vulkan and software paths
+first on Godot 4.6 or later, with D3D/Vulkan validation enabled. Then validate macOS
 Metal and Linux Vulkan. Record an independent page heartbeat alongside drag,
 focus, pump and GPU-completion traces so a stuck interaction is not mislabeled
 as a frozen renderer.

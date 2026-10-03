@@ -207,7 +207,7 @@ pub fn accelerated_osr_support_diagnostic() -> (bool, String) {
     RenderBackend::detect().accelerated_osr_support_diagnostic()
 }
 
-pub use handoff::AcceleratedRenderState;
+pub use handoff::{AcceleratedInitializationError, AcceleratedRenderState};
 
 #[derive(Clone)]
 pub struct AcceleratedRenderHandler {

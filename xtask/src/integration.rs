@@ -18,7 +18,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Args)]
 pub struct Options {
-    /// Godot 4.5+ executable (use the console executable on Windows)
+    /// Godot 4.6+ executable (use the console executable on Windows)
     #[arg(long)]
     godot: PathBuf,
     /// Complete production addon, including the helper and matching CEF runtime

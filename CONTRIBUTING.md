@@ -41,7 +41,7 @@ Please be respectful and considerate in all interactions. We aim to maintain a w
   mise trust
   mise install
   ```
-- **Godot Engine** — Installed at the integration-test version by `mise install`
+- **Godot Engine 4.6+** — Installed at the integration-test version by `mise install`
 - **Platform-specific dependencies** (see below)
 
 The commands below assume mise shell integration is active. If your shell is not configured for mise activation yet, prefix commands with `mise exec --`.
@@ -330,7 +330,7 @@ minor, and patch versions, plus the runtime metadata when present in its pin.
 ### Godot headless integration tests
 
 The separate Rust `gdcef_itest` addon exercises the production extension inside
-Godot 4.5, managed by `mise.toml` and `mise.lock`. Build a complete production
+Godot 4.6, managed by `mise.toml` and `mise.lock`. Build a complete production
 bundle first, then run:
 
 ```sh

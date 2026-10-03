@@ -26,7 +26,7 @@ foundation for runtime/settings behavior. It can be assigned directly to
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `url` | `String` | `"https://google.com"` | URL loaded by the resource-backed browser instance. |
-| `enable_accelerated_osr` | `bool` | `true` | Enables GPU-accelerated OSR. Set to `false` to use software rendering. |
+| `enable_accelerated_osr` | `bool` | `true` | Enables accelerated OSR when supported, otherwise falls back to software rendering. |
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | Browser background color (supports transparency). |
 | `popup_policy` | `int` | `0` | Popup behavior policy: BLOCK/REDIRECT/SIGNAL_ONLY. |
 | `permission_policy` | `int` | `-1` | Same permission policy and signals as `CefTexture`; runtime changes cancel pending requests. See [Permissions](./permissions.md). |
@@ -222,12 +222,12 @@ The `enable_accelerated_osr` property controls whether GPU acceleration is used 
 # Enable GPU-accelerated rendering (recommended for performance)
 cef_texture.enable_accelerated_osr = true
 
-# Use software rendering
+# Use software rendering (fallback for unsupported platforms)
 cef_texture.enable_accelerated_osr = false
 ```
 
 ::: tip
-See the [supported backend matrix](./compatibility-matrix) and [Accelerated frame handoff](./accelerated-handoff) for native GPU synchronization and resource lifetime details.
+GPU acceleration provides significantly better performance but may not be available on all platforms. The system automatically falls back to software rendering when accelerated rendering is unavailable.
 :::
 
 ## Background Color

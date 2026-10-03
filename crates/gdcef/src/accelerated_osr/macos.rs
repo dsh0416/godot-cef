@@ -1,6 +1,7 @@
 //! Metal snapshot capture on Godot's own command queue.
 //!
-//! Godot 4.5 creates RD textures with MTLResourceHazardTrackingModeTracked.
+//! Godot 4.6 creates RD textures with MTLResourceHazardTrackingModeTracked:
+//! <https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/metal/rendering_device_driver_metal.mm#L312-L327>
 //! Using that same thread-safe MTLCommandQueue lets Metal track dependencies
 //! across our blit and Godot's command buffers. The pool separately guarantees
 //! the target has no outstanding readers. waitUntilCompleted ends CEF's lease

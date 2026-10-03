@@ -51,22 +51,26 @@ merely running on the render thread does not establish exclusive queue access.
 Queue wrappers stay loaded for the process lifetime because the driver caches
 their addresses. Restart Godot after rebuilding the extension.
 
-Godot 4.5.0–4.5.2 exposes an internal D3D12 queue wrapper. A version-gated bridge
-reads its audited native pointer and verifies the queue's device identity.
-Godot 4.6 and 4.7 expose the native queue directly. Unaudited D3D12 versions fail initialization.
+Godot 4.6+ exposes the native D3D12 texture and command queue directly. The
+importer verifies the queue's device identity before submitting capture work.
 
 ## Runtime errors and validation
 
-Native importer initialization failures report the missing capability. Capture or
-publication failures retain the last successfully published frame; incomplete GPU
-work keeps its resources quarantined until device teardown.
+Browser initialization preserves the existing software fallback when acceleration
+is unavailable or the native importer cannot be created; the fallback reason is
+logged. Setting `enable_accelerated_osr = false` also uses software rendering.
+
+After accelerated rendering starts, capture or publication failures retain the
+last successfully published frame. Incomplete GPU work keeps its resources
+quarantined until device teardown.
 
 Run the graphical pixel/lifecycle suite described in
 [`tests/rendering`](https://github.com/dsh0416/godot-cef/tree/main/tests/rendering).
-It verifies the requested renderer and thread model and fails on unexpected
-fallback, engine errors, stale pixel sequences, crashes or timeouts. Headless tests
+It verifies the requested renderer and thread model. Accelerated test cases reject
+startup fallback so software pixels cannot pass a GPU test; engine errors, stale
+pixel sequences, crashes or timeouts also fail. Headless tests
 verify runtime progression but cannot validate GPU sharing or displayed pixels.
 
-The native state assumptions are based on Godot 4.5. Passing compilation does not
+The minimum supported Godot version is 4.6. Passing compilation does not
 replace graphical validation on each OS, GPU driver, and Godot version. This work
 continues [#227](https://github.com/dsh0416/godot-cef/issues/227).

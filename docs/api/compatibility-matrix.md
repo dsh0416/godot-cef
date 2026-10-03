@@ -8,6 +8,8 @@ targets. See [Distribution variants](./distribution-variants).
 
 ## Version Baseline
 
+Godot 4.6 or later is required.
+
 The Rust `cef` / `cef-dll-sys` crates in `Cargo.lock` define the CEF runtime version through their build metadata. After installing and activating the project toolchain as described in [Development Setup](https://github.com/dsh0416/godot-cef/blob/main/CONTRIBUTING.md#development-setup), derive that version from the repository root when installing CEF binaries manually:
 
 ```bash
@@ -27,15 +29,24 @@ This keeps the downloaded runtime files aligned with the Rust bindings.
 | macOS | x86_64, ARM64 | Metal | Native IOSurface sharing |
 | Linux | x86_64 | Vulkan | Extension and queue hooks |
 
-Set `enable_accelerated_osr = false` to use software rendering, including in
-headless tests. See [Accelerated frame handoff](./accelerated-handoff) for native
-GPU synchronization and resource lifetime details.
+## Fallback Conditions
+
+Even on a supported backend, Godot CEF falls back to software rendering when:
+
+- `enable_accelerated_osr` is disabled on `CefTexture`.
+- Platform texture importer creation fails.
+- Required Vulkan external memory extensions cannot be injected or are unavailable.
+
+These conditions apply during browser initialization. After accelerated rendering
+starts, capture or publication errors retain the last successfully published frame.
+See [Accelerated frame handoff](./accelerated-handoff) for GPU completion and
+resource lifetime details.
 
 ## Diagnostics
 
 At startup, Godot CEF logs:
 
 - Detected backend and whether accelerated OSR is supported.
-- Native importer initialization or GPU handoff errors.
+- Fallback reason when accelerated rendering cannot be used.
 
 During browser creation, logs also indicate whether each `CefTexture` instance starts in accelerated or software mode.
