@@ -17,6 +17,9 @@ env:
 
 jobs:
   test:
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -24,10 +27,18 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             can_run_tests: true
+            coverage: true
+            coverage_flag: macos
+            coverage_name: macos-arm64-unit
+            coverage_artifact: coverage-macos-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             can_run_tests: true
             msvc_arch: x64
+            coverage: true
+            coverage_flag: windows
+            coverage_name: windows-x64-unit
+            coverage_artifact: coverage-windows-x64
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             can_run_tests: false
@@ -35,6 +46,13 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             can_run_tests: true
+            # Linux x64 also runs the Godot headless suite under coverage;
+            # the other coverage targets collect unit-test coverage only.
+            coverage: true
+            integration: true
+            coverage_flag: linux
+            coverage_name: linux-unit-and-headless
+            coverage_artifact: coverage-linux-x64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             can_run_tests: false
@@ -52,19 +70,138 @@ jobs:
         uses: ./.github/actions/setup-rust-cef
         with:
           target: ${{ matrix.target }}
-          cache-rust-build: "true"
+          # Coverage builds use a separate instrumented target directory, so the
+          # shared checks target cache stays owned by the Clippy jobs.
+          cache-rust-build: ${{ !matrix.coverage }}
           msvc-arch: ${{ matrix.msvc_arch }}
           install-linux-deps: "true"
 
+      - name: Setup coverage tools
+        if: matrix.coverage
+        uses: ./.github/actions/setup-toolchain
+        with:
+          tools: aqua:taiki-e/cargo-llvm-cov
+
+      - name: Setup headless integration tools
+        if: matrix.integration
+        uses: ./.github/actions/setup-toolchain
+        with:
+          tools: godot
+
+      - name: Install LLVM tools
+        if: matrix.coverage
+        shell: bash
+        run: mise exec -- rustup component add llvm-tools-preview
+
+      - name: Install headless display dependencies
+        if: matrix.integration
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth
+
       - name: Run tests (Linux/macOS)
         shell: bash
-        if: matrix.can_run_tests && (runner.os == 'Linux' || runner.os == 'macOS')
+        if: matrix.can_run_tests && (runner.os == 'Linux' || runner.os == 'macOS') && !matrix.coverage
         env:
           RUSTC_WRAPPER: sccache
         run: |
           export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export DYLD_LIBRARY_PATH="${CEF_PATH}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
           mise exec -- cargo test --workspace --all-features --target "${{ matrix.target }}"
+
+      - name: Run tests with coverage and Godot headless (Linux x64)
+        if: matrix.integration
+        shell: bash
+        timeout-minutes: 45
+        run: |
+          target=x86_64-unknown-linux-gnu
+          # Drop any inherited sccache wrapper; llvm-cov installs its own below.
+          unset RUSTC_WRAPPER
+          export CARGO_TARGET_DIR="$PWD/target/coverage-build"
+          export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          coverage_env="$(mise exec -- cargo llvm-cov show-env --sh --target "$target")"
+          eval "$coverage_env"
+          mise exec -- cargo llvm-cov clean --workspace
+          mkdir -p target/coverage
+
+          # Keep the instrumented objects for llvm-cov, including libgdcef.so.
+          # This job never supplies binaries to the release packaging workflow.
+          mise exec -- cargo xtask bundle --target "$target" --target-dir "$CARGO_TARGET_DIR"
+          xvfb-run -a -s '-screen 0 1024x768x24' mise exec -- cargo xtask integration \
+            --target "$target" --godot "$(mise which godot)" \
+            --output target/coverage/integration
+
+          report_args=(--target "$target" --ignore-filename-regex '(gdcef_itest|benches)')
+          mise exec -- cargo llvm-cov report "${report_args[@]}" \
+            --json --summary-only --output-path target/coverage/headless.json
+          # Check this before unit tests: their hits cannot hide a missing DSO profile.
+          jq -e '
+            .data[0].files as $files |
+            all(["cef_texture", "cef_texture2d"][];
+              . as $class | any($files[];
+                (.filename | endswith("crates/gdcef/src/" + $class + "/mod.rs")) and
+                .summary.lines.covered > 0))
+          ' target/coverage/headless.json
+
+          mise exec -- cargo test --locked --workspace --all-features --target "$target"
+          mise exec -- cargo llvm-cov report "${report_args[@]}" \
+            --lcov --output-path target/coverage/lcov.info
+          test -s target/coverage/lcov.info
+
+      - name: Run tests with coverage (macOS ARM64)
+        if: matrix.coverage && runner.os == 'macOS'
+        shell: bash
+        timeout-minutes: 60
+        run: |
+          target=aarch64-apple-darwin
+          # Drop any inherited sccache wrapper; llvm-cov installs its own below.
+          unset RUSTC_WRAPPER
+          export DYLD_LIBRARY_PATH="${CEF_PATH}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+          mkdir -p target/coverage
+          mise exec -- cargo llvm-cov --locked --workspace --all-features --target "$target" \
+            --ignore-filename-regex '(gdcef_itest|benches)' \
+            --lcov --output-path target/coverage/lcov.info
+          test -s target/coverage/lcov.info
+
+      - name: Run tests with coverage (Windows x64)
+        if: matrix.coverage && runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 60
+        run: |
+          $target = "x86_64-pc-windows-msvc"
+          Remove-Item Env:RUSTC_WRAPPER -ErrorAction SilentlyContinue
+          $env:PATH = "$env:CEF_PATH;$env:PATH"
+          New-Item -ItemType Directory -Force -Path target/coverage | Out-Null
+          mise exec -- cargo llvm-cov --locked --workspace --all-features --target $target --ignore-filename-regex '(gdcef_itest|benches)' --lcov --output-path target/coverage/lcov.info
+          if (-not (Test-Path target/coverage/lcov.info -PathType Leaf)) { exit 1 }
+
+      - name: Upload coverage to Codecov
+        if: matrix.coverage
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          files: target/coverage/lcov.info
+          disable_search: true
+          plugins: noop
+          flags: ${{ matrix.coverage_flag }}
+          name: ${{ matrix.coverage_name }}
+          fail_ci_if_error: true
+
+      - name: Upload coverage and integration evidence
+        if: always() && matrix.coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.coverage_artifact }}
+          path: |
+            target/coverage/lcov.info
+            target/coverage/headless.json
+            target/coverage/integration/**/summary.json
+            target/coverage/integration/**/junit.xml
+            target/coverage/integration/**/result.json
+            target/coverage/integration/**/godot.log
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Check cross target (Linux/macOS)
         shell: bash
@@ -78,7 +215,7 @@ jobs:
       
       - name: Run tests (Windows)
         shell: pwsh
-        if: matrix.can_run_tests && runner.os == 'Windows'
+        if: matrix.can_run_tests && runner.os == 'Windows' && !matrix.coverage
         env:
           RUSTC_WRAPPER: sccache
         run: |
