@@ -1,6 +1,16 @@
 use super::*;
 
 impl CefTextureRuntime {
+    /// Builds the per-resource runtime wrapper.
+    ///
+    /// `runtime_enabled` is supplied by the owner and starts as
+    /// `!Engine::is_editor_hint()`: game and `--headless` runs may create a
+    /// browser and drive lifecycle, while editor tool instances stay inert.
+    /// [`Self::shutdown`] clears it permanently. `CefTexture` relies on that to
+    /// stop the runtime it borrows from an internal helper, so the helper's
+    /// deferred hook installation sees `false` and never starts a second
+    /// browser. The headless integration `lifecycle` case exercises
+    /// shutdown-before-deferred-startup.
     pub(crate) fn new(runtime_enabled: bool) -> Self {
         Self {
             app: App::default(),
@@ -47,6 +57,8 @@ impl CefTextureRuntime {
         backend::apply_popup_policy(&self.app, policy);
     }
 
+    /// Permanently disables this runtime. Existing hooks still exist until the
+    /// owner disconnects them, but browser creation and ticking stop.
     pub(crate) fn shutdown(&mut self) {
         self.runtime_enabled = false;
     }
