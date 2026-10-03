@@ -149,11 +149,13 @@ godot-cef/
 │   │       ├── godot_protocol/     # res:// and user:// scheme handlers
 │   │       └── vulkan_hook/        # Vulkan extension injection
 │   ├── gdcef_helper/       # CEF subprocess helper
+│   ├── gdcef_itest/        # Test-only GDExtension driven by the Godot main loop
 │   ├── cef_app/            # CEF application/browser configuration
 │   └── software_render/    # CPU popup compositing helpers
-├── xtask/                  # Build, bundle, pack, and validation tasks
+├── xtask/                  # Build, bundle, pack, validation, and integration runner
 ├── benches/                # Criterion benchmarks
 ├── addons/godot_cef/       # Godot addon files and bundled bin/ outputs
+├── tests/integration/      # Godot project and browser-page fixtures
 └── docs/                   # Documentation site (VitePress)
 ```
 
@@ -341,6 +343,15 @@ On Windows, omit `xvfb-run -a` and use the `*_console.exe` inside
 `--addon` selects a complete existing addon, `--output` selects an evidence
 directory, and `--case CefTexture2D:permission_navigation` runs a single case.
 The command builds only the test addon and reuses the production bundle.
+Use `--test-addon <path>` to reuse an already built test library and skip that
+build as well. The Rust `xtask` runner handles project staging, the loopback HTTP
+server, process supervision, and reports; integration testing requires no Node.
+
+Run the Rust harness guards without Godot or CEF:
+
+```sh
+cargo test --locked -p xtask integration::
+```
 
 CI runs all 14 cases after the native Linux x64 release build, and their result
 is part of the required Build/Gate checks. Each case has a separate process and

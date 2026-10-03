@@ -2962,9 +2962,14 @@ name = "xtask"
 version = "1.17.0"
 dependencies = [
  "clap",
+ "getrandom",
+ "httparse",
+ "libc",
  "plist",
  "serde",
  "serde_json",
+ "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

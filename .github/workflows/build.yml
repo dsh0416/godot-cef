@@ -146,6 +146,10 @@ jobs:
           target: ${{ matrix.target }}
           install-linux-deps: "true"
 
+      - name: Validate integration runner failure handling
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: 'mise exec -- cargo test --locked -p xtask integration::'
+
       - name: Build and bundle for Linux
         env:
           RUSTC_WRAPPER: sccache
@@ -155,17 +159,13 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         uses: ./.github/actions/setup-toolchain
         with:
-          tools: node godot
+          tools: godot
 
       - name: Install headless display dependencies
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb xauth
-
-      - name: Validate integration runner failure handling
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: mise exec -- node --test tests/integration/process.test.mjs tests/integration/server.test.mjs
 
       - name: Run Godot headless integration tests
         if: matrix.target == 'x86_64-unknown-linux-gnu'
