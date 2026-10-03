@@ -381,7 +381,7 @@ impl Suite {
 
 fn random_id() -> Result<String> {
     let mut bytes = [0_u8; 16];
-    getrandom::getrandom(&mut bytes).map_err(|error| format!("Cannot generate run ID: {error}"))?;
+    getrandom::fill(&mut bytes).map_err(|error| format!("Cannot generate run ID: {error}"))?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 

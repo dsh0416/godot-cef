@@ -308,9 +308,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "154.2.0+154.0.28"
+version = "154.3.0+154.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5b58469710177fffc21edb0b24ffa035c862f82d275bd90fc7b4ed3c81f74d5"
+checksum = "bb637fa99d7ee2ffc1b810d53c0ff571288a0ac6e071a54d9cc49a22046480fd"
 dependencies = [
  "anyhow",
  "ash",
@@ -336,9 +336,9 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "154.2.0+154.0.28"
+version = "154.3.0+154.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52918263b95a701338a534c7cfbb7c9bf06a2dd8ef5079eb595c3754735ecb46"
+checksum = "051acaa5c39f3a0411b5c5f4c96560cbfd4460219438572270eff47477ab9027"
 dependencies = [
  "anyhow",
  "cc",
@@ -840,6 +840,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "getrandom"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "r-efi",
+]
+
+[[package]]
 name = "gl_generator"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1255,9 +1266,9 @@ checksum = "34b357333733e8260735ba5894eb928c02ecc69c78715f01a8019e7fa7f2db4c"
 
 [[package]]
 name = "libc"
-version = "0.2.189"
+version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "libloading"
@@ -1744,6 +1755,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "r-efi"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
 name = "range-alloc"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1867,7 +1884,7 @@ checksum = "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
 dependencies = [
  "cc",
  "cfg-if",
- "getrandom",
+ "getrandom 0.2.17",
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
@@ -2962,7 +2979,7 @@ name = "xtask"
 version = "1.17.0"
 dependencies = [
  "clap",
- "getrandom",
+ "getrandom 0.4.3",
  "httparse",
  "libc",
  "plist",
