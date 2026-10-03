@@ -19,6 +19,8 @@ var page_dimensions: Array[Dictionary] = []
 var last_sequence := 0
 var start_ms := 0
 var finished := false
+var scenario := "lifecycle"
+var pacing: Dictionary = {}
 
 
 func _ready() -> void:
@@ -28,6 +30,7 @@ func _ready() -> void:
 	class_name_under_test = OS.get_environment("GDCEF_RENDER_CLASS")
 	accelerated = OS.get_environment("GDCEF_RENDER_MODE") == "accelerated"
 	evidence = OS.get_environment("GDCEF_RENDER_OUTPUT")
+	scenario = OS.get_environment("GDCEF_RENDER_SCENARIO")
 	ProjectSettings.set_setting("godot_cef/storage/data_path", evidence.path_join("cef-profile"))
 	if class_name_under_test not in ["CefTexture", "CefTexture2D"] or evidence.is_empty():
 		fail("Runner configuration is missing or invalid")
@@ -46,7 +49,7 @@ func _process(_delta: float) -> void:
 func create_browser_surface(origin: Vector2) -> Dictionary:
 	var instance: Object = ClassDB.instantiate(class_name_under_test)
 	instance.set("enable_accelerated_osr", accelerated)
-	instance.set("url", "res://fixture/page.html")
+	instance.set("url", OS.get_environment("GDCEF_RENDER_URL"))
 	if instance.has_signal("console_message"):
 		instance.connect("console_message", _on_browser_console_message)
 	var rect: TextureRect
@@ -261,6 +264,9 @@ func stress_independent_streams(current_sequence: int, generation: int) -> bool:
 
 
 func run() -> void:
+	if scenario == "pacing":
+		await run_pacing()
+		return
 	for generation in range(2):
 		create_browser()
 		if not await expect_sequence(1, "initial-%d" % generation):
@@ -342,6 +348,76 @@ func run() -> void:
 	finish()
 
 
+func run_pacing() -> void:
+	create_browser()
+	surface.position = Vector2.ZERO
+	if not resize_browser(Vector2i(1280, 800)):
+		return
+	if not await expect_sequence(1, "pacing-initial"):
+		return
+	# This phase deliberately does not call frame_image/get_image. Synchronous
+	# viewport reads drain GPU work and can hide queue-coupled pacing regressions.
+	browser.call("eval", "window.startPacing(3000,20000)")
+	var warmup_end := Time.get_ticks_usec() + 3000000
+	while Time.get_ticks_usec() < warmup_end and not finished:
+		await RenderingServer.frame_post_draw
+	var measured_start := Time.get_ticks_usec()
+	var start_draw := Engine.get_frames_drawn()
+	var bin_start := measured_start
+	var bin_draw := start_draw
+	var bins: Array[Dictionary] = []
+	while Time.get_ticks_usec() - measured_start < 20000000 and not finished:
+		await RenderingServer.frame_post_draw
+		var now := Time.get_ticks_usec()
+		if now - bin_start >= 1000000:
+			var elapsed_ms := (now - bin_start) / 1000.0
+			var frames := Engine.get_frames_drawn() - bin_draw
+			bins.append({"elapsed_ms": elapsed_ms, "frames": frames, "fps": frames * 1000.0 / elapsed_ms})
+			bin_start = now
+			bin_draw = Engine.get_frames_drawn()
+	if finished:
+		return
+	var elapsed_ms := (Time.get_ticks_usec() - measured_start) / 1000.0
+	var frames := Engine.get_frames_drawn() - start_draw
+	pacing = {
+		"warmup_ms": 3000, "elapsed_ms": elapsed_ms, "frames": frames,
+		"fps": frames * 1000.0 / elapsed_ms, "bins": bins,
+		"vsync_mode": DisplayServer.window_get_vsync_mode(),
+		"display_refresh_hz": DisplayServer.screen_get_refresh_rate(DisplayServer.window_get_current_screen()),
+		"engine_fps_cap": Engine.max_fps,
+		"live_browser_exit": true,
+	}
+	# Browser eval and rAF start asynchronously. Wait for its independent timer
+	# through HTTP so early viewport readbacks cannot perturb the end of its sample.
+	var request := HTTPRequest.new()
+	add_child(request)
+	var report_url := OS.get_environment("GDCEF_RENDER_URL").replace("/page.html", "/pacing")
+	var report_deadline := Time.get_ticks_msec() + 12000
+	var report_received := false
+	while Time.get_ticks_msec() < report_deadline and not finished:
+		if request.request(report_url) != OK:
+			break
+		var response: Array = await request.request_completed
+		if response[1] == 200:
+			report_received = true
+			break
+		await get_tree().create_timer(0.05).timeout
+	request.queue_free()
+	if not report_received:
+		fail("Browser did not finish its independent rAF measurement")
+		return
+	# The page posts its complete rAF report before painting the final sentinel.
+	# Actual viewport pixels establish that the animated browser is still visible.
+	if not await expect_sequence(2, "pacing-final"):
+		return
+	# Leave the still-animating browser alive so scene shutdown must drain native
+	# completion callbacks; explicit destruction followed by idle frames hides it.
+	# Refill the ordinary rendering pipeline after the final synchronous readback.
+	for frame in range(3):
+		await RenderingServer.frame_post_draw
+	finish()
+
+
 func fail(message: String) -> void:
 	if finished:
 		return
@@ -361,6 +437,7 @@ func finish() -> void:
 		"checks": checks, "passed": failures.is_empty(), "failures": failures,
 		"samples": samples, "elapsed_ms": Time.get_ticks_msec() - start_ms,
 		"page_dimensions": page_dimensions,
+		"scenario": scenario, "pacing": pacing,
 	}
 	var file := FileAccess.open(evidence.path_join("result.json"), FileAccess.WRITE)
 	if file != null:

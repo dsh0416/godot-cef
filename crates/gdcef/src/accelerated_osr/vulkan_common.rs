@@ -123,11 +123,13 @@ pub(crate) fn find_memory_type_index(type_filter: u32) -> Option<u32> {
 ///
 /// Records barriers, image copy, and final transition into `cmd_buffer`,
 /// then resets `fence` and `cmd_buffer` as needed and submits the work.
-/// `ctx.queue` must be Godot's actual graphics queue, covered by the process-wide
-/// queue synchronization hooks. Bootstrap/publication completion proves `dst`
+/// `ctx.queue` must be a queue in Godot's graphics family, covered by the queue
+/// synchronization hooks. Bootstrap/publication completion proves `dst`
 /// has no remaining readers and is in TRANSFER_SRC_OPTIMAL. The final barrier
 /// restores that layout and makes writes visible to Godot's later transfer reads
-/// on the same queue. The caller waits for `fence` before returning the CEF lease.
+/// on the same queue. A separate capture queue additionally signals a semaphore
+/// which the caller must wait on Godot's queue before publication. The caller
+/// waits for `fence` before returning the CEF lease.
 pub(crate) fn submit_vulkan_copy_async(
     ctx: &VulkanCopyContext,
     cmd_buffer: ash::vk::CommandBuffer,
@@ -311,12 +313,16 @@ pub(crate) fn submit_vulkan_copy_async(
 
     let wait_stages = [vk::PipelineStageFlags::TRANSFER];
     let waits = [ctx.wait_semaphore];
+    let signals = [ctx.signal_semaphore];
     let mut submit_info =
         vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
     if ctx.wait_semaphore != vk::Semaphore::null() {
         submit_info = submit_info
             .wait_semaphores(&waits)
             .wait_dst_stage_mask(&wait_stages);
+    }
+    if ctx.signal_semaphore != vk::Semaphore::null() {
+        submit_info = submit_info.signal_semaphores(&signals);
     }
     let result = unsafe { (ctx.queue_submit)(ctx.queue, 1, &submit_info, fence) };
     if result != vk::Result::SUCCESS {
@@ -335,6 +341,8 @@ pub(crate) struct VulkanCopyContext {
     pub src_external_queue_family: u32,
     /// Optional imported producer completion, used for Linux DMA-BUF sync files.
     pub wait_semaphore: ash::vk::Semaphore,
+    /// Optional capture completion for publication on a different physical queue.
+    pub signal_semaphore: ash::vk::Semaphore,
     // Function pointers
     pub reset_fences: ash::vk::PFN_vkResetFences,
     pub reset_command_buffer: ash::vk::PFN_vkResetCommandBuffer,

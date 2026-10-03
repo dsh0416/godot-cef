@@ -11,6 +11,8 @@ mod handoff;
 mod publication;
 mod snapshot_pool;
 
+pub(crate) use publication::drain_pending_publications;
+
 /// An exclusively leased, initialized snapshot slot. Backend capture must
 /// finish all reads of CEF storage and restore the agreed source state before
 /// returning. This handle is resolved on the render thread, never during paint.

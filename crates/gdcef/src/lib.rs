@@ -32,6 +32,13 @@ unsafe impl ExtensionLibrary for GodotCef {
     fn on_stage_deinit(level: InitStage) {
         if level == InitStage::Scene {
             cef_pump::uninstall();
+            // Godot deletes the main loop and synchronizes queued instance
+            // cleanup before Scene deinit; RenderingServer is finalized later.
+            // Drain GPU completion callbacks while their API bindings are live.
+            // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/main/main.cpp
+            if let Err(error) = accelerated_osr::drain_pending_publications() {
+                godot::global::godot_error!("[AcceleratedOSR] {error}");
+            }
         }
     }
 

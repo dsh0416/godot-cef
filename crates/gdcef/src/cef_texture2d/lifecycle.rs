@@ -100,6 +100,7 @@ impl CefTexture2D {
                 .unwrap_or(Rid::Invalid);
             stable.set_texture_rd_rid(dst_rd_rid);
             *texture_2d_rd = stable.clone();
+            self.popup_compositor = Some(popup_compositor::PopupCompositor::new(stable.get_rid()));
         }
         self.base_mut().emit_changed();
     }
@@ -110,6 +111,9 @@ impl CefTexture2D {
         self.cancel_active_touches();
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
+            if let Some(compositor) = self.popup_compositor.take() {
+                compositor.dispose();
+            }
             if let Some(ref mut stable) = self.stable_texture_2d_rd {
                 stable.set_texture_rd_rid(Rid::Invalid);
             }

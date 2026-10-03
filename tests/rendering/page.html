@@ -49,6 +49,62 @@ window.startBurst = (first, count, delay) => {
   };
   paintNext();
 };
+window.startPacing = (warmupMs, durationMs) => {
+  const context = canvas.getContext('2d', { alpha: false });
+  const bins = [], intervals = [];
+  let start, measuredStart, previous, binStart, tailStart;
+  let frames = 0, binFrames = 0, tailFrames = 0;
+  const tick = async timestamp => {
+    start ??= timestamp;
+    context.fillStyle = `hsl(${timestamp / 5 % 360},100%,50%)`;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#000000';
+    context.fillRect(timestamp / 3 % canvas.width, 0, 30, canvas.height);
+    if (timestamp - start >= warmupMs) {
+      measuredStart ??= timestamp;
+      binStart ??= timestamp;
+      if (previous !== undefined) {
+        intervals.push(timestamp - previous);
+        frames++;
+        binFrames++;
+        if (tailStart !== undefined) tailFrames++;
+      }
+      previous = timestamp;
+      if (timestamp - measuredStart >= durationMs / 2) tailStart ??= timestamp;
+      if (timestamp - binStart >= 1000) {
+        bins.push({ elapsed_ms: timestamp - binStart, frames: binFrames,
+          fps: binFrames * 1000 / (timestamp - binStart) });
+        binStart = timestamp;
+        binFrames = 0;
+      }
+      if (timestamp - measuredStart >= durationMs) {
+        const elapsed = timestamp - measuredStart;
+        const sorted = intervals.slice().sort((a, b) => a - b);
+        const report = { warmup_ms: warmupMs, elapsed_ms: elapsed, frames,
+          fps: frames * 1000 / elapsed, tail_fps: tailFrames * 1000 / (timestamp - tailStart),
+          median_interval_ms: sorted[Math.floor(sorted.length / 2)], max_interval_ms: sorted.at(-1),
+          bins, innerWidth, innerHeight, devicePixelRatio };
+        const run = new URLSearchParams(location.search).get('run');
+        const response = await fetch(`/pacing?run=${encodeURIComponent(run)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report)
+        });
+        if (!response.ok) throw new Error(`Pacing report rejected: ${response.status}`);
+        window.paint(2);
+        // Keep native frames in flight during final readback and scene teardown.
+        // The strip stays outside the sentinel/sequence sample positions.
+        const keepDrawing = time => {
+          context.fillStyle = `hsl(${time / 5 % 360},100%,50%)`;
+          context.fillRect(0, canvas.height - 4, canvas.width, 4);
+          requestAnimationFrame(keepDrawing);
+        };
+        requestAnimationFrame(keepDrawing);
+        return;
+      }
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+};
 addEventListener('resize', () => window.paint(current));
 window.paint(current);
 </script></body></html>

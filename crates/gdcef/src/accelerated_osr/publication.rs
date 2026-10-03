@@ -12,11 +12,30 @@ use godot::classes::rendering_device::{
 use godot::classes::{RdTextureFormat, RdTextureView, RenderingDevice, RenderingServer};
 use godot::global::{Error, godot_error};
 use godot::prelude::*;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 const SNAPSHOT_SLOTS: usize = 3;
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+static PENDING_READBACKS: AtomicUsize = AtomicUsize::new(0);
+
+/// Tracks callbacks which still require live Godot bindings, not GPU completion.
+/// Dropping a cancelled callback removes its registration without releasing any
+/// slot: only the existing checked completion transitions can do that.
+struct PendingReadback;
+
+impl PendingReadback {
+    fn new() -> Self {
+        PENDING_READBACKS.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for PendingReadback {
+    fn drop(&mut self) {
+        PENDING_READBACKS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 pub type SharedPublication = Arc<Mutex<Publication>>;
 
@@ -310,6 +329,7 @@ fn read_completion(
     bootstrap: bool,
 ) -> Result<(), String> {
     let shared = Arc::clone(shared);
+    let mut pending = Some(PendingReadback::new());
     let callback = Callable::from_sync_fn("cef_snapshot_complete", move |args: &[&Variant]| {
         let valid = args
             .first()
@@ -319,6 +339,7 @@ fn read_completion(
         // thread. Route through its public thread API so cleanup retains that
         // contract even if callback dispatch changes in a later engine version.
         let completion = Arc::clone(&shared);
+        let mut pending_completion = pending.take();
         RenderingServer::singleton().call_on_render_thread(&Callable::from_sync_fn(
             "cef_snapshot_reclaim",
             move |_: &[&Variant]| {
@@ -337,6 +358,9 @@ fn read_completion(
                     }
                 }
                 collect_retired(&completion);
+                // Keep the registration until retirement work itself completes.
+                // The guard also accounts for rejected/dropped callbacks.
+                drop(pending_completion.take());
             },
         ));
     });
@@ -344,6 +368,47 @@ fn read_completion(
         rd.texture_get_data_async(sentinel, 0, &callback),
         "snapshot readback",
     )
+}
+
+/// Finish pending retirement before Scene bindings are unloaded. Normal capture
+/// and publication never invoke this blocking drain.
+pub(crate) fn drain_pending_publications() -> Result<(), String> {
+    // Software/headless runs and already-drained renderers need no RD calls.
+    if PENDING_READBACKS.load(Ordering::Acquire) == 0 {
+        return Ok(());
+    }
+    crate::render::on_render_thread_sync(|| {
+        if PENDING_READBACKS.load(Ordering::Acquire) == 0 {
+            return Ok(());
+        }
+        let mut rd = rendering_device()?;
+        // A separate marker must outlive the synchronous read: the callbacks
+        // drained inside it may free every sentinel belonging to a retired pool.
+        let marker = create_texture(&mut rd, 1, 1, SnapshotFormat::Rgba8)?;
+        check(
+            rd.texture_update(marker, 0, &PackedByteArray::from(&[0u8; 4][..])),
+            "shutdown marker initialization",
+        )?;
+        // In Godot 4.6 texture_get_data calls _flush_and_stall_for_all_frames:
+        // it waits submitted frames, submits the current graph, then waits that
+        // frame. _stall_for_frame invokes the pending asynchronous callbacks
+        // only after the frame fence, while our bindings are still available.
+        // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/servers/rendering/rendering_device.cpp
+        let marker_data = rd.texture_get_data(marker, 0);
+        if marker_data.len() != 4 {
+            // No completion proof: retain the marker and any faulted pool slots
+            // until device teardown, as on ordinary readback failure.
+            return Err("Snapshot shutdown drain did not complete its marker readback".into());
+        }
+        rd.free_rid(marker);
+        let pending = PENDING_READBACKS.load(Ordering::Acquire);
+        if pending != 0 {
+            return Err(format!(
+                "Snapshot shutdown drain left {pending} callbacks pending"
+            ));
+        }
+        Ok(())
+    })?
 }
 
 fn quarantine(shared: &SharedPublication, token: SnapshotToken, error: &str) {

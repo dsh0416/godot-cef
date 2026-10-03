@@ -4,6 +4,7 @@ use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
 use godot::global::godot_warn;
 use godot::prelude::*;
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use super::super::{NativeCaptureTarget, SnapshotFormat};
@@ -12,8 +13,10 @@ use crate::accelerated_osr::vulkan_common::{
     submit_vulkan_copy_async,
 };
 
-/// Vulkan capture shares Godot's actual main queue. The process-wide Vulkan
-/// queue interception serializes host access, including Godot's transfer workers.
+const MAX_PENDING_PUBLICATION_BRIDGES: usize = 8;
+
+/// Capture uses a reserved queue in Godot's graphics family when available.
+/// Queue interception serializes host access, including Godot's transfer workers.
 /// All GPU reads from CEF finish in `capture`, before its paint callback returns.
 pub struct VulkanTextureImporter {
     device: ash::Device,
@@ -24,7 +27,9 @@ pub struct VulkanTextureImporter {
     command_buffer: vk::CommandBuffer,
     fence: vk::Fence,
     queue: vk::Queue,
+    godot_queue: vk::Queue,
     queue_family_index: u32,
+    publication_bridges: VecDeque<PublicationBridge>,
     captured: bool,
     // Own the loader, not Godot's VkInstance/VkDevice. Function tables must not
     // outlive the DLL from which their entry points were resolved.
@@ -65,9 +70,11 @@ impl VulkanTextureImporter {
         };
         let device =
             unsafe { ash::Device::load(instance.fp_v1_0(), vk::Device::from_raw(device_handle)) };
-        crate::vulkan_hook::queue_sync::ensure_queue_synchronization(
+        let godot_queue = vk::Queue::from_raw(queue_handle);
+        let queue = crate::vulkan_hook::queue_sync::choose_capture_queue(
             device.handle(),
-            vk::Queue::from_raw(queue_handle),
+            godot_queue,
+            queue_family_index,
         )?;
         if unsafe {
             instance.get_device_proc_addr(
@@ -113,8 +120,10 @@ impl VulkanTextureImporter {
             command_pool,
             command_buffer,
             fence,
-            queue: vk::Queue::from_raw(queue_handle),
+            queue,
+            godot_queue,
             queue_family_index,
+            publication_bridges: VecDeque::with_capacity(MAX_PENDING_PUBLICATION_BRIDGES),
             captured: false,
             _entry: entry,
         })
@@ -142,7 +151,15 @@ impl VulkanTextureImporter {
         if info.format != expected_color {
             return Err("CEF pixel format does not match the Vulkan staging slot".into());
         }
+        // Reclaim only after the consumer wait completed, independently of CEF
+        // source completion. At most eight pending waits can hold GPU objects.
+        self.reclaim_publication_bridges()?;
         let source = self.import_source(info.shared_texture_handle as isize, target)?;
+        let bridge = if self.queue != self.godot_queue {
+            Some(self.create_publication_bridge()?)
+        } else {
+            None
+        };
         let functions = self.device.fp_v1_0();
         let context = VulkanCopyContext {
             device: self.device.handle(),
@@ -150,6 +167,9 @@ impl VulkanTextureImporter {
             queue_family_index: self.queue_family_index,
             src_external_queue_family: vk::QUEUE_FAMILY_EXTERNAL,
             wait_semaphore: vk::Semaphore::null(),
+            signal_semaphore: bridge
+                .as_ref()
+                .map_or(vk::Semaphore::null(), |bridge| bridge.semaphore),
             reset_fences: functions.reset_fences,
             reset_command_buffer: functions.reset_command_buffer,
             begin_command_buffer: functions.begin_command_buffer,
@@ -158,12 +178,12 @@ impl VulkanTextureImporter {
             cmd_copy_image: functions.cmd_copy_image,
             queue_submit: functions.queue_submit,
         };
-        // Pinned CEF 154.0.28 requests kPreferMappableSharedImage and holds the
-        // frame until this callback returns. Its Chromium blit marks the target
-        // mappable, so CopyOutputRGBA delivers it through a GPU-finished callback:
-        // https://github.com/chromiumembedded/cef/blob/564dd6c4aafff558154bd3176eb5d13551db6734/libcef/browser/osr/video_consumer_osr.cc#L43-L49
-        // https://github.com/chromium/chromium/blob/a654841425914cbb703a2931e07b70a83aedbafd/components/viz/service/frame_sinks/video_capture/frame_sink_video_capturer_impl.cc#L1125-L1143
-        // https://github.com/chromium/chromium/blob/a654841425914cbb703a2931e07b70a83aedbafd/components/viz/service/display_embedder/skia_output_surface_impl_on_gpu.cc#L1063-L1129
+        // CEF 154.0.32 requests kPreferMappableSharedImage and holds the frame
+        // until this callback returns. Its Chromium 154.0.8037.58 blit marks the
+        // target mappable, so CopyOutputRGBA delivers it after GPU completion:
+        // https://github.com/chromiumembedded/cef/blob/682c378d70d5780061e96644dca16ddd8fd157a9/libcef/browser/osr/video_consumer_osr.cc
+        // https://github.com/chromium/chromium/blob/154.0.8037.58/components/viz/service/frame_sinks/video_capture/frame_sink_video_capturer_impl.cc
+        // https://github.com/chromium/chromium/blob/154.0.8037.58/components/viz/service/display_embedder/skia_output_surface_impl_on_gpu.cc
         // Producer completion precedes capture; Vulkan's external-image rules
         // specify GENERAL for D3D11_TEXTURE imports. Acquire/release transfers
         // external ownership and restores that layout before CEF can reuse it:
@@ -180,11 +200,25 @@ impl VulkanTextureImporter {
             // A submission error must not shorten CEF's borrow if the driver
             // accepted any work before reporting failure. Drain the actual
             // queue (or confirm device loss) while the imported source is live.
-            self.finish_failed_submission();
+            self.finish_failed_submission(self.queue);
+            if let Some(bridge) = bridge {
+                self.destroy_publication_bridge(bridge);
+            }
             return Err(error);
         }
-        self.wait_for_capture()?;
+        if let Err(error) = self.wait_for_capture() {
+            // This wait returns early only on actual device loss. Neither the
+            // borrowed image nor its signal semaphore can still be executing.
+            if let Some(bridge) = bridge {
+                self.destroy_publication_bridge(bridge);
+            }
+            return Err(error);
+        }
         // source's RAII destructor runs after all copy/release commands finish.
+        drop(source);
+        if let Some(bridge) = bridge {
+            self.enqueue_publication_bridge(bridge)?;
+        }
         self.captured = true;
         Ok(())
     }
@@ -193,21 +227,101 @@ impl VulkanTextureImporter {
         if !self.captured {
             return Err("No completed Vulkan snapshot to publish".into());
         }
-        // Capture restored TRANSFER_SRC_OPTIMAL with a TRANSFER_WRITE ->
-        // TRANSFER_READ memory dependency on this same physical VkQueue. Later
-        // RD copies inherit that dependency; no second-queue semaphore is needed.
+        // Capture restored TRANSFER_SRC_OPTIMAL. On the same queue, its final
+        // barrier covers later RD copies. On a reserved queue, capture also
+        // enqueued a semaphore wait on Godot's actual queue before publishing
+        // the slot as Ready, so subsequent RD transfer reads inherit visibility.
         Ok(())
     }
 
-    fn finish_failed_submission(&self) {
+    fn create_publication_bridge(&self) -> Result<PublicationBridge, String> {
+        let semaphore = unsafe {
+            self.device
+                .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+        }
+        .map_err(|error| format!("Create publication semaphore failed: {error:?}"))?;
+        let fence = match unsafe {
+            self.device
+                .create_fence(&vk::FenceCreateInfo::default(), None)
+        } {
+            Ok(fence) => fence,
+            Err(error) => {
+                unsafe { self.device.destroy_semaphore(semaphore, None) };
+                return Err(format!("Create publication wait fence failed: {error:?}"));
+            }
+        };
+        Ok(PublicationBridge { semaphore, fence })
+    }
+
+    fn enqueue_publication_bridge(&mut self, bridge: PublicationBridge) -> Result<(), String> {
+        let semaphores = [bridge.semaphore];
+        let stages = [vk::PipelineStageFlags::TRANSFER];
+        let submit = vk::SubmitInfo::default()
+            .wait_semaphores(&semaphores)
+            .wait_dst_stage_mask(&stages);
+        // A semaphore wait's second scope includes later submissions to this
+        // queue, so an empty batch orders the RD copies recorded after capture.
+        // The semaphore supplies cross-queue write visibility; CPU fence waiting
+        // alone would not. Both queues belong to the same graphics family, so
+        // the EXCLUSIVE staging image requires no queue-family ownership transfer.
+        // https://docs.vulkan.org/refpages/latest/refpages/source/vkQueueSubmit.html
+        if let Err(error) = unsafe {
+            self.device
+                .queue_submit(self.godot_queue, &[submit], bridge.fence)
+        } {
+            // Even an ambiguous failed submit may have accepted the wait. The
+            // private queue already completed, but only draining Godot's queue
+            // (or device loss) permits destroying this possibly pending semaphore.
+            self.finish_failed_submission(self.godot_queue);
+            self.destroy_publication_bridge(bridge);
+            return Err(format!("Submit Vulkan publication wait failed: {error:?}"));
+        }
+        self.publication_bridges.push_back(bridge);
+        Ok(())
+    }
+
+    fn reclaim_publication_bridges(&mut self) -> Result<(), String> {
+        while let Some(bridge) = self.publication_bridges.front() {
+            match unsafe { self.device.get_fence_status(bridge.fence) } {
+                Ok(true) => {}
+                Ok(false) if self.publication_bridges.len() < MAX_PENDING_PUBLICATION_BRIDGES => {
+                    return Ok(());
+                }
+                Ok(false) => {
+                    // Actual consumer backpressure is the only ordinary-path
+                    // reason to wait for Godot. Do so before creating a ninth pair.
+                    self.wait_for_fence(bridge.fence, "publication wait reclamation")?;
+                }
+                Err(error) => {
+                    // Keep every pending pair owned. Teardown waits for their
+                    // fences (or confirmed device loss), never just a frame count.
+                    return Err(format!("Query publication wait fence failed: {error:?}"));
+                }
+            }
+            if let Some(bridge) = self.publication_bridges.pop_front() {
+                self.destroy_publication_bridge(bridge);
+            }
+        }
+        Ok(())
+    }
+
+    fn destroy_publication_bridge(&self, bridge: PublicationBridge) {
+        // Caller proved that all submitted uses completed or the device was lost.
+        unsafe {
+            self.device.destroy_fence(bridge.fence, None);
+            self.device.destroy_semaphore(bridge.semaphore, None);
+        }
+    }
+
+    fn finish_failed_submission(&self, queue: vk::Queue) {
         let mut warned = false;
         loop {
-            match unsafe { self.device.queue_wait_idle(self.queue) } {
+            match unsafe { self.device.queue_wait_idle(queue) } {
                 Ok(()) | Err(vk::Result::ERROR_DEVICE_LOST) => return,
                 Err(error) => {
                     if !warned {
                         godot_warn!(
-                            "[AcceleratedOSR/Vulkan] Queue drain failed ({error:?}); retaining CEF's borrow until completion or device loss"
+                            "[AcceleratedOSR/Vulkan] Queue drain failed ({error:?}); retaining GPU resources until completion or device loss"
                         );
                         warned = true;
                     }
@@ -322,15 +436,16 @@ impl VulkanTextureImporter {
     }
 
     fn wait_for_capture(&self) -> Result<(), String> {
+        self.wait_for_fence(self.fence, "CEF capture")
+    }
+
+    fn wait_for_fence(&self, fence: vk::Fence, operation: &str) -> Result<(), String> {
         let mut wait_error_logged = false;
         loop {
-            match unsafe {
-                self.device
-                    .wait_for_fences(&[self.fence], true, 100_000_000)
-            } {
+            match unsafe { self.device.wait_for_fences(&[fence], true, 100_000_000) } {
                 Ok(()) => return Ok(()),
                 Err(vk::Result::ERROR_DEVICE_LOST) => {
-                    return Err("Vulkan device lost during CEF capture".into());
+                    return Err(format!("Vulkan device lost during {operation}"));
                 }
                 Err(vk::Result::TIMEOUT) => {}
                 Err(error) => {
@@ -338,7 +453,7 @@ impl VulkanTextureImporter {
                     // that the GPU may still read. Preserve the borrow and retry.
                     if !wait_error_logged {
                         godot_warn!(
-                            "[AcceleratedOSR/Vulkan] Fence wait failed ({error:?}); retaining CEF's borrow until completion or device loss"
+                            "[AcceleratedOSR/Vulkan] Fence wait for {operation} failed ({error:?}); retaining GPU resources until completion or device loss"
                         );
                         wait_error_logged = true;
                     }
@@ -347,6 +462,13 @@ impl VulkanTextureImporter {
             }
         }
     }
+}
+
+// These handles have no unconditional Drop: every release must be backed by a
+// completed consumer fence, an error-path queue drain, or confirmed device loss.
+struct PublicationBridge {
+    semaphore: vk::Semaphore,
+    fence: vk::Fence,
 }
 
 struct ImportedVulkanImage {
@@ -369,6 +491,12 @@ impl Drop for ImportedVulkanImage {
 impl Drop for VulkanTextureImporter {
     fn drop(&mut self) {
         // Every submitted capture was waited to completion (or device loss).
+        // Consumer waits can outlive capture, so drain them while Godot's device
+        // is still alive before releasing their semaphore/fence pairs.
+        while let Some(bridge) = self.publication_bridges.pop_front() {
+            let _ = self.wait_for_fence(bridge.fence, "publication teardown");
+            self.destroy_publication_bridge(bridge);
+        }
         unsafe {
             self.device.destroy_fence(self.fence, None);
             self.device.destroy_command_pool(self.command_pool, None);

@@ -13,8 +13,29 @@
 //! <https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/thirdparty/volk/volk.c#L148-L153>
 //! <https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/vulkan/rendering_device_driver_vulkan.cpp#L1189-L1195>
 
+#[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+pub(crate) use hooks::choose_capture_queue;
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+pub(crate) use hooks::ensure_queue_synchronization;
 #[cfg(target_arch = "x86_64")]
-pub(crate) use hooks::{ensure_queue_synchronization, install, register_created_device};
+pub(crate) use hooks::{install, register_created_device};
+
+#[cfg(target_arch = "x86_64")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CaptureQueueReservation {
+    pub family: u32,
+    pub index: u32,
+}
+
+#[cfg(all(not(target_arch = "x86_64"), target_os = "windows"))]
+pub(crate) fn choose_capture_queue(
+    device: ash::vk::Device,
+    godot_queue: ash::vk::Queue,
+    _family: u32,
+) -> Result<ash::vk::Queue, String> {
+    ensure_queue_synchronization(device, godot_queue)?;
+    Ok(godot_queue)
+}
 
 #[cfg(not(target_arch = "x86_64"))]
 pub(crate) fn ensure_queue_synchronization(
@@ -121,7 +142,10 @@ mod hooks {
         fn queue(queue: vk::Queue) -> Self {
             let sync = {
                 let mut registry = registry();
-                let device = registry.queues.get(&queue.as_raw()).copied().unwrap_or(0);
+                let device = registry
+                    .queues
+                    .get(&queue.as_raw())
+                    .map_or(0, |queue| queue.device);
                 Arc::clone(registry.host_devices.entry(device).or_default())
             };
             Self::acquire(sync, Some(queue.as_raw()))
@@ -179,12 +203,21 @@ mod hooks {
     struct DeviceRecord {
         dispatch: Dispatch,
         created_through_hook: bool,
+        capture_queues: Vec<super::CaptureQueueReservation>,
+    }
+
+    #[derive(Clone, Copy)]
+    struct QueueRecord {
+        device: u64,
+        family: u32,
+        index: u32,
+        flags: vk::DeviceQueueCreateFlags,
     }
 
     #[derive(Default)]
     struct Registry {
         devices: HashMap<u64, DeviceRecord>,
-        queues: HashMap<u64, u64>,
+        queues: HashMap<u64, QueueRecord>,
         host_devices: HashMap<u64, Arc<DeviceHostSync>>,
     }
 
@@ -197,8 +230,8 @@ mod hooks {
 
     fn queue_dispatch(queue: vk::Queue) -> Option<Dispatch> {
         let registry = registry();
-        let device = registry.queues.get(&queue.as_raw())?;
-        Some(registry.devices.get(device)?.dispatch)
+        let device = registry.queues.get(&queue.as_raw())?.device;
+        Some(registry.devices.get(&device)?.dispatch)
     }
 
     fn device_dispatch(device: vk::Device) -> Option<Dispatch> {
@@ -291,9 +324,15 @@ mod hooks {
         if let Some(function) = original!(GET_QUEUE, candidate, vk::PFN_vkGetDeviceQueue) {
             unsafe { function(device, family, index, queue) };
             if !queue.is_null() && unsafe { *queue } != vk::Queue::null() {
-                registry()
-                    .queues
-                    .insert(unsafe { *queue }.as_raw(), device.as_raw());
+                registry().queues.insert(
+                    unsafe { *queue }.as_raw(),
+                    QueueRecord {
+                        device: device.as_raw(),
+                        family,
+                        index,
+                        flags: vk::DeviceQueueCreateFlags::empty(),
+                    },
+                );
             }
         }
     }
@@ -307,10 +346,17 @@ mod hooks {
         let candidate = device_dispatch(device).and_then(|dispatch| dispatch.get_queue2);
         if let Some(function) = original!(GET_QUEUE2, candidate, GetQueue2Fn) {
             unsafe { function(device, info, queue) };
-            if !queue.is_null() && unsafe { *queue } != vk::Queue::null() {
-                registry()
-                    .queues
-                    .insert(unsafe { *queue }.as_raw(), device.as_raw());
+            if !queue.is_null() && !info.is_null() && unsafe { *queue } != vk::Queue::null() {
+                let info = unsafe { &*info };
+                registry().queues.insert(
+                    unsafe { *queue }.as_raw(),
+                    QueueRecord {
+                        device: device.as_raw(),
+                        family: info.queue_family_index,
+                        index: info.queue_index,
+                        flags: info.flags,
+                    },
+                );
             }
         }
     }
@@ -326,7 +372,9 @@ mod hooks {
             unsafe { function(device, allocator) };
         }
         let mut registry = registry();
-        registry.queues.retain(|_, owner| *owner != device.as_raw());
+        registry
+            .queues
+            .retain(|_, queue| queue.device != device.as_raw());
         registry.devices.remove(&device.as_raw());
         registry.host_devices.remove(&device.as_raw());
     }
@@ -389,7 +437,10 @@ mod hooks {
         replacement(unsafe { CStr::from_ptr(name) }, native)
     }
 
-    pub(crate) fn register_created_device(device: vk::Device) -> Result<(), String> {
+    pub(crate) fn register_created_device(
+        device: vk::Device,
+        reservations: &[super::CaptureQueueReservation],
+    ) -> Result<(), String> {
         let gdpa = GDPA
             .get()
             .ok_or("Vulkan device resolver hook unavailable")?;
@@ -426,6 +477,7 @@ mod hooks {
             DeviceRecord {
                 dispatch,
                 created_through_hook: true,
+                capture_queues: reservations.to_vec(),
             },
         );
         Ok(())
@@ -446,11 +498,78 @@ mod hooks {
             .get(&device.as_raw())
             .ok_or("Vulkan device was not observed by the creation hook")?;
         if !record.created_through_hook
-            || registry.queues.get(&queue.as_raw()) != Some(&device.as_raw())
+            || registry
+                .queues
+                .get(&queue.as_raw())
+                .map(|queue| queue.device)
+                != Some(device.as_raw())
         {
             return Err("Vulkan queue has no intercepted device/queue provenance".to_string());
         }
         Ok(())
+    }
+
+    fn capture_queue_index(
+        reservations: &[super::CaptureQueueReservation],
+        godot: QueueRecord,
+        family: u32,
+    ) -> Result<Option<u32>, String> {
+        if godot.family != family {
+            return Err("Godot's Vulkan queue does not belong to the reported family".into());
+        }
+        let reserved = reservations.iter().find(|queue| queue.family == family);
+        match reserved {
+            Some(reserved) if godot.flags.is_empty() && godot.index < reserved.index => {
+                Ok(Some(reserved.index))
+            }
+            Some(_) => Err(
+                "Private Vulkan queue reservation conflicts with Godot's queue provenance".into(),
+            ),
+            None => Ok(None),
+        }
+    }
+
+    /// Only indices appended to a successful vkCreateDevice request are used.
+    /// A family without spare capacity keeps the existing synchronized queue.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn choose_capture_queue(
+        device: vk::Device,
+        godot_queue: vk::Queue,
+        family: u32,
+    ) -> Result<vk::Queue, String> {
+        ensure_queue_synchronization(device, godot_queue)?;
+        let index = {
+            let registry = registry();
+            let device_record = registry
+                .devices
+                .get(&device.as_raw())
+                .ok_or("Vulkan device disappeared before capture queue selection")?;
+            let godot = *registry
+                .queues
+                .get(&godot_queue.as_raw())
+                .ok_or("Godot queue has no intercepted provenance")?;
+            capture_queue_index(&device_record.capture_queues, godot, family)?
+        };
+        let Some(index) = index else {
+            eprintln!(
+                "[VulkanHook] Capture uses Godot's queue (family {family}; no private queue reserved)"
+            );
+            return Ok(godot_queue);
+        };
+        let mut queue = vk::Queue::null();
+        // The wrapper records the exact family/index and installs the same
+        // per-physical-queue synchronization used for Godot's own queues.
+        unsafe { get_device_queue(device, family, index, &mut queue) };
+        if queue == vk::Queue::null() || queue == godot_queue {
+            return Err(
+                "Vulkan did not return the distinct queue reserved at device creation".into(),
+            );
+        }
+        ensure_queue_synchronization(device, queue)?;
+        eprintln!(
+            "[VulkanHook] Capture uses reserved private queue (family {family}, index {index})"
+        );
+        Ok(queue)
     }
 
     pub(crate) fn install(
@@ -589,6 +708,42 @@ mod hooks {
     mod tests {
         use super::*;
         use std::sync::atomic::AtomicUsize;
+
+        #[test]
+        fn private_queue_selection_requires_exact_family_and_original_index() {
+            let godot = QueueRecord {
+                device: 7,
+                family: 2,
+                index: 0,
+                flags: vk::DeviceQueueCreateFlags::empty(),
+            };
+            let reservations = [super::super::CaptureQueueReservation {
+                family: 2,
+                index: 1,
+            }];
+            assert_eq!(capture_queue_index(&reservations, godot, 2), Ok(Some(1)));
+            assert_eq!(capture_queue_index(&[], godot, 2), Ok(None));
+            assert!(capture_queue_index(&reservations, godot, 3).is_err());
+            assert!(
+                capture_queue_index(&reservations, QueueRecord { index: 1, ..godot }, 2).is_err()
+            );
+            assert!(
+                capture_queue_index(
+                    &reservations,
+                    QueueRecord {
+                        flags: vk::DeviceQueueCreateFlags::PROTECTED,
+                        ..godot
+                    },
+                    2
+                )
+                .is_err()
+            );
+            let unrelated = [super::super::CaptureQueueReservation {
+                family: 1,
+                index: 1,
+            }];
+            assert_eq!(capture_queue_index(&unrelated, godot, 2), Ok(None));
+        }
 
         #[test]
         fn resolver_replaces_every_host_synchronized_queue_operation() {

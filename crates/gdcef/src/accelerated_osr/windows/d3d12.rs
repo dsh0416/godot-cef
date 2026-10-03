@@ -43,7 +43,6 @@ pub struct D3D12TextureImporter {
     capture_queue: ID3D12CommandQueue,
     godot_queue: ID3D12CommandQueue,
     capture_fence: ID3D12Fence,
-    release_fence: ID3D12Fence,
     fence_value: u64,
     fence_event: FenceEvent,
     enhanced_bridge: Option<EnhancedBridge>,
@@ -74,8 +73,6 @@ impl D3D12TextureImporter {
         .map_err(|e| format!("CreateCommandQueue failed: {e}"))?;
         let capture_fence = unsafe { device.CreateFence(0, D3D12_FENCE_FLAG_NONE) }
             .map_err(|e| format!("Create capture fence failed: {e}"))?;
-        let release_fence = unsafe { device.CreateFence(0, D3D12_FENCE_FLAG_NONE) }
-            .map_err(|e| format!("Create release fence failed: {e}"))?;
         let fence_event = FenceEvent(
             unsafe { CreateEventW(None, false, false, None) }
                 .map_err(|e| format!("Create fence event failed: {e}"))?,
@@ -112,7 +109,6 @@ impl D3D12TextureImporter {
             capture_queue,
             godot_queue,
             capture_fence,
-            release_fence,
             fence_value: 0,
             fence_event,
             enhanced_bridge,
@@ -170,12 +166,16 @@ impl D3D12TextureImporter {
         };
         self.copy.record(&source, &destination, state)?;
 
-        // RD retirement has already completed, but still express queue-to-queue
-        // ownership and visibility before native writes begin.
-        unsafe { self.godot_queue.Signal(&self.release_fence, next_value) }
-            .map_err(|e| format!("Signal staging release failed: {e}"))?;
-        unsafe { self.capture_queue.Wait(&self.release_fence, next_value) }
-            .map_err(|e| format!("Wait for staging release failed: {e}"))?;
+        // The pool exposes this slot only after bootstrap/publication readback:
+        // Godot's _stall_for_frame CPU-waits its queue fence before invoking that
+        // callback. Its prior staging reads (and the initial upload) have thus
+        // completed before this submission. ExecuteCommandLists boundaries make
+        // resource caches coherent, including across DIRECT queues on one device.
+        // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/servers/rendering/rendering_device.cpp
+        // https://microsoft.github.io/DirectX-Specs/d3d/D3D12EnhancedBarriers.html#external-dependencies-and-d3d12_barrier_access_global
+        // Do not replace that per-slot completion with a fresh Godot queue-tail
+        // fence: it would also wait for unrelated work queued after the slot's
+        // last read, including Present, while blocking CEF's UI message pump.
         self.fence_value = next_value;
         if let Some(bridge) = &self.enhanced_bridge {
             bridge.acquire.submit(&self.capture_queue);

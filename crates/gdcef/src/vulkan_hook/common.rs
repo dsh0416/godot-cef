@@ -1,3 +1,68 @@
+use ash::vk;
+
+/// Owns priority arrays for private queues appended to Godot's request. Moving
+/// the plan does not move their allocations. Original queue indices stay valid.
+pub(super) struct CaptureQueuePlan<'a> {
+    pub(super) infos: Vec<vk::DeviceQueueCreateInfo<'a>>,
+    _priorities: Vec<Vec<f32>>,
+    pub(super) reservations: Vec<super::queue_sync::CaptureQueueReservation>,
+}
+
+impl<'a> CaptureQueuePlan<'a> {
+    /// Non-null priority pointers must contain queue_count floats, as required
+    /// by the intercepted Vulkan device creation call.
+    pub(super) unsafe fn new(
+        originals: &[vk::DeviceQueueCreateInfo<'a>],
+        properties: &[vk::QueueFamilyProperties],
+    ) -> Self {
+        let mut plan = Self {
+            infos: originals.to_vec(),
+            _priorities: Vec::new(),
+            reservations: Vec::new(),
+        };
+        for (index, original) in originals.iter().enumerate() {
+            let Some(family) = properties.get(original.queue_family_index as usize) else {
+                continue;
+            };
+            // Godot's main family supports graphics+compute. Leave protected
+            // queues and repeated family entries (whose counts share a limit)
+            // entirely unchanged instead of guessing their retrieval rules.
+            if !family
+                .queue_flags
+                .contains(vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE)
+                || !original.flags.is_empty()
+                || original.queue_count == 0
+                || original.queue_count >= family.queue_count
+                || original.p_queue_priorities.is_null()
+                || originals
+                    .iter()
+                    .filter(|info| info.queue_family_index == original.queue_family_index)
+                    .count()
+                    != 1
+            {
+                continue;
+            }
+            let mut priorities = unsafe {
+                std::slice::from_raw_parts(
+                    original.p_queue_priorities,
+                    original.queue_count as usize,
+                )
+            }
+            .to_vec();
+            priorities.push(priorities[0]);
+            plan.infos[index].queue_count = original.queue_count + 1;
+            plan.infos[index].p_queue_priorities = priorities.as_ptr();
+            plan._priorities.push(priorities);
+            plan.reservations
+                .push(super::queue_sync::CaptureQueueReservation {
+                    family: original.queue_family_index,
+                    index: original.queue_count,
+                });
+        }
+        plan
+    }
+}
+
 macro_rules! define_vulkan_hook {
     (
         log_prefix: $log_prefix:literal,
@@ -33,6 +98,19 @@ macro_rules! define_vulkan_hook {
 
         static ENUMERATE_EXTENSIONS_FN: OnceLock<PFN_vkEnumerateDeviceExtensionProperties> =
             OnceLock::new();
+        static QUEUE_FAMILY_PROPERTIES_FN: OnceLock<ash::vk::PFN_vkGetPhysicalDeviceQueueFamilyProperties> = OnceLock::new();
+
+        fn queue_family_properties(physical_device: ash::vk::PhysicalDevice) -> Vec<ash::vk::QueueFamilyProperties> {
+            let Some(function) = QUEUE_FAMILY_PROPERTIES_FN.get() else { return Vec::new() };
+            let mut count = 0;
+            unsafe { function(physical_device, &mut count, std::ptr::null_mut()) };
+            let mut properties = vec![ash::vk::QueueFamilyProperties::default(); count as usize];
+            if count != 0 {
+                unsafe { function(physical_device, &mut count, properties.as_mut_ptr()) };
+                properties.truncate(count as usize);
+            }
+            properties
+        }
 
         fn device_supports_extension(
             physical_device: ash::vk::PhysicalDevice,
@@ -109,10 +187,10 @@ macro_rules! define_vulkan_hook {
             false
         }
 
-        fn record_created_device(result: i32, p_device: *mut c_void) -> i32 {
+        fn record_created_device(result: i32, p_device: *mut c_void, reservations: &[super::queue_sync::CaptureQueueReservation]) -> i32 {
             if result == ash::vk::Result::SUCCESS.as_raw() && !p_device.is_null() {
                 let device = unsafe { *(p_device as *const ash::vk::Device) };
-                if let Err(error) = super::queue_sync::register_created_device(device) {
+                if let Err(error) = super::queue_sync::register_created_device(device, reservations) {
                     eprintln!("{} Queue synchronization registration failed: {}", $log_prefix, error);
                 }
             }
@@ -134,12 +212,25 @@ macro_rules! define_vulkan_hook {
                     return record_created_device(
                         hook.call(physical_device, p_create_info, p_allocator, p_device),
                         p_device,
+                        &[],
                     );
                 }
 
                 let physical_device_handle =
                     <ash::vk::PhysicalDevice as ash::vk::Handle>::from_raw(physical_device as u64);
                 let original_info = &*(p_create_info as *const ash::vk::DeviceCreateInfo<'_>);
+                // Linux keeps its existing shared-queue capture unchanged.
+                let queue_plan = if cfg!(target_os = "windows")
+                    && original_info.queue_create_info_count != 0
+                    && !original_info.p_queue_create_infos.is_null()
+                {
+                    Some(super::common::CaptureQueuePlan::new(
+                        std::slice::from_raw_parts(original_info.p_queue_create_infos, original_info.queue_create_info_count as usize),
+                        &queue_family_properties(physical_device_handle),
+                    ))
+                } else {
+                    None
+                };
 
                 let mut extensions_to_add: Vec<&std::ffi::CStr> = Vec::new();
                 $(
@@ -156,13 +247,9 @@ macro_rules! define_vulkan_hook {
                     } else {
                         eprintln!("{} {} not supported by device", $log_prefix, $status_extension.to_string_lossy());
                     }
-                    return record_created_device(
-                        hook.call(physical_device, p_create_info, p_allocator, p_device),
-                        p_device,
-                    );
+                } else {
+                    eprintln!("{} Injecting external memory extensions", $log_prefix);
                 }
-
-                eprintln!("{} Injecting external memory extensions", $log_prefix);
 
                 let original_count = original_info.enabled_extension_count as usize;
                 let mut extensions: Vec<*const std::ffi::c_char> =
@@ -182,7 +269,7 @@ macro_rules! define_vulkan_hook {
                 }
 
                 #[allow(deprecated)]
-                let modified_info = ash::vk::DeviceCreateInfo {
+                let mut modified_info = ash::vk::DeviceCreateInfo {
                     s_type: original_info.s_type,
                     p_next: original_info.p_next,
                     flags: original_info.flags,
@@ -195,13 +282,25 @@ macro_rules! define_vulkan_hook {
                     p_enabled_features: original_info.p_enabled_features,
                     _marker: std::marker::PhantomData,
                 };
+                if let Some(plan) = &queue_plan {
+                    modified_info.p_queue_create_infos = plan.infos.as_ptr();
+                }
 
-                let result = hook.call(
+                let mut result = hook.call(
                     physical_device,
                     &modified_info as *const _ as *const c_void,
                     p_allocator,
                     p_device,
                 );
+                let mut reservations = queue_plan.as_ref().map_or(&[][..], |plan| plan.reservations.as_slice());
+                if result != ash::vk::Result::SUCCESS.as_raw() && !reservations.is_empty() {
+                    // Extra queues are an optimization, not a new device
+                    // requirement. Keep the original device request viable.
+                    eprintln!("{} Private capture queue creation failed ({:?}); retrying original queue counts", $log_prefix, ash::vk::Result::from_raw(result));
+                    modified_info.p_queue_create_infos = original_info.p_queue_create_infos;
+                    result = hook.call(physical_device, &modified_info as *const _ as *const c_void, p_allocator, p_device);
+                    reservations = &[];
+                }
 
                 let vk_result = ash::vk::Result::from_raw(result);
                 if vk_result == ash::vk::Result::SUCCESS {
@@ -213,7 +312,7 @@ macro_rules! define_vulkan_hook {
                     eprintln!("{} Device creation failed: {:?}", $log_prefix, vk_result);
                 }
 
-                record_created_device(result, p_device)
+                record_created_device(result, p_device, reservations)
             }
         }
 
@@ -302,6 +401,10 @@ macro_rules! define_vulkan_hook {
                     let _ = ENUMERATE_EXTENSIONS_FN.set(*f);
                 }
 
+                if let Ok(function) = lib.get::<ash::vk::PFN_vkGetPhysicalDeviceQueueFamilyProperties>(b"vkGetPhysicalDeviceQueueFamilyProperties\0") {
+                    let _ = QUEUE_FAMILY_PROPERTIES_FN.set(*function);
+                }
+
                 if VK_CREATE_DEVICE_HOOK.set(hook).is_err() {
                     eprintln!("{} Hook already stored (this shouldn't happen)", $log_prefix);
                 }
@@ -330,3 +433,73 @@ macro_rules! define_vulkan_hook {
 }
 
 pub(crate) use define_vulkan_hook;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn family(count: u32) -> vk::QueueFamilyProperties {
+        vk::QueueFamilyProperties {
+            queue_flags: vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE,
+            queue_count: count,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn reservation_appends_without_changing_existing_queue_indices_or_priorities() {
+        let priorities = [0.25, 0.75];
+        let original = vk::DeviceQueueCreateInfo::default()
+            .queue_family_index(1)
+            .queue_priorities(&priorities);
+        let plan = unsafe { CaptureQueuePlan::new(&[original], &[family(1), family(3)]) };
+        assert_eq!(original.queue_count, 2);
+        assert_eq!(plan.infos[0].queue_count, 3);
+        assert_eq!(
+            plan.reservations,
+            [super::super::queue_sync::CaptureQueueReservation {
+                family: 1,
+                index: 2
+            }]
+        );
+        // Moving the plan must leave the pointers passed to Vulkan valid.
+        let moved = Box::new(plan);
+        let copied = unsafe { std::slice::from_raw_parts(moved.infos[0].p_queue_priorities, 3) };
+        assert_eq!(copied, [0.25, 0.75, 0.25]);
+        assert_eq!(moved.infos[0].p_next, original.p_next);
+        assert_eq!(moved.infos[0].flags, original.flags);
+    }
+
+    #[test]
+    fn exhausted_unknown_or_invalid_families_never_claim_a_private_queue() {
+        let priorities = [0.0];
+        let original = vk::DeviceQueueCreateInfo::default().queue_priorities(&priorities);
+        for properties in [vec![], vec![family(0)], vec![family(1)]] {
+            let plan = unsafe { CaptureQueuePlan::new(&[original], &properties) };
+            assert!(plan.reservations.is_empty());
+            assert_eq!(plan.infos[0].queue_count, 1);
+        }
+        let missing_priorities = vk::DeviceQueueCreateInfo {
+            queue_count: 1,
+            ..Default::default()
+        };
+        let plan = unsafe { CaptureQueuePlan::new(&[missing_priorities], &[family(2)]) };
+        assert!(plan.reservations.is_empty());
+    }
+
+    #[test]
+    fn repeated_or_protected_family_requests_keep_the_original_capacity_contract() {
+        let priorities = [0.0];
+        let plain = vk::DeviceQueueCreateInfo::default().queue_priorities(&priorities);
+        let protected = plain.flags(vk::DeviceQueueCreateFlags::PROTECTED);
+        for requests in [vec![protected], vec![plain, protected], vec![plain, plain]] {
+            let plan = unsafe { CaptureQueuePlan::new(&requests, &[family(2)]) };
+            assert!(plan.reservations.is_empty());
+            for (before, after) in requests.iter().zip(&plan.infos) {
+                assert_eq!(before.queue_count, after.queue_count);
+                assert_eq!(before.flags, after.flags);
+                assert_eq!(before.p_queue_priorities, after.p_queue_priorities);
+            }
+        }
+    }
+}

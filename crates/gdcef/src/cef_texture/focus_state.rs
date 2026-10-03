@@ -136,4 +136,32 @@ mod tests {
         assert_eq!(resumed.cef_focus, Some(true));
         assert!(resumed.ime_active);
     }
+
+    #[test]
+    fn navigation_reasserts_host_focus_without_stealing_the_current_owner() {
+        let mut focus = FocusState::default();
+        assert_eq!(
+            focus.reconcile(FocusOwner::Browser, true).cef_focus,
+            Some(true)
+        );
+        // A new Chromium render widget starts unfocused, while the same Godot
+        // control still owns focus. Navigation must invalidate the host cache.
+        assert_eq!(focus.reconcile(FocusOwner::Browser, true).cef_focus, None);
+        focus.invalidate_host_focus();
+        assert_eq!(
+            focus.reconcile(FocusOwner::Browser, true).cef_focus,
+            Some(true)
+        );
+
+        // Completion arriving after the user moved to another control, or
+        // while the window is inactive, must not reclaim focus.
+        focus.invalidate_host_focus();
+        let outside = focus.reconcile(FocusOwner::Outside, true);
+        assert_eq!(outside.cef_focus, Some(false));
+        assert_eq!(outside.transfer, None);
+        focus.invalidate_host_focus();
+        let inactive = focus.reconcile(FocusOwner::Browser, false);
+        assert_eq!(inactive.cef_focus, Some(false));
+        assert_eq!(inactive.transfer, None);
+    }
 }

@@ -19,6 +19,8 @@ use cef_app::ipc_contract::{
 };
 
 mod lifecycle;
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+mod popup_compositor;
 mod rendering;
 mod runtime;
 
@@ -54,6 +56,8 @@ pub struct CefTexture2D {
     fallback_texture: Gd<ImageTexture>,
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     stable_texture_2d_rd: Option<Gd<godot::classes::Texture2Drd>>,
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    popup_compositor: Option<popup_compositor::PopupCompositor>,
 
     #[export]
     #[var(get = get_url_property, set = set_url_property)]
@@ -126,6 +130,8 @@ impl ITexture2D for CefTexture2D {
             fallback_texture,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             stable_texture_2d_rd,
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            popup_compositor: None,
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
@@ -172,7 +178,10 @@ impl ITexture2D for CefTexture2D {
             && let Some(stable) = &self.stable_texture_2d_rd
             && stable.get_texture_rd_rid().is_valid()
         {
-            return stable.get_rid();
+            return self
+                .popup_compositor
+                .as_ref()
+                .map_or_else(|| stable.get_rid(), popup_compositor::PopupCompositor::rid);
         }
 
         self.fallback_texture.get_rid()

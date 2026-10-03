@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: transparent; }
+  select { position: absolute; left: 3.125vw; top: 5vh; width: 56.25vw; height: 20vh; font: 9vh sans-serif; }
+  option { color: white; background: rgb(255, 0, 0); }
+  .patch { position: absolute; left: 68.75vw; width: 25vw; height: 30vh; }
+  #midtone { top: 10vh; background: rgb(64, 96, 128); }
+  #alpha { top: 50vh; background: rgba(128, 64, 32, .5); }
+  #selected { position: absolute; right: 0; top: 0; width: 5vw; height: 5vh; background: black; }
+</style>
+<div id="midtone" class="patch"></div>
+<div id="alpha" class="patch"></div>
+<div id="selected"></div>
+<select id="menu" onchange="document.querySelector('#selected').style.background=this.value==='two'?'yellow':'black'">
+  <option value="one">ONE</option><option value="two">TWO</option>
+  <option value="three">THREE</option><option value="four">FOUR</option>
+</select>

@@ -30,8 +30,8 @@ CPU 调用结束和超时都不能作为 GPU 完成证据。无法证明完成�
 
 | 后端 | 捕获与交接 |
 | --- | --- |
-| Windows D3D12 | 回调内直接通过 D3D12 打开 CEF 共享句柄，在自有队列捕获，通过 COMMON 状态获取并释放源，双向使用队列 fence 并等待捕获完成。保留 RD 的复制源状态，增强屏障与旧式屏障通过 COMMON 交接。 |
-| Windows Vulkan | 每次回调重新导入 Win32 外部内存，使用 Godot 实际队列及队列族，获取并释放外部图像所有权，恢复 staging 的 `TRANSFER_SRC_OPTIMAL` 状态并等待复制完成。 |
+| Windows D3D12 | 回调内直接通过 D3D12 打开 CEF 共享句柄，在自有队列捕获，通过 COMMON 状态获取并释放源。CPU 已观察到的槽位完成证明先前的 Godot 读取已经结束；捕获 fence 约束 Godot 队列上的发布顺序，并保证回调返回前结束借用源访问。保留 RD 的复制源状态，增强屏障与旧式屏障通过 COMMON 交接。 |
+| Windows Vulkan | 每次回调重新导入 Win32 外部内存，优先使用与 Godot 同族且已预留的私有队列，无可用预留时沿用 Godot 队列。获取并释放外部图像所有权，恢复 staging 的 `TRANSFER_SRC_OPTIMAL` 状态，等待原生复制 fence 后才返回。Godot 队列上的信号量等待保证私有队列捕获先于发布。 |
 | Linux Vulkan | 导入当前 DMA-BUF 平面与 DRM modifier，通过 sync-file 信号量等待生产者（旧内核使用原生 DMA-BUF fence 轮询），获取并释放 foreign 队列所有权，在回调返回前完成复制。 |
 | macOS Metal | 打开当前 IOSurface，在 Godot 自身的线程安全 `MTLCommandQueue` 上复制到启用 hazard tracking 的 staging；同队列资源依赖保证可见性，`waitUntilCompleted` 保证借用源不再被访问。 |
 
@@ -39,7 +39,24 @@ Vulkan 钩子串行化实际队列的 CPU 访问，覆盖 Godot 后台传输工�
 初始化会验证设备与队列的来源；仅在渲染线程执行不能保证队列独占访问。
 驱动会缓存队列包装函数的地址，因此其模块在进程生命周期内保持加载；重建扩展后需要重启 Godot。
 
+Windows 的设备创建钩子可在物理队列族有剩余容量时追加一条队列，保持 Godot 原有索引和优先级不变。
+只有成功创建记录与队列来源均确认后，导入器才使用私有队列；未预留时沿用已有的共享队列路径。
+私有捕获发出信号量，Godot 队列通过空提交在 transfer 阶段等待，再执行后续 RD 复制。
+独立 fence 负责回收这次等待；正常私有捕获路径不会同步等待这个 Godot 队列 fence。
+Linux 继续使用 Godot 实际队列捕获。
+
 Godot 4.6+ 直接返回原生 D3D12 纹理与命令队列。导入器在提交捕获工作前校验队列所属设备。
+空闲 D3D12 槽位已有初始化或上次发布的完成证明。若再把新的 Godot 到捕获队列 fence
+排在无关绘制工作之后，会使捕获产生多余等待，并可能在 VSync 下拖低浏览器帧率。
+捕获队列到 Godot 队列的 fence 仍然保留。
+
+## 弹出菜单展现
+
+`CefTexture` 通过子 overlay 显示加速 popup，可延伸到节点边界之外，仍遵守祖先节点的常规裁剪。
+`CefTexture2D` 保持公开 RenderingServer 纹理代理不变：平时指向原生 view，
+popup 可见时指向合成 view 与 popup 的 GPU canvas viewport。
+该画布使用预乘 alpha，并将 popup 裁剪在纹理边界内；打开、隐藏或调整 popup 尺寸不会替换公开纹理 RID。
+合成直接使用 GPU 纹理，不进行 CPU 读回，也不切换到软件渲染。
 
 ## 错误处理与验证
 
@@ -54,6 +71,11 @@ Godot 4.6+ 直接返回原生 D3D12 纹理与命令队列。导入器在提交�
 测试验证请求的渲染器与线程模式。加速测试用例拒绝启动回退，防止软件渲染像素使 GPU 测试误判通过；
 引擎错误、过期像素序号、崩溃或超时同样导致失败。
 无界面测试只验证运行时推进，不能验证 GPU 共享与实际显示像素。
+
+`pacing` 场景开启 VSync，预热 3 秒，再测量 20 秒的 CEF rAF 与 Godot 绘制节奏，
+测量期间不读回 viewport。它检查持续帧率及最后 10 秒的帧率，随后保留活跃浏览器退出。
+`popup` 场景在跨站重定向后发送原生鼠标与键盘输入，验证焦点保持、菜单打开与选择、
+重新打开与关闭、popup 边界变化、纹理标识稳定，以及颜色与 alpha 保持。
 
 最低支持 Godot 4.6。编译通过不能代替各操作系统、GPU 驱动与 Godot 版本上的实机验证。
 此项工作继续推进 [#227](https://github.com/dsh0416/godot-cef/issues/227)。

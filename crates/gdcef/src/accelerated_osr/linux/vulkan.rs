@@ -292,6 +292,7 @@ impl VulkanTextureImporter {
             queue_family_index: self.queue_family_index,
             src_external_queue_family: vk::QUEUE_FAMILY_FOREIGN_EXT,
             wait_semaphore: producer,
+            signal_semaphore: vk::Semaphore::null(),
             reset_fences: self.fns.reset_fences,
             reset_command_buffer: self.fns.reset_command_buffer,
             begin_command_buffer: self.fns.begin_command_buffer,
