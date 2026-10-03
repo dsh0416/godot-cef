@@ -13,13 +13,14 @@ use crate::browser::{App, RenderMode};
 use crate::cef_init;
 use crate::cef_texture::backend;
 use crate::input;
-use crate::render;
 use cef_app::ipc_contract::{
     ROUTE_IPC_BINARY_GODOT_TO_RENDERER, ROUTE_IPC_DATA_GODOT_TO_RENDERER,
     ROUTE_IPC_GODOT_TO_RENDERER,
 };
 
 mod lifecycle;
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+mod popup_compositor;
 mod rendering;
 mod runtime;
 
@@ -56,7 +57,7 @@ pub struct CefTexture2D {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     stable_texture_2d_rd: Option<Gd<godot::classes::Texture2Drd>>,
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-    placeholder_rd_rid: Rid,
+    popup_compositor: Option<popup_compositor::PopupCompositor>,
 
     #[export]
     #[var(get = get_url_property, set = set_url_property)]
@@ -119,11 +120,7 @@ impl ITexture2D for CefTexture2D {
         }
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        let (stable_texture_2d_rd, placeholder_rd_rid) =
-            match render::create_rd_texture(texture_size.x, texture_size.y) {
-                Ok((rd_rid, t2d)) => (Some(t2d), rd_rid),
-                Err(_) => (None, Rid::Invalid),
-            };
+        let stable_texture_2d_rd = Some(godot::classes::Texture2Drd::new_gd());
 
         Self {
             base,
@@ -134,7 +131,7 @@ impl ITexture2D for CefTexture2D {
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             stable_texture_2d_rd,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-            placeholder_rd_rid,
+            popup_compositor: None,
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
@@ -172,10 +169,19 @@ impl ITexture2D for CefTexture2D {
 
     fn get_rid(&self) -> Rid {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        if self.enable_accelerated_osr
+        if self
+            .runtime
+            .app()
+            .state
+            .as_ref()
+            .is_some_and(|state| matches!(state.render_mode, RenderMode::Accelerated { .. }))
             && let Some(stable) = &self.stable_texture_2d_rd
+            && stable.get_texture_rd_rid().is_valid()
         {
-            return stable.get_rid();
+            return self
+                .popup_compositor
+                .as_ref()
+                .map_or_else(|| stable.get_rid(), popup_compositor::PopupCompositor::rid);
         }
 
         self.fallback_texture.get_rid()

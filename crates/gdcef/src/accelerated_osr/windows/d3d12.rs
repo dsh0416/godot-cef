@@ -1,514 +1,678 @@
+use super::super::{NativeCaptureTarget, SnapshotFormat};
 use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
-use godot::global::{godot_error, godot_print, godot_warn};
+use godot::global::{godot_print, godot_warn};
 use godot::prelude::*;
-use std::ffi::c_void;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID};
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT, ID3D11Device, ID3D11Device1,
-    ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
-};
-use windows::Win32::Graphics::Direct3D11on12::{
-    D3D11_RESOURCE_FLAGS, D3D11On12CreateDevice, ID3D11On12Device,
-};
+use std::ffi::{CStr, c_void};
+use std::io::Write;
+use std::mem::ManuallyDrop;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+use windows::Win32::Foundation::{CloseHandle, HANDLE, LUID, WAIT_FAILED};
 use windows::Win32::Graphics::Direct3D12::{
-    D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_RESOURCE_STATE_COMMON,
-    D3D12_RESOURCE_STATE_COPY_DEST, ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12Resource,
+    D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_ACCESS_COPY_SOURCE, D3D12_BARRIER_GROUP,
+    D3D12_BARRIER_GROUP_0, D3D12_BARRIER_LAYOUT_COMMON, D3D12_BARRIER_LAYOUT_COPY_SOURCE,
+    D3D12_BARRIER_SUBRESOURCE_RANGE, D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_TYPE_TEXTURE,
+    D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_FEATURE_D3D12_OPTIONS12,
+    D3D12_FEATURE_DATA_D3D12_OPTIONS12, D3D12_FENCE_FLAG_NONE, D3D12_MESSAGE,
+    D3D12_MESSAGE_CALLBACK_IGNORE_FILTERS, D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID,
+    D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION, D3D12_MESSAGE_SEVERITY_ERROR,
+    D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+    D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+    D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS, D3D12_RESOURCE_STATE_COMMON,
+    D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATES,
+    D3D12_RESOURCE_TRANSITION_BARRIER, D3D12_TEXTURE_BARRIER, ID3D12CommandAllocator,
+    ID3D12CommandList, ID3D12CommandQueue, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList,
+    ID3D12GraphicsCommandList7, ID3D12InfoQueue, ID3D12InfoQueue1, ID3D12Resource,
+};
+use windows::Win32::Graphics::Dxgi::Common::{
+    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_TYPELESS, DXGI_FORMAT_B8G8R8A8_UNORM,
+    DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_UNORM,
+    DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
 };
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory, IDXGIAdapter, IDXGIFactory};
-use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
-use windows::core::Interface;
+use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+use windows::core::{IUnknown, Interface, PCSTR};
 
-pub struct PendingD3D12Copy {
-    duplicated_handle: HANDLE,
-    width: u32,
-    height: u32,
-}
-
-impl Drop for PendingD3D12Copy {
-    fn drop(&mut self) {
-        if !self.duplicated_handle.is_invalid() {
-            let _ = unsafe { CloseHandle(self.duplicated_handle) };
-        }
-    }
-}
-
-struct ImportedD3D11Resource {
-    duplicated_handle: HANDLE,
-}
-
-use super::duplicate_win32_handle;
-
+/// Captures the CEF borrow synchronously into an exclusively owned staging slot.
+/// Native context and fence access is serialized by the containing importer
+/// mutex. No borrowed source handle survives `capture`.
 pub struct D3D12TextureImporter {
-    device: std::mem::ManuallyDrop<ID3D12Device>,
-    d3d11_device: std::mem::ManuallyDrop<ID3D11Device>,
-    d3d11_context: ID3D11DeviceContext,
-    d3d11on12_device: ID3D11On12Device,
-    command_queue: ID3D12CommandQueue,
-    fence: ID3D12Fence,
+    device: ID3D12Device,
+    copy: NativeCopyList,
+    capture_queue: ID3D12CommandQueue,
+    godot_queue: ID3D12CommandQueue,
+    capture_fence: ID3D12Fence,
     fence_value: u64,
-    fence_event: HANDLE,
-    device_removed_logged: bool,
-    pending_copy: Option<PendingD3D12Copy>,
-    imported_resource: Option<ImportedD3D11Resource>,
-    copy_in_flight: bool,
+    fence_event: FenceEvent,
+    enhanced_bridge: Option<EnhancedBridge>,
+    diagnostics: Option<NativeDebugDiagnostics>,
 }
 
 impl D3D12TextureImporter {
-    pub fn new() -> Option<Self> {
+    /// Must run on Godot's render thread; capture itself uses only native APIs.
+    pub fn new() -> Result<Self, String> {
         let rd = RenderingServer::singleton()
             .get_rendering_device()
-            .ok_or_else(|| {
-                godot_error!("[AcceleratedOSR/D3D12] Failed to get RenderingDevice");
-            })
-            .ok()?;
-
+            .ok_or("Failed to get RenderingDevice")?;
         let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
-
-        if device_ptr == 0 {
-            godot_error!("[AcceleratedOSR/D3D12] Failed to get D3D12 device from Godot");
-            return None;
+        let queue_ptr = rd.get_driver_resource(DriverResource::COMMAND_QUEUE, Rid::Invalid, 0);
+        // Godot retains its references; clone adds our own COM references.
+        let device: ID3D12Device = unsafe { clone_native_interface(device_ptr) }?;
+        let diagnostics = NativeDebugDiagnostics::new(&device);
+        let godot_queue = godot_command_queue(queue_ptr, &device)?;
+        if unsafe { godot_queue.GetDesc() }.Type != D3D12_COMMAND_LIST_TYPE_DIRECT {
+            return Err("Godot's main D3D12 queue is not a direct queue".into());
         }
-
-        let device: ID3D12Device = unsafe { ID3D12Device::from_raw(device_ptr as *mut c_void) };
-
-        // CRITICAL: Create our OWN command queue instead of using Godot's.
-        // Using Godot's command queue causes synchronization conflicts because:
-        // 1. Godot is also submitting commands to that queue
-        // 2. Our fence signals don't synchronize with Godot's operations
-        // 3. This causes DEVICE_HUNG errors on the second frame
-        let queue_desc = D3D12_COMMAND_QUEUE_DESC {
-            Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
-            ..Default::default()
-        };
-        let command_queue: ID3D12CommandQueue = unsafe { device.CreateCommandQueue(&queue_desc) }
-            .map_err(|e| {
-                godot_error!(
-                    "[AcceleratedOSR/D3D12] Failed to create command queue: {:?}",
-                    e
-                );
-                drop(e);
+        let capture_queue: ID3D12CommandQueue = unsafe {
+            device.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC {
+                Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
+                ..Default::default()
             })
-            .ok()?;
-
-        // Create fence for synchronization
-        let fence: ID3D12Fence = unsafe {
-            device.CreateFence(
-                0,
-                windows::Win32::Graphics::Direct3D12::D3D12_FENCE_FLAG_NONE,
-            )
         }
-        .map_err(|e| {
-            godot_error!("[AcceleratedOSR/D3D12] Failed to create fence: {:?}", e);
-            drop(e);
-        })
-        .ok()?;
-
-        let fence_event = unsafe { CreateEventW(None, false, false, None) }
-            .map_err(|e| {
-                godot_error!(
-                    "[AcceleratedOSR/D3D12] Failed to create fence event: {:?}",
-                    e
-                );
-                drop(e);
-            })
-            .ok()?;
-
-        // Create D3D11on12 device to open CEF's D3D11 shared texture handles.
-        // CEF provides D3D11 handles (OpenSharedResource1), not D3D12 handles (OpenSharedHandle).
-        // Using D3D12::OpenSharedHandle with CEF's handle causes NT Handle errors on older Windows 10.
-        let command_queues = [Some(
-            command_queue
-                .clone()
-                .cast::<windows::core::IUnknown>()
-                .map_err(|e| {
-                    godot_error!(
-                        "[AcceleratedOSR/D3D12] Failed to cast command queue to IUnknown: {:?}",
-                        e
-                    );
-                    drop(e);
-                })
-                .ok()?,
-        )];
-        let mut d3d11_device: Option<ID3D11Device> = None;
-        let mut d3d11_context: Option<ID3D11DeviceContext> = None;
-        unsafe {
-            D3D11On12CreateDevice(
-                &device,
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT.0,
-                None,
-                Some(&command_queues),
-                0,
-                Some(&mut d3d11_device as *mut _),
-                Some(&mut d3d11_context as *mut _),
-                None,
-            )
-        }
-        .map_err(|e| {
-            godot_error!(
-                "[AcceleratedOSR/D3D12] D3D11On12CreateDevice failed: {:?}. \
-                 Accelerated OSR requires D3D11on12 (Windows 10+).",
-                e
-            );
-            drop(e);
-        })
-        .ok()?;
-
-        let d3d11_device = d3d11_device
-            .ok_or_else(|| {
-                godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null device");
-                "D3D11 device is null"
-            })
-            .ok()?;
-        let d3d11_context = d3d11_context
-            .ok_or_else(|| {
-                godot_error!("[AcceleratedOSR/D3D12] D3D11On12CreateDevice returned null context");
-                "D3D11 context is null"
-            })
-            .ok()?;
-
-        let d3d11on12_device: ID3D11On12Device = d3d11_device
-            .cast()
-            .map_err(|e| {
-                godot_error!(
-                    "[AcceleratedOSR/D3D12] Failed to query ID3D11On12Device: {:?}",
-                    e
-                );
-                drop(e);
-            })
-            .ok()?;
-
-        godot_print!(
-            "[AcceleratedOSR/D3D12] Using D3D11on12 for CEF texture import (Godot D3D12 device)"
+        .map_err(|e| format!("CreateCommandQueue failed: {e}"))?;
+        let capture_fence = unsafe { device.CreateFence(0, D3D12_FENCE_FLAG_NONE) }
+            .map_err(|e| format!("Create capture fence failed: {e}"))?;
+        let fence_event = FenceEvent(
+            unsafe { CreateEventW(None, false, false, None) }
+                .map_err(|e| format!("Create fence event failed: {e}"))?,
         );
 
-        Some(Self {
-            device: std::mem::ManuallyDrop::new(device),
-            d3d11_device: std::mem::ManuallyDrop::new(d3d11_device),
-            d3d11_context,
-            d3d11on12_device,
-            command_queue,
-            fence,
+        // This matches Godot 4.6's D3D12 feature selection. Enhanced and legacy
+        // COPY_SOURCE are NOT interchangeable: interop requires a COMMON bridge.
+        // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/d3d12/rendering_device_driver_d3d12.cpp#L5574-L5578
+        // https://microsoft.github.io/DirectX-Specs/d3d/D3D12EnhancedBarriers.html#interop-with-legacy-resourcebarrier
+        let mut options = D3D12_FEATURE_DATA_D3D12_OPTIONS12::default();
+        let enhanced = unsafe {
+            device.CheckFeatureSupport(
+                D3D12_FEATURE_D3D12_OPTIONS12,
+                &mut options as *mut _ as *mut c_void,
+                size_of::<D3D12_FEATURE_DATA_D3D12_OPTIONS12>() as u32,
+            )
+        }
+        .is_ok()
+            && options.EnhancedBarriersSupported.as_bool();
+        let enhanced_bridge = if enhanced {
+            Some(EnhancedBridge::new(&device)?)
+        } else {
+            None
+        };
+
+        let copy = NativeCopyList::new(&device)?;
+        godot_print!(
+            "[AcceleratedOSR/D3D12] Synchronous staging capture (enhanced barriers: {})",
+            enhanced
+        );
+        Ok(Self {
+            device,
+            copy,
+            capture_queue,
+            godot_queue,
+            capture_fence,
             fence_value: 0,
             fence_event,
-            device_removed_logged: false,
-            pending_copy: None,
-            imported_resource: None,
-            copy_in_flight: false,
+            enhanced_bridge,
+            diagnostics,
         })
     }
 
-    pub fn check_device_state(&mut self) -> Result<(), String> {
-        let reason = unsafe { self.device.GetDeviceRemovedReason() };
-        if reason.is_ok() {
-            self.device_removed_logged = false;
-            Ok(())
-        } else if !self.device_removed_logged {
-            godot_warn!(
-                "[AcceleratedOSR/D3D12] D3D12 device removed: {:?}",
-                reason.err()
-            );
-            self.device_removed_logged = true;
-            Err("D3D12 device removed".into())
-        } else {
-            Err("D3D12 device removed".into())
-        }
-    }
-
-    pub fn import_shared_handle(
+    pub fn capture(
         &mut self,
-        handle: HANDLE,
-        _width: u32,
-        _height: u32,
-        _format: cef::sys::cef_color_type_t,
-    ) -> Result<ID3D11Texture2D, String> {
-        if handle.is_invalid() {
-            return Err("Shared handle is invalid".into());
-        }
-
-        let d3d11_device1: ID3D11Device1 = self
-            .d3d11_device
-            .clone()
-            .cast()
-            .map_err(|e| format!("Failed to query ID3D11Device1: {:?}", e))?;
-
-        let resource: ID3D11Texture2D =
-            unsafe { d3d11_device1.OpenSharedResource1::<ID3D11Texture2D>(handle) }.map_err(
-                |e| {
-                    if !self.device_removed_logged {
-                        godot_warn!("[AcceleratedOSR/D3D12] OpenSharedResource1 failed: {:?}", e);
-                        self.device_removed_logged = true;
-                    }
-                    format!("OpenSharedResource1 failed: {:?}", e)
-                },
-            )?;
-
-        self.device_removed_logged = false;
-
-        Ok(resource)
-    }
-
-    pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
+        info: &cef::AcceleratedPaintInfo,
+        target: NativeCaptureTarget,
+    ) -> Result<(), String> {
+        self.check_device_state()?;
         let handle = HANDLE(info.shared_texture_handle);
         if handle.is_invalid() {
-            return Err("Source handle is invalid".into());
+            return Err("CEF supplied an invalid shared texture handle".into());
         }
-
-        let width = info.extra.coded_size.width as u32;
-        let height = info.extra.coded_size.height as u32;
-
-        if width == 0 || height == 0 {
-            return Err(format!("Invalid source dimensions: {}x{}", width, height));
+        if info.extra.coded_size.width <= 0
+            || info.extra.coded_size.height <= 0
+            || target.width != info.extra.coded_size.width as u32
+            || target.height != info.extra.coded_size.height as u32
+        {
+            return Err("CEF dimensions do not match the staging slot".into());
         }
+        let expected_color = match target.format {
+            SnapshotFormat::Bgra8 => cef::ColorType::BGRA_8888,
+            SnapshotFormat::Rgba8 => cef::ColorType::RGBA_8888,
+        };
+        if info.format != expected_color {
+            return Err("CEF pixel format does not match the staging slot".into());
+        }
+        // Duplicating a HANDLE would extend handle lifetime, not preserve pixels.
+        let mut source: Option<ID3D12Resource> = None;
+        unsafe { self.device.OpenSharedHandle(handle, &mut source) }
+            .map_err(|e| format!("OpenSharedHandle failed: {e}"))?;
+        let source = source.ok_or("CEF shared handle resolved to a null resource")?;
+        let destination: ID3D12Resource = unsafe { clone_native_interface(target.native_handle) }?;
+        validate_copy_resources(&source, &destination, target)?;
+        let next_value = self
+            .fence_value
+            .checked_add(1)
+            .filter(|value| *value != u64::MAX)
+            .ok_or("D3D12 capture fence timeline exhausted")?;
 
-        // Duplicate the handle so we own it - this is fast and non-blocking
-        let duplicated_handle = duplicate_win32_handle(handle)?;
+        // Finish all fallible recording before submitting anything.
+        if let Some(bridge) = self.enhanced_bridge.as_mut() {
+            bridge.record(&destination)?;
+        }
+        let state = if self.enhanced_bridge.is_some() {
+            D3D12_RESOURCE_STATE_COMMON
+        } else {
+            // RD explicitly transitions initialized staging from COPY_DEST to
+            // COPY_SOURCE: this is not an implicitly promoted/decaying state.
+            D3D12_RESOURCE_STATE_COPY_SOURCE
+        };
+        self.copy.record(&source, &destination, state)?;
 
-        // Replace any existing pending copy (drop the old one, which closes its handle)
-        self.pending_copy = Some(PendingD3D12Copy {
-            duplicated_handle,
-            width,
-            height,
-        });
-
-        Ok(())
+        // The pool exposes this slot only after bootstrap/publication readback:
+        // Godot's _stall_for_frame CPU-waits its queue fence before invoking that
+        // callback. Its prior staging reads (and the initial upload) have thus
+        // completed before this submission. ExecuteCommandLists boundaries make
+        // resource caches coherent, including across DIRECT queues on one device.
+        // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/servers/rendering/rendering_device.cpp
+        // https://microsoft.github.io/DirectX-Specs/d3d/D3D12EnhancedBarriers.html#external-dependencies-and-d3d12_barrier_access_global
+        // Do not replace that per-slot completion with a fresh Godot queue-tail
+        // fence: it would also wait for unrelated work queued after the slot's
+        // last read, including Present, while blocking CEF's UI message pump.
+        self.fence_value = next_value;
+        if let Some(bridge) = &self.enhanced_bridge {
+            bridge.acquire.submit(&self.capture_queue);
+        }
+        self.copy.submit(&self.capture_queue);
+        if let Some(bridge) = &self.enhanced_bridge {
+            bridge.release.submit(&self.capture_queue);
+        }
+        // Retain source until GPU completion or actual device
+        // removal. An ordinary Signal/SetEvent failure cannot end CEF's borrow.
+        let result = self.finish_submitted_capture();
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.poll();
+        }
+        result
     }
 
-    pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
+    /// Run on the render thread before recording RD staging -> display copies.
+    /// CPU completion protects the CEF borrow; the queue wait expresses producer
+    /// visibility to D3D12 and its validation layer.
+    pub fn prepare_publication(&self) -> Result<(), String> {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.poll();
+        }
         self.check_device_state()?;
-
-        let pending = match self.pending_copy.take() {
-            Some(p) => p,
-            None => return Ok(()), // Nothing to do
-        };
-
-        if !dst_rd_rid.is_valid() {
-            return Err("Destination RID is invalid".into());
+        if self.fence_value == 0 {
+            return Err("No completed D3D12 snapshot to publish".into());
         }
-
-        // Wait for any previous in-flight copy to complete before reusing resources
-        if self.copy_in_flight {
-            self.wait_for_copy()?;
-            self.copy_in_flight = false;
-        }
-
-        // Free previous imported resource
-        self.free_imported_resource();
-
-        // Import the resource using our duplicated handle
-        let src_resource = match self.import_shared_handle(
-            pending.duplicated_handle,
-            pending.width,
-            pending.height,
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888,
-        ) {
-            Ok(res) => res,
-            Err(e) => {
-                // pending will be dropped here, closing its handle
-                return Err(e);
-            }
-        };
-
-        // Get destination D3D12 resource from Godot's RenderingDevice
-        let dst_resource = {
-            let rd = RenderingServer::singleton()
-                .get_rendering_device()
-                .ok_or("Failed to get RenderingDevice")?;
-
-            let resource_ptr = rd.get_driver_resource(DriverResource::TEXTURE, dst_rd_rid, 0);
-
-            if resource_ptr == 0 {
-                return Err("Failed to get destination D3D12 resource handle".into());
-            }
-
-            unsafe { ID3D12Resource::from_raw(resource_ptr as *mut c_void) }
-        };
-
-        // Submit copy command (non-blocking)
-        self.submit_copy_async(&src_resource, &dst_resource)?;
-        self.copy_in_flight = true;
-
-        // Don't drop dst_resource - it's owned by Godot
-        std::mem::forget(dst_resource);
-
-        // Store the imported resource (keeps it alive for the GPU operation)
-        // Transfer handle ownership from pending to imported_resource
-        self.imported_resource = Some(ImportedD3D11Resource {
-            duplicated_handle: pending.duplicated_handle,
-        });
-
-        // Prevent pending's Drop from closing the handle (we transferred ownership)
-        std::mem::forget(pending);
-
-        Ok(())
+        unsafe { self.godot_queue.Wait(&self.capture_fence, self.fence_value) }
+            .map_err(|e| format!("Wait for captured snapshot failed: {e}"))
     }
 
-    pub fn wait_for_copy(&mut self) -> Result<(), String> {
-        if !self.copy_in_flight {
-            return Ok(());
-        }
+    fn check_device_state(&self) -> Result<(), String> {
+        unsafe { self.device.GetDeviceRemovedReason() }
+            .map_err(|e| format!("D3D12 device removed: {e}"))
+    }
 
-        if self.fence_value > 0 {
-            let completed = unsafe { self.fence.GetCompletedValue() };
-            if completed < self.fence_value {
-                unsafe {
-                    self.fence
-                        .SetEventOnCompletion(self.fence_value, self.fence_event)
+    fn finish_submitted_capture(&self) -> Result<(), String> {
+        let mut signal_error_logged = false;
+        loop {
+            match unsafe {
+                self.capture_queue
+                    .Signal(&self.capture_fence, self.fence_value)
+            } {
+                Ok(()) => break,
+                Err(error) => {
+                    self.check_device_state()?;
+                    if !signal_error_logged {
+                        godot_warn!(
+                            "[AcceleratedOSR/D3D12] Fence signal failed ({error}); retaining CEF's borrow until completion or device removal"
+                        );
+                        signal_error_logged = true;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
                 }
-                .map_err(|e| format!("Failed to set event on completion: {:?}", e))?;
-                unsafe { WaitForSingleObject(self.fence_event, INFINITE) };
             }
         }
-
-        self.copy_in_flight = false;
-        Ok(())
-    }
-
-    fn submit_copy_async(
-        &mut self,
-        src_resource: &ID3D11Texture2D,
-        dst_resource: &ID3D12Resource,
-    ) -> Result<(), String> {
-        // Wait for previous copy before reusing D3D11 context
-        if self.fence_value > 0 {
-            let completed = unsafe { self.fence.GetCompletedValue() };
-            if completed < self.fence_value {
-                unsafe {
-                    self.fence
-                        .SetEventOnCompletion(self.fence_value, self.fence_event)
+        let mut use_event = unsafe {
+            self.capture_fence
+                .SetEventOnCompletion(self.fence_value, self.fence_event.0)
+        }
+        .is_ok();
+        loop {
+            let completed = unsafe { self.capture_fence.GetCompletedValue() };
+            // UINT64_MAX signals removal; it is never a successful frame.
+            if completed != u64::MAX && completed >= self.fence_value {
+                return self.check_device_state();
+            }
+            self.check_device_state()?;
+            if use_event {
+                if unsafe { WaitForSingleObject(self.fence_event.0, 100) } == WAIT_FAILED {
+                    use_event = false;
                 }
-                .map_err(|e| format!("Failed to set event on completion: {:?}", e))?;
-                unsafe { WaitForSingleObject(self.fence_event, INFINITE) };
+            } else {
+                std::thread::sleep(Duration::from_millis(1));
             }
-        }
-
-        // Wrap Godot's D3D12 texture for D3D11 copy. D3D11on12 handles resource transitions.
-        let flags = D3D11_RESOURCE_FLAGS {
-            BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-            MiscFlags: 0,
-            CPUAccessFlags: 0,
-            StructureByteStride: 0,
-        };
-        let mut wrapped_dst: Option<ID3D11Resource> = None;
-        unsafe {
-            self.d3d11on12_device.CreateWrappedResource(
-                dst_resource,
-                &flags,
-                D3D12_RESOURCE_STATE_COPY_DEST,
-                D3D12_RESOURCE_STATE_COMMON,
-                &mut wrapped_dst,
-            )
-        }
-        .map_err(|e| format!("CreateWrappedResource failed: {:?}", e))?;
-
-        let wrapped_dst = wrapped_dst.ok_or("CreateWrappedResource returned null")?;
-
-        // Copy CEF texture (D3D11) to wrapped Godot texture
-        unsafe {
-            self.d3d11_context.CopyResource(&wrapped_dst, src_resource);
-        }
-
-        // Release wrapped resource - transitions it back to COMMON for Godot
-        unsafe {
-            let resources = [Some(wrapped_dst)];
-            self.d3d11on12_device.ReleaseWrappedResources(&resources);
-        }
-
-        // Flush to submit D3D11on12 work to our command queue
-        unsafe {
-            self.d3d11_context.Flush();
-        }
-
-        self.fence_value += 1;
-        unsafe { self.command_queue.Signal(&self.fence, self.fence_value) }
-            .map_err(|e| format!("Failed to signal fence: {:?}", e))?;
-
-        // NOTE: We do NOT wait here - the caller should call wait_for_copy() when needed
-        Ok(())
-    }
-
-    fn free_imported_resource(&mut self) {
-        if let Some(imported) = self.imported_resource.take() {
-            let _ = unsafe { CloseHandle(imported.duplicated_handle) };
         }
     }
 }
 
-impl Drop for D3D12TextureImporter {
-    fn drop(&mut self) {
-        if self.copy_in_flight {
-            let _ = self.wait_for_copy();
+fn validate_copy_resources(
+    source: &ID3D12Resource,
+    destination: &ID3D12Resource,
+    target: NativeCaptureTarget,
+) -> Result<(), String> {
+    let source_desc = unsafe { source.GetDesc() };
+    let destination_desc = unsafe { destination.GetDesc() };
+    let same_family = |format: DXGI_FORMAT| match target.format {
+        SnapshotFormat::Bgra8 => matches!(
+            format,
+            DXGI_FORMAT_B8G8R8A8_UNORM
+                | DXGI_FORMAT_B8G8R8A8_UNORM_SRGB
+                | DXGI_FORMAT_B8G8R8A8_TYPELESS
+        ),
+        SnapshotFormat::Rgba8 => matches!(
+            format,
+            DXGI_FORMAT_R8G8B8A8_UNORM
+                | DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+                | DXGI_FORMAT_R8G8B8A8_TYPELESS
+        ),
+    };
+    if source_desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D
+        || source_desc.Width != u64::from(target.width)
+        || source_desc.Height != target.height
+        || source_desc.MipLevels != 1
+        || source_desc.DepthOrArraySize != 1
+        || source_desc.SampleDesc.Count != 1
+        || !same_family(source_desc.Format)
+        || destination_desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D
+        || destination_desc.Width != u64::from(target.width)
+        || destination_desc.Height != target.height
+        || destination_desc.MipLevels != 1
+        || destination_desc.DepthOrArraySize != 1
+        || destination_desc.SampleDesc.Count != 1
+        || !same_family(destination_desc.Format)
+        || destination_desc
+            .Flags
+            .contains(D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS)
+    {
+        return Err("Capture requires matching single-subresource RGBA8/BGRA8 textures without simultaneous access".into());
+    }
+    Ok(())
+}
+
+struct NativeCopyList {
+    allocator: ID3D12CommandAllocator,
+    list: ID3D12GraphicsCommandList,
+    submission: ID3D12CommandList,
+}
+
+impl NativeCopyList {
+    fn new(device: &ID3D12Device) -> Result<Self, String> {
+        let allocator = unsafe { device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT) }
+            .map_err(|e| format!("Create copy allocator failed: {e}"))?;
+        let list: ID3D12GraphicsCommandList = unsafe {
+            device.CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, &allocator, None)
         }
+        .map_err(|e| format!("Create copy command list failed: {e}"))?;
+        let submission = list
+            .cast()
+            .map_err(|e| format!("Query copy command list failed: {e}"))?;
+        unsafe { list.Close() }.map_err(|e| format!("Close initial copy list failed: {e}"))?;
+        Ok(Self {
+            allocator,
+            list,
+            submission,
+        })
+    }
 
-        self.pending_copy = None;
-        self.free_imported_resource();
+    fn record(
+        &mut self,
+        source: &ID3D12Resource,
+        destination: &ID3D12Resource,
+        destination_state: D3D12_RESOURCE_STATES,
+    ) -> Result<(), String> {
+        // Previous capture completion protects both allocator and list reuse.
+        unsafe { self.allocator.Reset() }
+            .map_err(|e| format!("Reset copy allocator failed: {e}"))?;
+        unsafe { self.list.Reset(&self.allocator, None) }
+            .map_err(|e| format!("Reset copy list failed: {e}"))?;
+        // This COMMON contract applies to CEF's shared D3D11 source, not Godot's
+        // staging texture. Pinned CEF 154.0.28 requests mappable shared frames;
+        // its Chromium waits for GPU completion before delivering that borrow:
+        // https://github.com/chromiumembedded/cef/blob/564dd6c4aafff558154bd3176eb5d13551db6734/libcef/browser/osr/video_consumer_osr.cc#L43-L49
+        // https://github.com/chromium/chromium/blob/a654841425914cbb703a2931e07b70a83aedbafd/components/viz/service/display_embedder/skia_output_surface_impl_on_gpu.cc#L1063-L1129
+        // Chromium creates the Windows GMB as a shared D3D11 texture. Microsoft's
+        // D3D11On12 shared-resource import starts in COMMON; restore COMMON before
+        // returning the source. The staging state uses its separate RD contract.
+        // https://github.com/chromium/chromium/blob/a654841425914cbb703a2931e07b70a83aedbafd/gpu/command_buffer/service/shared_image/d3d_image_backing_factory.cc#L380-L410
+        // https://github.com/microsoft/D3D11On12/blob/ed0213477e4ed9d6f929122586f6ec348793af16/src/resource.cpp#L349-L354
+        self.transition(
+            source,
+            D3D12_RESOURCE_STATE_COMMON,
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+        );
+        self.transition(
+            destination,
+            destination_state,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+        );
+        unsafe { self.list.CopyResource(destination, source) };
+        self.transition(
+            source,
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+            D3D12_RESOURCE_STATE_COMMON,
+        );
+        self.transition(
+            destination,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            destination_state,
+        );
+        unsafe { self.list.Close() }.map_err(|e| format!("Close copy list failed: {e}"))
+    }
 
-        // d3d11_device is ManuallyDrop — drop before the D3D12 device.
+    fn transition(
+        &self,
+        resource: &ID3D12Resource,
+        before: D3D12_RESOURCE_STATES,
+        after: D3D12_RESOURCE_STATES,
+    ) {
+        let mut barrier = D3D12_RESOURCE_BARRIER {
+            Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+            Anonymous: D3D12_RESOURCE_BARRIER_0 {
+                Transition: ManuallyDrop::new(D3D12_RESOURCE_TRANSITION_BARRIER {
+                    pResource: ManuallyDrop::new(Some(resource.clone())),
+                    Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                    StateBefore: before,
+                    StateAfter: after,
+                }),
+            },
+            ..Default::default()
+        };
         unsafe {
-            std::mem::ManuallyDrop::drop(&mut self.d3d11_device);
-        }
-
-        if !self.fence_event.is_invalid() {
-            let _ = unsafe { CloseHandle(self.fence_event) };
+            self.list.ResourceBarrier(std::slice::from_ref(&barrier));
+            ManuallyDrop::drop(&mut (*barrier.Anonymous.Transition).pResource);
         }
     }
+
+    fn submit(&self, queue: &ID3D12CommandQueue) {
+        unsafe { queue.ExecuteCommandLists(&[Some(self.submission.clone())]) };
+    }
+}
+
+struct EnhancedBridge {
+    acquire: BarrierList,
+    release: BarrierList,
+}
+
+impl EnhancedBridge {
+    fn new(device: &ID3D12Device) -> Result<Self, String> {
+        Ok(Self {
+            acquire: BarrierList::new(device)?,
+            release: BarrierList::new(device)?,
+        })
+    }
+
+    fn record(&mut self, resource: &ID3D12Resource) -> Result<(), String> {
+        self.acquire.record(resource, true)?;
+        self.release.record(resource, false)
+    }
+}
+
+struct BarrierList {
+    allocator: ID3D12CommandAllocator,
+    list: ID3D12GraphicsCommandList7,
+    submission: ID3D12CommandList,
+}
+
+impl BarrierList {
+    fn new(device: &ID3D12Device) -> Result<Self, String> {
+        let allocator = unsafe { device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT) }
+            .map_err(|e| format!("Create barrier allocator failed: {e}"))?;
+        let list: ID3D12GraphicsCommandList7 = unsafe {
+            device.CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, &allocator, None)
+        }
+        .map_err(|e| format!("Create enhanced barrier list failed: {e}"))?;
+        let submission = list
+            .cast()
+            .map_err(|e| format!("Query barrier command list failed: {e}"))?;
+        unsafe { list.Close() }.map_err(|e| format!("Close initial barrier list failed: {e}"))?;
+        Ok(Self {
+            allocator,
+            list,
+            submission,
+        })
+    }
+
+    fn record(&mut self, resource: &ID3D12Resource, acquire: bool) -> Result<(), String> {
+        // Every previous capture completed before either allocator can be reset.
+        // Both lists are recorded before any borrowed-source copy is submitted.
+        unsafe { self.allocator.Reset() }
+            .map_err(|e| format!("Reset barrier allocator failed: {e}"))?;
+        unsafe { self.list.Reset(&self.allocator, None) }
+            .map_err(|e| format!("Reset barrier list failed: {e}"))?;
+        let mut barrier = D3D12_TEXTURE_BARRIER {
+            SyncBefore: D3D12_BARRIER_SYNC_ALL,
+            SyncAfter: D3D12_BARRIER_SYNC_ALL,
+            AccessBefore: if acquire {
+                D3D12_BARRIER_ACCESS_COPY_SOURCE
+            } else {
+                D3D12_BARRIER_ACCESS_COMMON
+            },
+            AccessAfter: if acquire {
+                D3D12_BARRIER_ACCESS_COMMON
+            } else {
+                D3D12_BARRIER_ACCESS_COPY_SOURCE
+            },
+            LayoutBefore: if acquire {
+                D3D12_BARRIER_LAYOUT_COPY_SOURCE
+            } else {
+                D3D12_BARRIER_LAYOUT_COMMON
+            },
+            LayoutAfter: if acquire {
+                D3D12_BARRIER_LAYOUT_COMMON
+            } else {
+                D3D12_BARRIER_LAYOUT_COPY_SOURCE
+            },
+            pResource: ManuallyDrop::new(Some(resource.clone())),
+            Subresources: D3D12_BARRIER_SUBRESOURCE_RANGE {
+                IndexOrFirstMipLevel: u32::MAX,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        unsafe {
+            self.list.Barrier(&[D3D12_BARRIER_GROUP {
+                Type: D3D12_BARRIER_TYPE_TEXTURE,
+                NumBarriers: 1,
+                Anonymous: D3D12_BARRIER_GROUP_0 {
+                    pTextureBarriers: &barrier,
+                },
+            }]);
+            ManuallyDrop::drop(&mut barrier.pResource);
+        }
+        unsafe { self.list.Close() }.map_err(|e| format!("Close barrier list failed: {e}"))
+    }
+
+    fn submit(&self, queue: &ID3D12CommandQueue) {
+        unsafe { queue.ExecuteCommandLists(&[Some(self.submission.clone())]) };
+    }
+}
+
+struct FenceEvent(HANDLE);
+
+impl Drop for FenceEvent {
+    fn drop(&mut self) {
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Only exists when Godot actually created a debug-layer D3D12 device. No layer
+/// or filters are enabled/changed here. Capture errors must be visible even if
+/// the engine binary sends its own debug output only to a debugger.
+struct NativeDebugDiagnostics {
+    queue: ID3D12InfoQueue,
+    callback: Option<(ID3D12InfoQueue1, u32)>,
+    next_message: AtomicU64,
+    discarded_messages: AtomicU64,
+}
+
+impl NativeDebugDiagnostics {
+    fn new(device: &ID3D12Device) -> Option<Self> {
+        let queue = device.cast::<ID3D12InfoQueue>().ok()?;
+        let callback = queue.cast::<ID3D12InfoQueue1>().ok().and_then(|queue| {
+            let mut cookie = 0;
+            unsafe {
+                queue.RegisterMessageCallback(
+                    Some(native_debug_message),
+                    D3D12_MESSAGE_CALLBACK_IGNORE_FILTERS,
+                    std::ptr::null_mut(),
+                    &mut cookie,
+                )
+            }
+            .ok()
+            .map(|()| (queue, cookie))
+        });
+        godot_print!(
+            "[AcceleratedOSR/D3D12] Debug layer confirmed: ID3D12InfoQueue available; diagnostics {}",
+            if callback.is_some() {
+                "callback"
+            } else {
+                "polling"
+            }
+        );
+        Some(Self {
+            queue,
+            callback,
+            next_message: AtomicU64::new(0),
+            discarded_messages: AtomicU64::new(0),
+        })
+    }
+
+    fn poll(&self) {
+        if self.callback.is_some() {
+            return;
+        }
+        let count = unsafe { self.queue.GetNumStoredMessagesAllowedByRetrievalFilter() };
+        let start = self.next_message.swap(count, Ordering::Relaxed);
+        for index in (if start <= count { start } else { 0 })..count {
+            let mut length = 0;
+            if unsafe { self.queue.GetMessage(index, None, &mut length) }.is_err()
+                || length < size_of::<D3D12_MESSAGE>()
+            {
+                continue;
+            }
+            // usize storage provides the alignment required by D3D12_MESSAGE.
+            let mut storage = vec![0usize; length.div_ceil(size_of::<usize>())];
+            let message = storage.as_mut_ptr().cast::<D3D12_MESSAGE>();
+            if unsafe { self.queue.GetMessage(index, Some(message), &mut length) }.is_ok() {
+                let message = unsafe { &*message };
+                unsafe {
+                    native_debug_message(
+                        message.Category,
+                        message.Severity,
+                        message.ID,
+                        PCSTR(message.pDescription),
+                        std::ptr::null_mut(),
+                    );
+                }
+            }
+        }
+        let discarded = unsafe { self.queue.GetNumMessagesDiscardedByMessageCountLimit() };
+        if discarded > self.discarded_messages.swap(discarded, Ordering::Relaxed) {
+            let _ = writeln!(
+                std::io::stderr(),
+                "D3D12 ERROR: debug message queue overflowed; diagnostics are incomplete"
+            );
+        }
+    }
+}
+
+impl Drop for NativeDebugDiagnostics {
+    fn drop(&mut self) {
+        self.poll();
+        if let Some((queue, cookie)) = &self.callback {
+            let _ = unsafe { queue.UnregisterMessageCallback(*cookie) };
+        }
+    }
+}
+
+unsafe extern "system" fn native_debug_message(
+    _category: D3D12_MESSAGE_CATEGORY,
+    severity: D3D12_MESSAGE_SEVERITY,
+    id: D3D12_MESSAGE_ID,
+    description: PCSTR,
+    _context: *mut c_void,
+) {
+    if !matches!(
+        severity,
+        D3D12_MESSAGE_SEVERITY_ERROR | D3D12_MESSAGE_SEVERITY_CORRUPTION
+    ) || description.is_null()
+    {
+        return;
+    }
+    let message = unsafe { CStr::from_ptr(description.as_ptr().cast()) }.to_string_lossy();
+    // Do not call into Godot from a driver callback, and do not panic on an I/O
+    // error across this extern-system boundary. The callback retains no context.
+    let _ = writeln!(std::io::stderr(), "D3D12 ERROR: [{}] {message}", id.0);
+}
+
+fn godot_command_queue(
+    driver_handle: u64,
+    device: &ID3D12Device,
+) -> Result<ID3D12CommandQueue, String> {
+    // Godot 4.6's public COMMAND_QUEUE resource is ID3D12CommandQueue*.
+    // Take our own COM reference and verify it belongs to the logical device.
+    // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/d3d12/rendering_device_driver_d3d12.cpp#L5143-L5146
+    let queue: ID3D12CommandQueue = unsafe { clone_native_interface(driver_handle) }?;
+    let mut queue_device: Option<ID3D12Device> = None;
+    unsafe { queue.GetDevice(&mut queue_device) }
+        .map_err(|error| format!("Get Godot queue device failed: {error}"))?;
+    let queue_device = queue_device.ok_or("Godot queue returned a null device")?;
+    let queue_identity = queue_device
+        .cast::<IUnknown>()
+        .map_err(|error| format!("Query Godot queue device identity failed: {error}"))?;
+    let device_identity = device
+        .cast::<IUnknown>()
+        .map_err(|error| format!("Query Godot logical device identity failed: {error}"))?;
+    if queue_identity != device_identity {
+        return Err("Godot's D3D12 queue belongs to a different logical device".into());
+    }
+    Ok(queue)
+}
+
+/// # Safety
+/// The pointer must be a live COM interface of type T, borrowed from Godot.
+unsafe fn clone_native_interface<T: Interface>(pointer: u64) -> Result<T, String> {
+    let pointer = pointer as *mut c_void;
+    unsafe { T::from_raw_borrowed(&pointer) }
+        .cloned()
+        .ok_or_else(|| "Godot returned a null native D3D12 interface".into())
 }
 
 /// Get the GPU vendor and device IDs from Godot's D3D12 device.
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     let rd = RenderingServer::singleton().get_rendering_device()?;
     let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
-
-    if device_ptr == 0 {
-        godot_warn!("[AcceleratedOSR/D3D12] Failed to get D3D12 device for GPU ID query");
-        return None;
-    }
-
-    let device: ID3D12Device = unsafe { ID3D12Device::from_raw(device_ptr as *mut c_void) };
+    let device: ID3D12Device = unsafe { clone_native_interface(device_ptr) }.ok()?;
     let target_luid: LUID = unsafe { device.GetAdapterLuid() };
-
-    // Device is from Godot, we don't need to close it
-    std::mem::forget(device);
-
-    // Use the original DXGI factory (available since Windows Vista) for maximum compatibility
     let factory: IDXGIFactory = unsafe { CreateDXGIFactory() }.ok()?;
-
     let mut adapter_index = 0u32;
-    loop {
-        let adapter: IDXGIAdapter = match unsafe { factory.EnumAdapters(adapter_index) } {
-            Ok(a) => a,
-            Err(_) => break, // No more adapters
+    while let Ok(adapter) = unsafe { factory.EnumAdapters(adapter_index) } {
+        let adapter: IDXGIAdapter = adapter;
+        adapter_index += 1;
+        let Ok(desc) = (unsafe { adapter.GetDesc() }) else {
+            continue;
         };
-
-        let desc = match unsafe { adapter.GetDesc() } {
-            Ok(d) => d,
-            Err(_) => {
-                adapter_index += 1;
-                continue;
-            }
-        };
-
         if desc.AdapterLuid.HighPart == target_luid.HighPart
             && desc.AdapterLuid.LowPart == target_luid.LowPart
         {
-            let name = String::from_utf16_lossy(&desc.Description)
-                .trim_end_matches('\0')
-                .to_string();
-            godot_print!(
-                "[AcceleratedOSR/D3D12] Godot GPU: vendor=0x{:04x}, device=0x{:04x}, name={}",
-                desc.VendorId,
-                desc.DeviceId,
-                name
-            );
             return Some((desc.VendorId, desc.DeviceId));
         }
-
-        adapter_index += 1;
     }
-
-    godot_warn!("[AcceleratedOSR/D3D12] Could not find adapter matching LUID");
     None
 }
 
+// Native context/allocator access is serialized by the containing importer
+// mutex; capture completes its GPU work before releasing that mutex.
 unsafe impl Send for D3D12TextureImporter {}
 unsafe impl Sync for D3D12TextureImporter {}

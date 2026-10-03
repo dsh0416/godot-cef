@@ -234,6 +234,13 @@ impl CefTexture {
 
     fn emit_loading_state_signals(&mut self, events: &VecDeque<LoadingStateEvent>) {
         for event in events {
+            // Main-frame navigation can replace Chromium's focused render
+            // widget without changing Godot's focus owner. A cached `true`
+            // would then suppress SetFocus and native select popups never open.
+            // Reapply the current owner at commit and completion, including
+            // redirects; an unfocused/hidden control still sends `false`.
+            self.focus_state.invalidate_host_focus();
+            self.reconcile_browser_focus();
             match event {
                 LoadingStateEvent::Started { url } => {
                     emit_signal_variants!(self, "load_started", GString::from(url));

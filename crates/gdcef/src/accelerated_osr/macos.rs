@@ -1,8 +1,17 @@
-use super::RenderBackend;
+//! Metal snapshot capture on Godot's own command queue.
+//!
+//! Godot 4.6 creates RD textures with MTLResourceHazardTrackingModeTracked:
+//! <https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/drivers/metal/rendering_device_driver_metal.mm#L312-L327>
+//! Using that same thread-safe MTLCommandQueue lets Metal track dependencies
+//! across our blit and Godot's command buffers. The pool separately guarantees
+//! the target has no outstanding readers. waitUntilCompleted ends CEF's lease
+//! before returning; retaining an IOSurface alone would not preserve its pixels.
+
+use super::{NativeCaptureTarget, SnapshotFormat};
 use cef::AcceleratedPaintInfo;
 use godot::classes::RenderingServer;
 use godot::classes::rendering_device::DriverResource;
-use godot::global::{godot_error, godot_print, godot_warn};
+use godot::global::{godot_error, godot_print};
 use godot::prelude::*;
 use objc2::encode::{Encode, Encoding};
 use objc2::msg_send;
@@ -14,26 +23,9 @@ use objc2_metal::{
 };
 use std::ffi::c_void;
 
-pub struct PendingMetalCopy {
-    io_surface: *mut c_void,
-    width: u32,
-    height: u32,
-    format: cef::sys::cef_color_type_t,
-}
-
-impl Drop for PendingMetalCopy {
-    fn drop(&mut self) {
-        if !self.io_surface.is_null() {
-            unsafe { CFRelease(self.io_surface) };
-        }
-    }
-}
-
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
-    fn CFRetain(cf: *mut c_void) -> *mut c_void;
     fn CFRelease(cf: *mut c_void);
-
     fn CFStringCreateWithCString(
         alloc: *const c_void,
         cStr: *const i8,
@@ -43,300 +35,127 @@ unsafe extern "C" {
     fn CFDataGetBytePtr(theData: *const c_void) -> *const u8;
 }
 
-/// Wrapper type for IOSurfaceRef with correct Objective-C type encoding.
-/// Metal's `newTextureWithDescriptor:iosurface:plane:` expects `^{__IOSurface=}` encoding.
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 struct IOSurfaceRef(*mut c_void);
-
 unsafe impl Encode for IOSurfaceRef {
     const ENCODING: Encoding = Encoding::Pointer(&Encoding::Struct("__IOSurface", &[]));
 }
-
 #[link(name = "IOSurface", kind = "framework")]
 unsafe extern "C" {
     fn IOSurfaceGetWidth(buffer: *mut c_void) -> usize;
     fn IOSurfaceGetHeight(buffer: *mut c_void) -> usize;
 }
 
-pub struct NativeTextureImporter {
+pub struct GodotTextureImporter {
     device: Retained<AnyObject>,
     command_queue: Retained<AnyObject>,
 }
 
-impl NativeTextureImporter {
-    pub fn new() -> Option<Self> {
-        let rs = RenderingServer::singleton().get_rendering_device()?;
-
-        let mtl_device_ptr =
-            rs.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
-
-        if mtl_device_ptr == 0 {
-            return None;
-        }
-
-        let device: Retained<AnyObject> = unsafe {
-            let device_ptr = mtl_device_ptr as *mut AnyObject;
-            Retained::retain(device_ptr)?
-        };
-
-        let command_queue: Option<Retained<AnyObject>> =
-            unsafe { msg_send![&*device, newCommandQueue] };
-
-        let command_queue = match command_queue {
-            Some(cq) => cq,
-            None => {
-                godot_warn!(
-                    "Failed to create Metal command queue via newCommandQueue (returned nil)"
-                );
-                return None;
-            }
-        };
-        Some(Self {
+impl GodotTextureImporter {
+    /// Rendering thread only. Retain native objects, never claim ownership of a
+    /// borrowed Godot reference. MTLCommandQueue itself supports concurrent use.
+    pub fn new() -> Result<Self, String> {
+        let rd = RenderingServer::singleton()
+            .get_rendering_device()
+            .ok_or("Metal RenderingDevice unavailable")?;
+        let device_ptr = rd.get_driver_resource(DriverResource::LOGICAL_DEVICE, Rid::Invalid, 0);
+        let queue_ptr = rd.get_driver_resource(DriverResource::COMMAND_QUEUE, Rid::Invalid, 0);
+        let device = unsafe { Retained::retain(device_ptr as *mut AnyObject) }
+            .ok_or("Godot did not expose its Metal device")?;
+        let command_queue = unsafe { Retained::retain(queue_ptr as *mut AnyObject) }
+            .ok_or("Godot did not expose its Metal command queue")?;
+        Ok(Self {
             device,
             command_queue,
         })
     }
 
-    /// Copies from a source Metal texture to a destination Metal texture using blit encoder.
-    pub fn copy_texture(
-        &self,
-        src_texture: &AnyObject,
-        dst_texture: &AnyObject,
-        width: u32,
-        height: u32,
+    pub fn capture(
+        &mut self,
+        info: &AcceleratedPaintInfo,
+        target: NativeCaptureTarget,
     ) -> Result<(), String> {
-        let src_origin = MTLOrigin { x: 0, y: 0, z: 0 };
-        let src_size = MTLSize {
-            width: width as usize,
-            height: height as usize,
-            depth: 1,
-        };
-        let dst_origin = MTLOrigin { x: 0, y: 0, z: 0 };
-
-        unsafe {
-            let command_buffer_opt: Option<Retained<AnyObject>> =
-                msg_send![&*self.command_queue, commandBuffer];
-            let command_buffer = match command_buffer_opt {
-                Some(cb) => cb,
-                None => return Err("Failed to create Metal command buffer".to_string()),
-            };
-            let blit_encoder_opt: Option<Retained<AnyObject>> =
-                msg_send![&*command_buffer, blitCommandEncoder];
-            let blit_encoder = match blit_encoder_opt {
-                Some(be) => be,
-                None => return Err("Failed to create Metal blit command encoder".to_string()),
-            };
-
-            let _: () = msg_send![
-                &*blit_encoder,
-                copyFromTexture: src_texture,
-                sourceSlice: 0usize,
-                sourceLevel: 0usize,
-                sourceOrigin: src_origin,
-                sourceSize: src_size,
-                toTexture: dst_texture,
-                destinationSlice: 0usize,
-                destinationLevel: 0usize,
-                destinationOrigin: dst_origin
-            ];
-
-            let _: () = msg_send![&*blit_encoder, endEncoding];
-            let _: () = msg_send![&*command_buffer, commit];
-            let _: () = msg_send![&*command_buffer, waitUntilCompleted];
+        let surface = info.shared_texture_io_surface;
+        if surface.is_null() || target.native_handle == 0 || target.width == 0 || target.height == 0
+        {
+            return Err("Invalid Metal capture source or target".into());
         }
-
-        Ok(())
-    }
-
-    pub fn import_io_surface(
-        &self,
-        io_surface: *mut c_void,
-        width: u32,
-        height: u32,
-        format: cef::sys::cef_color_type_t,
-    ) -> Result<Retained<AnyObject>, String> {
-        if io_surface.is_null() {
-            return Err("IOSurface is null".into());
+        if SnapshotFormat::from_cef(info)? != target.format {
+            return Err("Metal snapshot format does not match CEF's frame".into());
         }
-        if width == 0 || height == 0 {
-            return Err(format!("Invalid dimensions: {}x{}", width, height));
+        let (width, height) = unsafe { (IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface)) };
+        if width < target.width as usize || height < target.height as usize {
+            return Err("CEF IOSurface is smaller than its coded frame dimensions".into());
         }
-
-        let (ios_width, ios_height) = unsafe {
-            (
-                IOSurfaceGetWidth(io_surface),
-                IOSurfaceGetHeight(io_surface),
-            )
-        };
-        if ios_width != width as usize || ios_height != height as usize {
-            godot_warn!(
-                "[AcceleratedOSR/macOS] Dimension mismatch: IOSurface {}x{}, expected {}x{}",
-                ios_width,
-                ios_height,
-                width,
-                height
+        let destination = unsafe { Retained::retain(target.native_handle as *mut AnyObject) }
+            .ok_or("Metal snapshot texture is null")?;
+        // Automatic hazard tracking is only guaranteed for tracked resources on
+        // one queue. Check it instead of relying on future engine defaults.
+        let tracked: usize = unsafe { msg_send![&*destination, hazardTrackingMode] };
+        let target_width: usize = unsafe { msg_send![&*destination, width] };
+        let target_height: usize = unsafe { msg_send![&*destination, height] };
+        if tracked != 2
+            || target_width != target.width as usize
+            || target_height != target.height as usize
+        {
+            return Err(
+                "Metal snapshot requires a tracked texture with matching dimensions".into(),
             );
         }
-
-        // Using sRGB formats to ensure correct gamma handling for web content
-        let mtl_pixel_format = match format {
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => MTLPixelFormat::RGBA8Unorm_sRGB,
-            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888 => MTLPixelFormat::BGRA8Unorm_sRGB,
-            _ => MTLPixelFormat::BGRA8Unorm_sRGB,
-        };
-
         unsafe {
             let desc = MTLTextureDescriptor::new();
-            desc.setWidth(width as usize);
-            desc.setHeight(height as usize);
+            desc.setWidth(width);
+            desc.setHeight(height);
             desc.setTextureType(MTLTextureType::Type2D);
-            desc.setPixelFormat(mtl_pixel_format);
+            desc.setPixelFormat(match target.format {
+                SnapshotFormat::Bgra8 => MTLPixelFormat::BGRA8Unorm_sRGB,
+                SnapshotFormat::Rgba8 => MTLPixelFormat::RGBA8Unorm_sRGB,
+            });
             desc.setUsage(MTLTextureUsage::ShaderRead);
             desc.setStorageMode(MTLStorageMode::Shared);
-
-            let io_surface_ref = IOSurfaceRef(io_surface);
-            let texture: Option<Retained<AnyObject>> = msg_send![
-                &*self.device,
-                newTextureWithDescriptor: &*desc,
-                iosurface: io_surface_ref,
-                plane: 0usize
-            ];
-
-            texture.ok_or_else(|| "Metal texture creation failed".to_string())
-        }
-    }
-}
-
-pub struct GodotTextureImporter {
-    metal_importer: NativeTextureImporter,
-    current_metal_texture: Option<Retained<AnyObject>>,
-    current_texture_rid: Option<Rid>,
-    pending_copy: Option<PendingMetalCopy>,
-}
-
-impl GodotTextureImporter {
-    pub fn new() -> Option<Self> {
-        let metal_importer = NativeTextureImporter::new()?;
-        let render_backend = RenderBackend::detect();
-
-        if !render_backend.supports_accelerated_osr() {
-            godot_warn!(
-                "[AcceleratedOSR/macOS] Render backend {:?} does not support accelerated OSR. \
-                 Metal backend is required on macOS.",
-                render_backend
-            );
-            return None;
-        }
-
-        Some(Self {
-            metal_importer,
-            current_metal_texture: None,
-            current_texture_rid: None,
-            pending_copy: None,
-        })
-    }
-
-    pub fn queue_copy(&mut self, info: &AcceleratedPaintInfo) -> Result<(), String> {
-        let io_surface = info.shared_texture_io_surface;
-        if io_surface.is_null() {
-            return Err("Source IOSurface is null".into());
-        }
-
-        let width = info.extra.coded_size.width as u32;
-        let height = info.extra.coded_size.height as u32;
-
-        if width == 0 || height == 0 {
-            return Err(format!("Invalid source dimensions: {}x{}", width, height));
-        }
-
-        // Retain the IOSurface to extend its lifetime beyond the callback
-        let retained_surface = unsafe { CFRetain(io_surface) };
-
-        // Replace any existing pending copy (drop the old one, which releases its IOSurface)
-        self.pending_copy = Some(PendingMetalCopy {
-            io_surface: retained_surface,
-            width,
-            height,
-            format: *info.format.as_ref(),
-        });
-
-        Ok(())
-    }
-
-    pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
-        let pending = match self.pending_copy.take() {
-            Some(p) => p,
-            None => return Ok(()), // Nothing to do
-        };
-
-        if !dst_rd_rid.is_valid() {
-            return Err("Destination RID is invalid".into());
-        }
-
-        // Create Metal texture from IOSurface (source)
-        let src_metal_texture = self.metal_importer.import_io_surface(
-            pending.io_surface,
-            pending.width,
-            pending.height,
-            pending.format,
-        )?;
-
-        // Get destination Metal texture from Godot's RenderingDevice
-        let dst_texture_ptr = {
-            let rd = RenderingServer::singleton()
-                .get_rendering_device()
-                .ok_or("Failed to get RenderingDevice")?;
-
-            let texture_ptr = rd.get_driver_resource(DriverResource::TEXTURE, dst_rd_rid, 0);
-
-            if texture_ptr == 0 {
-                return Err("Failed to get destination Metal texture handle".into());
+            let _: () = msg_send![&*desc, setHazardTrackingMode: 2usize];
+            let source: Option<Retained<AnyObject>> = msg_send![&*self.device,
+                newTextureWithDescriptor: &*desc, iosurface: IOSurfaceRef(surface), plane: 0usize];
+            let source = source.ok_or("Cannot open CEF IOSurface as a Metal texture")?;
+            let command: Option<Retained<AnyObject>> =
+                msg_send![&*self.command_queue, commandBuffer];
+            let command = command.ok_or("Cannot allocate Metal capture command buffer")?;
+            let blit: Option<Retained<AnyObject>> = msg_send![&*command, blitCommandEncoder];
+            let blit = blit.ok_or("Cannot allocate Metal capture blit encoder")?;
+            let origin = MTLOrigin { x: 0, y: 0, z: 0 };
+            let size = MTLSize {
+                width: target.width as usize,
+                height: target.height as usize,
+                depth: 1,
+            };
+            let _: () = msg_send![&*blit,
+                copyFromTexture: &*source, sourceSlice: 0usize, sourceLevel: 0usize,
+                sourceOrigin: origin, sourceSize: size,
+                toTexture: &*destination, destinationSlice: 0usize, destinationLevel: 0usize,
+                destinationOrigin: origin];
+            let _: () = msg_send![&*blit, endEncoding];
+            let _: () = msg_send![&*command, commit];
+            // No timeout or error return can release the borrowed frame before
+            // the command reaches a terminal state. Keep both textures alive.
+            let _: () = msg_send![&*command, waitUntilCompleted];
+            let status: usize = msg_send![&*command, status];
+            if status != 4 {
+                return Err(format!(
+                    "Metal capture completed with command status {status}"
+                ));
             }
-
-            texture_ptr as *mut AnyObject
-        };
-
-        // Ensure the destination pointer is suitably aligned for AnyObject before dereferencing.
-        let required_align = std::mem::align_of::<AnyObject>();
-        if !(dst_texture_ptr as usize).is_multiple_of(required_align) {
-            return Err("Destination Metal texture handle is misaligned for AnyObject".into());
         }
-
-        let dst_texture_ref = unsafe { &*dst_texture_ptr };
-
-        self.metal_importer.copy_texture(
-            &src_metal_texture,
-            dst_texture_ref,
-            pending.width,
-            pending.height,
-        )?;
-
-        // pending is dropped here, which releases the IOSurface
         Ok(())
     }
 
-    pub fn wait_for_copy(&mut self) -> Result<(), String> {
+    pub fn prepare_publication(&self) -> Result<(), String> {
+        // Capture has completed on the very queue that will consume staging.
+        // Tracked-resource dependencies provide Metal visibility; no external
+        // queue handoff or texture layout transition is involved.
         Ok(())
     }
 }
-
-impl Drop for GodotTextureImporter {
-    fn drop(&mut self) {
-        self.pending_copy = None;
-
-        let mut rs = RenderingServer::singleton();
-        if let Some(rid) = self.current_texture_rid.take() {
-            rs.free_rid(rid);
-        }
-        self.current_metal_texture.take();
-    }
-}
-
-pub fn is_supported() -> bool {
-    NativeTextureImporter::new().is_some() && RenderBackend::detect().supports_accelerated_osr()
-}
-
 // IOKit types and functions for querying GPU registry properties
 type IORegistryEntryID = u64;
 type IOReturn = i32;

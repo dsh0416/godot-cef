@@ -2,7 +2,7 @@
 
 # Godot CEF
 
-A high-performance Chromium Embedded Framework (CEF) integration for Godot Engine 4.5+, written in Rust. Render web content directly inside your Godot games and applications with full support for modern web standards, JavaScript, HTML5, and CSS3.
+A high-performance Chromium Embedded Framework (CEF) integration for Godot Engine 4.6+, written in Rust. Render web content directly inside your Godot games and applications with full support for modern web standards, JavaScript, HTML5, and CSS3.
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/build.yml?label=Build)](https://github.com/dsh0416/godot-cef/actions/workflows/build.yml)
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/test.yml?label=Test)](https://github.com/dsh0416/godot-cef/actions/workflows/test.yml)
@@ -110,7 +110,7 @@ package names, local packaging commands and source-build instructions.
 <details>
 <summary><strong>Platform Notes</strong></summary>
 
-1. **Windows DirectX 12**: Requires at least Godot 4.6 beta 2. Godot 4.5.1 contains a bug where `RenderingDevice.get_driver_resource` on DirectX 12 textures always returns 0.
+1. **Windows DirectX 12**: Uses the native texture and command queue exposed by Godot 4.6+. See [Accelerated frame handoff](https://godotcef.org/api/accelerated-handoff.html).
 
 2. **Vulkan Backends**: See [#4](https://github.com/dsh0416/godot-cef/issues/4) for details. On Windows and Linux, we use hooking to inject extensions for GPU-accelerated rendering (x86_64 only). This is a workaround until [godotengine/godot-proposals#13969](https://github.com/godotengine/godot-proposals/issues/13969) is resolved. On Linux with NVIDIA proprietary drivers, DMA-BUF acceleration requires the `nvidia-drm.modeset=1` kernel parameter; see the [Vulkan support guide](https://godotcef.org/api/vulkan-support.html#linux-nvidia-driver-requirement) for GRUB setup steps.
 
@@ -180,7 +180,7 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 
 ### Quick Build Steps
 
-1. **Install prerequisites**: [mise](https://mise.jdx.dev/) and Godot 4.5+
+1. **Install prerequisites**: [mise](https://mise.jdx.dev/) and Godot 4.6+
 
 2. **Install the project toolchain**:
    ```bash

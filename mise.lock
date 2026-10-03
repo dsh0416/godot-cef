@@ -61,17 +61,17 @@ backend = "cargo:export-cef-dir"
 specifiers = ["154.3.0"]
 
 [[tools.godot]]
-version = "4.5-stable"
+version = "4.6-stable"
 backend = "github:godotengine/godot"
-specifiers = ["4.5-stable"]
+specifiers = ["4.6-stable"]
 
 [tools.godot.options]
 matching_regex = '^Godot_v[^_]+_(linux\.|macos\.|win64|windows_arm64)'
 
 [tools.godot."platforms.linux-arm64"]
-checksum = "sha256:f9f167c0a19cc84385b508c12bd0e7a290dd21a639bce2ed6dcf4647af796589"
-url = "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_linux.arm64.zip"
-url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/293572311"
+checksum = "sha256:6c4bcb78a760f4b3bd958d0ca92496b0d5929540a0d29b0f315087a96226714a"
+url = "https://github.com/godotengine/godot/releases/download/4.6-stable/Godot_v4.6-stable_linux.arm64.zip"
+url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/346104791"
 
 [tools.godot."platforms.linux-arm64-musl"]
 checksum = "sha256:f9f167c0a19cc84385b508c12bd0e7a290dd21a639bce2ed6dcf4647af796589"
@@ -79,9 +79,9 @@ url = "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v
 url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/293572311"
 
 [tools.godot."platforms.linux-x64"]
-checksum = "sha256:c7316e1fd782ad276a4d985a7673b5976eaaa8d90561a2bea5289210dc53e9ba"
-url = "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip"
-url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/293572485"
+checksum = "sha256:6bcc59dfd1d670e918c77eae06e82b9dc5699de13d353dc3a4b3b6b307b6dc06"
+url = "https://github.com/godotengine/godot/releases/download/4.6-stable/Godot_v4.6-stable_linux.x86_64.zip"
+url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/346104933"
 
 [tools.godot."platforms.linux-x64-musl"]
 checksum = "sha256:c7316e1fd782ad276a4d985a7673b5976eaaa8d90561a2bea5289210dc53e9ba"
@@ -89,24 +89,24 @@ url = "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v
 url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/293572485"
 
 [tools.godot."platforms.macos-arm64"]
-checksum = "sha256:abb7cabe99fead0bd63ce03bd8c611734b2941f9b90051e8e3b5c6691527954d"
-url = "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_macos.universal.zip"
-url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/293572605"
+checksum = "sha256:fc15ceb6280420f117ab4ef62332654db0088078faeeb9025dd814276185ed3b"
+url = "https://github.com/godotengine/godot/releases/download/4.6-stable/Godot_v4.6-stable_macos.universal.zip"
+url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/346105092"
 
 [tools.godot."platforms.macos-x64"]
-checksum = "sha256:abb7cabe99fead0bd63ce03bd8c611734b2941f9b90051e8e3b5c6691527954d"
-url = "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_macos.universal.zip"
-url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/293572605"
+checksum = "sha256:fc15ceb6280420f117ab4ef62332654db0088078faeeb9025dd814276185ed3b"
+url = "https://github.com/godotengine/godot/releases/download/4.6-stable/Godot_v4.6-stable_macos.universal.zip"
+url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/346105092"
 
 [tools.godot."platforms.windows-arm64"]
-checksum = "sha256:6723b99f5b8b7aff5be5ca21e641d3e685a3182a2954b6b9658e80bf55ca113e"
-url = "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_windows_arm64.exe.zip"
-url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/293572907"
+checksum = "sha256:b726f40bd6014068ec3f9d3a8e0b10b574636c38d1b421a187776b7d63b3b7d8"
+url = "https://github.com/godotengine/godot/releases/download/4.6-stable/Godot_v4.6-stable_windows_arm64.exe.zip"
+url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/346105494"
 
 [tools.godot."platforms.windows-x64"]
-checksum = "sha256:303206071cb8be502cfa5b1e2b37b848c280347c03f78dcc2eb8a630857f7d10"
-url = "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_win64.exe.zip"
-url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/293572811"
+checksum = "sha256:5c9177625c0dca18c92ba6328203c7b5a9596c85ef9d7c968396f0272d8f10d9"
+url = "https://github.com/godotengine/godot/releases/download/4.6-stable/Godot_v4.6-stable_win64.exe.zip"
+url_api = "https://api.github.com/repos/godotengine/godot/releases/assets/346105301"
 
 [[tools.node]]
 version = "26.10.0"

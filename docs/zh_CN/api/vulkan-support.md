@@ -31,6 +31,10 @@ CEF 中的 GPU 加速离屏渲染（OSR）需要在 CEF 渲染器进程和宿主
 4. 修改后的请求传递给真正的 `vkCreateDevice` 函数
 5. Godot 现在拥有启用了外部内存支持的 Vulkan 设备
 
+队列钩子同时覆盖两个 Vulkan 函数解析入口与加载器导出，按实际队列串行化 CPU 提交，
+包括 Godot 后台传输工作。加速初始化前会校验设备和队列来源。
+GPU 屏障与完成条件见[加速帧交接](./accelerated-handoff)。
+
 ### 平台特定扩展
 
 **Windows：**
@@ -45,6 +49,9 @@ CEF 中的 GPU 加速离屏渲染（OSR）需要在 CEF 渲染器进程和宿主
 - `VK_KHR_external_memory` — 外部内存基础扩展
 - `VK_KHR_external_memory_fd` — 基于文件描述符的共享
 - `VK_EXT_external_memory_dma_buf` — DMA-BUF 共享用于零拷贝传输
+- `VK_EXT_image_drm_format_modifier` — 生产者图像布局
+- `VK_EXT_queue_family_foreign` — 外部生产者所有权
+- `VK_KHR_external_semaphore_fd` — 生产者 sync-file 导入
 
 ### Linux NVIDIA 驱动要求
 

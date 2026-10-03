@@ -100,6 +100,7 @@ impl CefTexture2D {
                 .unwrap_or(Rid::Invalid);
             stable.set_texture_rd_rid(dst_rd_rid);
             *texture_2d_rd = stable.clone();
+            self.popup_compositor = Some(popup_compositor::PopupCompositor::new(stable.get_rid()));
         }
         self.base_mut().emit_changed();
     }
@@ -110,12 +111,11 @@ impl CefTexture2D {
         self.cancel_active_touches();
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
+            if let Some(compositor) = self.popup_compositor.take() {
+                compositor.dispose();
+            }
             if let Some(ref mut stable) = self.stable_texture_2d_rd {
                 stable.set_texture_rd_rid(Rid::Invalid);
-            }
-            if self.placeholder_rd_rid.is_valid() {
-                render::free_rd_texture(self.placeholder_rd_rid);
-                self.placeholder_rd_rid = Rid::Invalid;
             }
         }
         self.runtime.cleanup_runtime(None);
@@ -168,7 +168,7 @@ impl CefTexture2D {
         // Headless Godot does not emit frame_pre_draw. Browser lifecycle and
         // callbacks must also progress without drawing when minimized or with
         // the render loop disabled. Software frames can be produced here;
-        // accelerated frames stay ordered after their copy on frame_pre_draw.
+        // accelerated begin requests follow publication on frame_pre_draw.
         if self
             .runtime
             .app()

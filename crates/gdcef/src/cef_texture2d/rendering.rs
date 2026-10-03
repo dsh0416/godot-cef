@@ -68,9 +68,62 @@ impl CefTexture2D {
         }
 
         let _ = replacement;
-        let should_emit_changed = software_had_dirty || has_replacement || had_pending_copy;
+        let popup_changed = self.update_popup_composition();
+        let should_emit_changed =
+            software_had_dirty || has_replacement || had_pending_copy || popup_changed;
         if should_emit_changed {
             self.base_mut().emit_changed();
         }
+        backend::queue_texture_publication(self.runtime.app());
+    }
+
+    fn update_popup_composition(&mut self) -> bool {
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+        {
+            let Some(compositor) = self.popup_compositor.as_mut() else {
+                return false;
+            };
+            let Some(state) = self.runtime.app().state.as_ref() else {
+                return false;
+            };
+            let RenderMode::Accelerated { render_state, .. } = &state.render_mode else {
+                return false;
+            };
+            let popup_position = state.popup_state.lock().ok().and_then(|popup| {
+                popup
+                    .visible
+                    .then_some(Vector2::new(popup.rect.x as f32, popup.rect.y as f32))
+            });
+            let Ok(mut render) = render_state.lock() else {
+                return false;
+            };
+            let popup = if let Some(position) = popup_position {
+                render
+                    .popup_rd_rid
+                    .filter(|_| render.popup_has_content)
+                    .map(|rid| {
+                        let rect = Rect2::new(
+                            position * crate::utils::get_display_scale_factor(),
+                            Vector2::new(render.popup_width as f32, render.popup_height as f32),
+                        );
+                        (rid, rect)
+                    })
+            } else {
+                render.popup_has_content = false;
+                None
+            };
+            let size = Vector2i::new(render.dst_width as i32, render.dst_height as i32);
+            drop(render);
+            // RenderingServer getters can synchronize with its worker. Never
+            // hold the state mutex while issuing canvas/viewport commands.
+            let changed = compositor.update(size, popup);
+            // Canvas commands and wrapper rebinding are queued before retirement.
+            if let Ok(mut render) = render_state.lock() {
+                render.acknowledge_popup(popup.map_or(Rid::Invalid, |(rid, _)| rid));
+            }
+            changed
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        false
     }
 }

@@ -1,7 +1,7 @@
 # Godot headless integration tests
 
 This suite loads the production addon and a separate Rust test GDExtension into
-an official Godot 4.5 runtime. The test addon starts from the engine main loop
+an official Godot 4.6 runtime. The test addon starts from the engine main loop
 only when `GDCEF_ITEST=1`; the project contains an empty scene and no GDScript
 test logic. Production classes are exercised through their registered Godot
 API, without linking another copy of `gdcef` into the test addon.

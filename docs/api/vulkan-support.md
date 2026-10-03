@@ -32,6 +32,11 @@ Since Godot doesn't provide an API to request additional Vulkan extensions durin
 4. The modified request is passed to the real `vkCreateDevice` function
 5. Godot now has a Vulkan device with external memory support enabled
 
+Queue interception also covers both Vulkan function resolvers and loader exports.
+It serializes host submissions per actual queue, including Godot's background
+transfer work, and verifies device/queue provenance before accelerated startup.
+See [Accelerated frame handoff](./accelerated-handoff) for GPU barriers and completion.
+
 ### Platform-Specific Extensions
 
 **Windows:**
@@ -46,6 +51,9 @@ Since Godot doesn't provide an API to request additional Vulkan extensions durin
 - `VK_KHR_external_memory` — Base extension for external memory
 - `VK_KHR_external_memory_fd` — File descriptor based sharing
 - `VK_EXT_external_memory_dma_buf` — DMA-BUF sharing for zero-copy transfers
+- `VK_EXT_image_drm_format_modifier` — Producer image layout
+- `VK_EXT_queue_family_foreign` — External producer ownership
+- `VK_KHR_external_semaphore_fd` — Producer sync-file import
 
 ### Linux NVIDIA Driver Requirement
 

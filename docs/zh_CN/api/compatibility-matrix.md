@@ -1,11 +1,13 @@
 # 兼容性矩阵
 
-该矩阵用于总结不同平台与渲染后端下，Godot CEF 的预期渲染行为。
+该矩阵列出 GPU 加速 OSR 支持的平台与渲染后端组合。
 
 本页包含完整 GitHub Release 包支持的架构。精简的 Asset Store 包不含 Windows/Linux ARM64；
 需要这些架构时请选择完整包。详见[分发版本](./distribution-variants)。
 
 ## 版本基线
+
+要求 Godot 4.6 或更高版本。
 
 CEF 运行时版本由 `Cargo.lock` 中 Rust `cef` / `cef-dll-sys` crate 的构建元数据确定。按[开发环境配置](https://github.com/dsh0416/godot-cef/blob/main/CONTRIBUTING.md#development-setup)安装并激活项目工具链后，在仓库根目录提取该版本，用于手动安装 CEF 二进制文件：
 
@@ -17,20 +19,14 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 
 这样可以确保下载的运行时文件与 Rust 绑定保持一致。
 
-## 运行时渲染矩阵
+## 受支持的 GPU 后端
 
-| 平台 | 架构 | Godot 后端 | 加速 OSR | 默认结果 |
-|------|------|------------|----------|----------|
-| Windows | x86_64 | Direct3D12 | 支持 | 使用加速渲染 |
-| Windows | x86_64 | Vulkan | 支持（基于 Hook） | 使用加速渲染 |
-| Windows | 任意 | OpenGL | 不支持 | 回退到软件渲染 |
-| Windows | ARM64 | Vulkan | 不支持 | 回退到软件渲染 |
-| macOS | 任意 | Metal | 支持 | 使用加速渲染 |
-| macOS | 任意 | Vulkan | 不支持 | 回退到软件渲染 |
-| macOS | 任意 | OpenGL | 不支持 | 回退到软件渲染 |
-| Linux | x86_64 | Vulkan | 支持（基于 Hook） | 使用加速渲染 |
-| Linux | 任意 | OpenGL | 不支持 | 回退到软件渲染 |
-| Linux | ARM64 | Vulkan | 不支持 | 回退到软件渲染 |
+| 平台 | 架构 | Godot 后端 | 集成方式 |
+|------|------|------------|----------|
+| Windows | x86_64、ARM64 | Direct3D12 | 原生共享纹理 |
+| Windows | x86_64 | Vulkan | 扩展与队列钩子 |
+| macOS | x86_64、ARM64 | Metal | 原生 IOSurface 共享 |
+| Linux | x86_64 | Vulkan | 扩展与队列钩子 |
 
 ## 回退条件
 
@@ -39,6 +35,9 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 - `CefTexture` 上关闭了 `enable_accelerated_osr`。
 - 平台纹理导入器初始化失败。
 - Vulkan 外部内存扩展注入失败或目标设备不支持。
+
+上述条件适用于浏览器初始化阶段。加速渲染启动后，捕获或发布失败时保留最后成功发布的帧。
+GPU 完成条件与资源生命周期详见[加速帧交接](./accelerated-handoff)。
 
 ## 诊断日志
 
