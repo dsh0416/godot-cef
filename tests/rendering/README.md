@@ -18,8 +18,9 @@ The default matrix runs `CefTexture` and `CefTexture2D`, software and accelerate
 OSR, and Godot rendering thread models 0 and 2 in separate processes. All cases
 still use a real graphics backend, including software CEF cases. Select a smaller
 matrix with `--class CefTexture2D --mode accelerated --thread-model 2`. Multiple
-values use comma separation. `--driver vulkan` or `--driver metal` requests those
-backends; unavailable drivers and accelerated fallbacks fail instead of passing.
+values use comma separation. The default driver is D3D12 on Windows, Metal on
+macOS, and Vulkan on Linux. `--driver` overrides that default; unavailable drivers
+and accelerated fallbacks fail instead of passing.
 `--addon` selects a complete prebuilt addon; `--output` selects the evidence root.
 Add `--gpu-validation` to pass Godot's GPU validation switch during both import
 and execution. Evidence records this request; confirm the backend's debug layer

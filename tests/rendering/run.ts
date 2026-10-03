@@ -10,7 +10,8 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const fixture = fileURLToPath(new URL("./", import.meta.url));
 const { values } = parseArgs({ options: {
   godot: { type: "string" }, addon: { type: "string" }, output: { type: "string" },
-  driver: { type: "string", default: process.platform === "win32" ? "d3d12" : "vulkan" },
+  driver: { type: "string", default: process.platform === "win32" ? "d3d12"
+    : process.platform === "darwin" ? "metal" : "vulkan" },
   class: { type: "string", default: "CefTexture,CefTexture2D" },
   mode: { type: "string", default: "software,accelerated" },
   "thread-model": { type: "string", default: "0,2" },
