@@ -259,7 +259,7 @@ cargo clippy --workspace --all-features -- -D warnings
 ### CI gates and caches
 
 `CI` is the only automatic entry workflow. It calls reusable Test, Build,
-Documentation, and Coverage workflows and finishes with one stable **Gate** check that
+and Documentation workflows and finishes with one stable **Gate** check that
 maintainers can require in branch protection. There are no workflow path
 filters, so every PR produces Gate. Gate runs with `always()` and checks both
 the reusable workflow results and their explicitly exported required job
@@ -268,9 +268,10 @@ results. Failed, cancelled, or unexpectedly skipped required work cannot pass.
 On PRs, main pushes, and manual runs, Gate requires both five-target Test/Clippy
 matrices, formatting, version validation, macOS universal plus Windows/Linux x64
 and ARM64 packaging, Linux x64 Godot headless integration tests, packing/validating
-Full and Store addons, the docs build, and Linux unit/headless coverage uploaded
-to Codecov.
-On `v*` tag pushes, Test, Documentation, and Coverage are intentionally skipped;
+Full and Store addons, the docs build, and instrumented unit coverage from the
+macOS ARM64, Windows x64, and Linux x64 Test jobs (Linux also covers the Godot
+headless suite) uploaded to Codecov.
+On `v*` tag pushes, Test and Documentation are intentionally skipped;
 Gate still requires all platform builds and both packages. Tag pushes and manual
 tag runs create draft releases with both archives after Gate. Main pushes and
 manual runs deploy Pages after Gate. Publication/deployment are downstream and
@@ -367,15 +368,18 @@ prerequisites, failure semantics, and the migrated permission scenarios.
 
 ### Code coverage
 
-The Coverage workflow instruments a separate Linux x64 debug build with
-`cargo-llvm-cov`, pinned through mise, and the locked Rust toolchain's
-`llvm-tools-preview` component. It runs the complete headless suite before the
-workspace unit tests.
-The headless-only report must contain executed lines from both `CefTexture` and
-`CefTexture2D`; this checks that Godot's dynamically loaded production library
-actually writes coverage data. The final LCOV report combines both test suites.
-The test addon and benchmarks are excluded from reports; production crates and
-the Rust xtask remain included. Coverage binaries never enter release packages.
+The macOS ARM64, Windows x64, and Linux x64 Test jobs instrument a separate
+debug build with `cargo-llvm-cov`, pinned through mise, and the locked Rust
+toolchain's `llvm-tools-preview` component. Coverage collection replaces each
+target's plain unit run instead of duplicating it. Linux x64 additionally runs
+the complete Godot headless suite before the workspace unit tests, so its LCOV
+report combines both.
+The Linux headless-only report must contain executed lines from both `CefTexture`
+and `CefTexture2D`; this checks that Godot's dynamically loaded production
+library actually writes coverage data. The test addon and benchmarks are
+excluded from reports; production crates and the Rust xtask remain included.
+Coverage binaries never enter release packages. macOS collects unit-test coverage
+only because the headless integration runner does not support macOS.
 
 To reproduce on Linux x64, first install the CEF build/runtime dependencies and
 set `CEF_PATH` as for a normal bundle. Run the following in a subshell to keep the
@@ -397,25 +401,38 @@ mise exec -- rustup component add llvm-tools-preview
     --godot "$(mise which godot)" --output target/coverage/integration
   mise exec -- cargo test --locked --workspace --all-features --target "$target"
   mise exec -- cargo llvm-cov report --target "$target" \
-    --ignore-filename-regex '(crates/gdcef_itest|benches)/' \
+    --ignore-filename-regex '(gdcef_itest|benches)' \
     --lcov --output-path target/coverage/lcov.info
 )
 ```
 
-The bundle command deploys instrumented binaries into the local
-`addons/godot_cef/bin/` directory. Run a normal `cargo xtask bundle` afterwards
-to restore your regular local addon. CI retains LCOV, the headless-only summary,
-and integration evidence as `coverage-linux-x64` for 14 days.
+To reproduce the macOS ARM64 or Windows x64 unit coverage, set
+`DYLD_LIBRARY_PATH` (macOS) or `PATH` (Windows) to include `CEF_PATH` and run:
+
+```sh
+mise exec -- cargo llvm-cov --locked --workspace --all-features --target <triple> \
+  --ignore-filename-regex '(gdcef_itest|benches)' \
+  --lcov --output-path target/coverage/lcov.info
+```
+
+Cargo-llvm-cov manages its own instrumented target directory for these direct
+runs. The Linux bundle command deploys instrumented binaries into the local
+`addons/godot_cef/bin/` directory; run a normal `cargo xtask bundle` afterwards
+to restore your regular local addon. CI retains each platform's LCOV (plus the
+Linux headless-only summary and integration evidence) as `coverage-linux-x64`,
+`coverage-macos-arm64`, and `coverage-windows-x64` for 14 days.
 
 Codecov project/patch statuses are informational while establishing the baseline;
-test, profile validation, report generation, and upload failures still fail Gate.
+instrumented test, profile validation, report generation, and upload failures
+still fail the Test job and therefore Gate.
 The upload uses GitHub OIDC, with the action's tokenless fallback for public fork
 PRs, so no `CODECOV_TOKEN` secret is needed. Repository maintainers must enable
 the repository in [Codecov](https://app.codecov.io/gh/dsh0416/godot-cef) and grant
 the [Codecov GitHub App](https://github.com/apps/codecov) access for PR reporting.
 
-This report measures Rust paths executed on Linux x64. It does not measure CEF,
-Godot internals, other platforms, or GPU behavior. Processes forcibly terminated
+The combined report measures Rust paths executed on macOS ARM64, Windows x64, and
+Linux x64. It does not measure CEF, Godot internals, other platforms or
+architectures, or GPU behavior. Processes forcibly terminated
 on a failure may not flush their profiles; failed runs are never uploaded as
 successful coverage.
 
