@@ -1,3 +1,4 @@
+#[cfg(target_os = "linux")]
 macro_rules! impl_vulkan_common_methods {
     (
         memory_field: $memory_field:ident,
@@ -21,8 +22,10 @@ macro_rules! impl_vulkan_common_methods {
             macro_rules! load_device_fn {
                 ($fn_name:expr, $fn_type:ty) => {
                     unsafe {
-                        let ptr =
-                            get_device_proc_addr(device, concat!($fn_name, "\0").as_ptr() as *const _);
+                        let ptr = get_device_proc_addr(
+                            device,
+                            concat!($fn_name, "\0").as_ptr() as *const _,
+                        );
                         if ptr.is_none() {
                             return Err(format!("Failed to load Vulkan function: {}", $fn_name));
                         }
@@ -44,6 +47,10 @@ macro_rules! impl_vulkan_common_methods {
                 get_image_memory_requirements: load_device_fn!(
                     "vkGetImageMemoryRequirements",
                     ash::vk::PFN_vkGetImageMemoryRequirements
+                ),
+                get_image_subresource_layout: load_device_fn!(
+                    "vkGetImageSubresourceLayout",
+                    ash::vk::PFN_vkGetImageSubresourceLayout
                 ),
                 create_command_pool: load_device_fn!(
                     "vkCreateCommandPool",
@@ -73,97 +80,36 @@ macro_rules! impl_vulkan_common_methods {
                 ),
                 cmd_copy_image: load_device_fn!("vkCmdCopyImage", ash::vk::PFN_vkCmdCopyImage),
                 queue_submit: load_device_fn!("vkQueueSubmit", ash::vk::PFN_vkQueueSubmit),
+                #[cfg(target_os = "linux")]
+                queue_wait_idle: load_device_fn!("vkQueueWaitIdle", ash::vk::PFN_vkQueueWaitIdle),
                 wait_for_fences: load_device_fn!("vkWaitForFences", ash::vk::PFN_vkWaitForFences),
                 reset_fences: load_device_fn!("vkResetFences", ash::vk::PFN_vkResetFences),
                 reset_command_buffer: load_device_fn!(
                     "vkResetCommandBuffer",
                     ash::vk::PFN_vkResetCommandBuffer
                 ),
-                get_device_queue: load_device_fn!("vkGetDeviceQueue", ash::vk::PFN_vkGetDeviceQueue),
+                #[cfg(target_os = "linux")]
+                create_semaphore: load_device_fn!(
+                    "vkCreateSemaphore",
+                    ash::vk::PFN_vkCreateSemaphore
+                ),
+                #[cfg(target_os = "linux")]
+                destroy_semaphore: load_device_fn!(
+                    "vkDestroySemaphore",
+                    ash::vk::PFN_vkDestroySemaphore
+                ),
+                #[cfg(target_os = "linux")]
+                import_semaphore_fd: load_device_fn!(
+                    "vkImportSemaphoreFdKHR",
+                    ash::vk::PFN_vkImportSemaphoreFdKHR
+                ),
                 $memory_field: load_device_fn!($memory_fn_name, $memory_fn_type),
             })
-        }
-
-        fn find_copy_queue(
-            lib: &libloading::Library,
-            physical_device: ash::vk::PhysicalDevice,
-            _fns: &VulkanFunctions,
-        ) -> (u32, u32, bool) {
-            let default = (0u32, 0u32, false);
-
-            if physical_device == ash::vk::PhysicalDevice::null() {
-                return default;
-            }
-
-            type GetPhysicalDeviceQueueFamilyProperties = unsafe extern "system" fn(
-                physical_device: ash::vk::PhysicalDevice,
-                p_queue_family_property_count: *mut u32,
-                p_queue_family_properties: *mut ash::vk::QueueFamilyProperties,
-            );
-
-            let get_queue_family_props: GetPhysicalDeviceQueueFamilyProperties = unsafe {
-                match lib.get(b"vkGetPhysicalDeviceQueueFamilyProperties\0") {
-                    Ok(f) => *f,
-                    Err(_) => return default,
-                }
-            };
-
-            let mut family_count: u32 = 0;
-            unsafe {
-                get_queue_family_props(physical_device, &mut family_count, std::ptr::null_mut());
-            }
-
-            if family_count == 0 {
-                return default;
-            }
-
-            let mut family_props =
-                vec![ash::vk::QueueFamilyProperties::default(); family_count as usize];
-            unsafe {
-                get_queue_family_props(
-                    physical_device,
-                    &mut family_count,
-                    family_props.as_mut_ptr(),
-                );
-            }
-
-            if !family_props.is_empty() && family_props[0].queue_count > 1 {
-                godot::global::godot_print!(
-                    "[AcceleratedOSR/Vulkan] Graphics family has {} queues, trying queue index 1",
-                    family_props[0].queue_count
-                );
-                return (0, 1, true);
-            }
-
-            for (idx, props) in family_props.iter().enumerate() {
-                let has_transfer = props
-                    .queue_flags
-                    .contains(ash::vk::QueueFlags::TRANSFER);
-                let has_graphics = props
-                    .queue_flags
-                    .contains(ash::vk::QueueFlags::GRAPHICS);
-                let has_compute = props
-                    .queue_flags
-                    .contains(ash::vk::QueueFlags::COMPUTE);
-
-                if has_transfer && !has_graphics && props.queue_count > 0 {
-                    godot::global::godot_print!(
-                        "[AcceleratedOSR/Vulkan] Found dedicated transfer queue family {} (compute={})",
-                        idx,
-                        has_compute
-                    );
-                    return (idx as u32, 0, true);
-                }
-            }
-
-            godot::global::godot_print!(
-                "[AcceleratedOSR/Vulkan] No separate queue available, using shared graphics queue"
-            );
-            default
         }
     };
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) use impl_vulkan_common_methods;
 
 pub(crate) fn find_memory_type_index(type_filter: u32) -> Option<u32> {
@@ -173,13 +119,15 @@ pub(crate) fn find_memory_type_index(type_filter: u32) -> Option<u32> {
     Some(type_filter.trailing_zeros())
 }
 
-/// Shared Vulkan image copy submission.
+/// Capture a borrowed external image into an initialized, idle snapshot slot.
 ///
 /// Records barriers, image copy, and final transition into `cmd_buffer`,
 /// then resets `fence` and `cmd_buffer` as needed and submits the work.
-/// Caller is responsible for waiting on `fence` (or otherwise ensuring completion)
-/// before reading from `dst` or reusing related resources, and for any additional
-/// synchronization with other queues or external APIs.
+/// `ctx.queue` must be Godot's actual graphics queue, covered by the process-wide
+/// queue synchronization hooks. Bootstrap/publication completion proves `dst`
+/// has no remaining readers and is in TRANSFER_SRC_OPTIMAL. The final barrier
+/// restores that layout and makes writes visible to Godot's later transfer reads
+/// on the same queue. The caller waits for `fence` before returning the CEF lease.
 pub(crate) fn submit_vulkan_copy_async(
     ctx: &VulkanCopyContext,
     cmd_buffer: ash::vk::CommandBuffer,
@@ -191,12 +139,28 @@ pub(crate) fn submit_vulkan_copy_async(
 ) -> Result<(), String> {
     use ash::vk;
 
-    let _ = unsafe { (ctx.reset_fences)(ctx.device, 1, &fence) };
-    let _ = unsafe { (ctx.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty()) };
+    let check = |result: vk::Result, operation: &str| {
+        if result == vk::Result::SUCCESS {
+            Ok(())
+        } else {
+            Err(format!("{operation} failed: {result:?}"))
+        }
+    };
+    check(
+        unsafe { (ctx.reset_fences)(ctx.device, 1, &fence) },
+        "vkResetFences",
+    )?;
+    check(
+        unsafe { (ctx.reset_command_buffer)(cmd_buffer, vk::CommandBufferResetFlags::empty()) },
+        "vkResetCommandBuffer",
+    )?;
 
     let begin_info =
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-    let _ = unsafe { (ctx.begin_command_buffer)(cmd_buffer, &begin_info) };
+    check(
+        unsafe { (ctx.begin_command_buffer)(cmd_buffer, &begin_info) },
+        "vkBeginCommandBuffer",
+    )?;
 
     let subresource_range = vk::ImageSubresourceRange {
         aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -207,11 +171,8 @@ pub(crate) fn submit_vulkan_copy_async(
     };
 
     let source_from_external_queue = ctx.src_external_queue_family != vk::QUEUE_FAMILY_IGNORED;
-    let src_old_layout = if source_from_external_queue {
-        vk::ImageLayout::GENERAL
-    } else {
-        vk::ImageLayout::UNDEFINED
-    };
+    // Imported producer content must never be discarded with UNDEFINED.
+    let src_old_layout = vk::ImageLayout::GENERAL;
     let src_src_queue_family = if source_from_external_queue {
         ctx.src_external_queue_family
     } else {
@@ -234,20 +195,22 @@ pub(crate) fn submit_vulkan_copy_async(
             .src_access_mask(vk::AccessFlags::empty())
             .dst_access_mask(vk::AccessFlags::TRANSFER_READ),
         vk::ImageMemoryBarrier::default()
-            .old_layout(vk::ImageLayout::UNDEFINED)
+            // The bootstrap readback (or previous publication completion) proves
+            // the staging image is idle in this exact Godot-tracked layout.
+            .old_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
             .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .image(dst)
             .subresource_range(subresource_range)
-            .src_access_mask(vk::AccessFlags::empty())
+            .src_access_mask(vk::AccessFlags::TRANSFER_READ)
             .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE),
     ];
 
     unsafe {
         (ctx.cmd_pipeline_barrier)(
             cmd_buffer,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::ALL_COMMANDS,
             vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(),
             0,
@@ -316,27 +279,21 @@ pub(crate) fn submit_vulkan_copy_async(
         }
     }
 
-    let (src_family, dst_family) = if ctx.uses_separate_queue && ctx.queue_family_index != 0 {
-        (ctx.queue_family_index, 0u32)
-    } else {
-        (vk::QUEUE_FAMILY_IGNORED, vk::QUEUE_FAMILY_IGNORED)
-    };
-
     let final_barrier = vk::ImageMemoryBarrier::default()
         .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-        .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-        .src_queue_family_index(src_family)
-        .dst_queue_family_index(dst_family)
+        .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .image(dst)
         .subresource_range(subresource_range)
         .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-        .dst_access_mask(vk::AccessFlags::SHADER_READ);
+        .dst_access_mask(vk::AccessFlags::TRANSFER_READ);
 
     unsafe {
         (ctx.cmd_pipeline_barrier)(
             cmd_buffer,
             vk::PipelineStageFlags::TRANSFER,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(),
             0,
             std::ptr::null(),
@@ -347,9 +304,20 @@ pub(crate) fn submit_vulkan_copy_async(
         );
     }
 
-    let _ = unsafe { (ctx.end_command_buffer)(cmd_buffer) };
+    check(
+        unsafe { (ctx.end_command_buffer)(cmd_buffer) },
+        "vkEndCommandBuffer",
+    )?;
 
-    let submit_info = vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
+    let wait_stages = [vk::PipelineStageFlags::TRANSFER];
+    let waits = [ctx.wait_semaphore];
+    let mut submit_info =
+        vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd_buffer));
+    if ctx.wait_semaphore != vk::Semaphore::null() {
+        submit_info = submit_info
+            .wait_semaphores(&waits)
+            .wait_dst_stage_mask(&wait_stages);
+    }
     let result = unsafe { (ctx.queue_submit)(ctx.queue, 1, &submit_info, fence) };
     if result != vk::Result::SUCCESS {
         return Err(format!("Failed to submit copy command: {:?}", result));
@@ -363,9 +331,10 @@ pub(crate) fn submit_vulkan_copy_async(
 pub(crate) struct VulkanCopyContext {
     pub device: ash::vk::Device,
     pub queue: ash::vk::Queue,
-    pub uses_separate_queue: bool,
     pub queue_family_index: u32,
     pub src_external_queue_family: u32,
+    /// Optional imported producer completion, used for Linux DMA-BUF sync files.
+    pub wait_semaphore: ash::vk::Semaphore,
     // Function pointers
     pub reset_fences: ash::vk::PFN_vkResetFences,
     pub reset_command_buffer: ash::vk::PFN_vkResetCommandBuffer,

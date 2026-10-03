@@ -110,8 +110,8 @@ impl CefTexture2D {
             if self.runtime.app().state.as_ref().is_some_and(|state| {
                 matches!(state.render_mode, RenderMode::Accelerated { .. })
             }) {
-                // Finish the pending GPU copy before asking CEF for its next
-                // accelerated frame, preserving the renderer's ordering.
+                // Queue publication before asking CEF for its next accelerated
+                // frame. The signal itself does not imply GPU completion.
                 self.runtime.request_external_begin_frame();
             }
         }

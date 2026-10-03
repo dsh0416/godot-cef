@@ -13,7 +13,6 @@ CEF 中的 GPU 加速离屏渲染（OSR）需要在 CEF 渲染器进程和宿主
 |------|----------|----------|
 | Windows | DirectX 12 | NT 句柄（原生支持） |
 | Windows | Vulkan | `VK_KHR_external_memory_win32` |
-| macOS | Vulkan | `VK_EXT_metal_objects` |
 | macOS | Metal | IOSurface（原生支持） |
 | Linux | Vulkan | `VK_EXT_external_memory_dma_buf` `VK_KHR_external_memory_fd` |
 
@@ -31,20 +30,23 @@ CEF 中的 GPU 加速离屏渲染（OSR）需要在 CEF 渲染器进程和宿主
 4. 修改后的请求传递给真正的 `vkCreateDevice` 函数
 5. Godot 现在拥有启用了外部内存支持的 Vulkan 设备
 
+队列钩子同时覆盖两个 Vulkan 函数解析入口与加载器导出，按实际队列串行化 CPU 提交，
+包括 Godot 后台传输工作。加速初始化前会校验设备和队列来源。
+GPU 屏障与完成条件见[加速帧交接](./accelerated-handoff)。
+
 ### 平台特定扩展
 
 **Windows：**
 - `VK_KHR_external_memory` — 外部内存基础扩展
 - `VK_KHR_external_memory_win32` — Windows 特定的句柄共享
 
-**macOS：**
-- `VK_KHR_external_memory` — 外部内存基础扩展
-- `VK_EXT_metal_objects` — Metal 对象共享
-
 **Linux：**
 - `VK_KHR_external_memory` — 外部内存基础扩展
 - `VK_KHR_external_memory_fd` — 基于文件描述符的共享
-- `VK_EXT_external_memory_dma_buf` — DMA-BUF 共享用于零拷贝传输
+- `VK_EXT_external_memory_dma_buf` — DMA-BUF 导入
+- `VK_EXT_image_drm_format_modifier` — 生产者图像布局
+- `VK_EXT_queue_family_foreign` — 外部生产者所有权
+- `VK_KHR_external_semaphore_fd` — 生产者 sync-file 导入
 
 ### Linux NVIDIA 驱动要求
 
@@ -109,8 +111,6 @@ cat /sys/module/nvidia_drm/parameters/modeset
 - **Linux ARM64** — Vulkan 钩子不可用
 - **macOS（Apple Silicon）** — Vulkan 钩子不可用
 
-在不支持的架构上，扩展会自动回退到软件渲染。
-
 ### macOS Vulkan 不支持
 
 由于根本性的技术限制，macOS Vulkan 支持（通过 MoltenVK）无法从钩子机制中受益：
@@ -140,17 +140,14 @@ cat /sys/module/nvidia_drm/parameters/modeset
 如果您遇到加速渲染问题，请尝试：
 1. 更新您的显卡驱动程序
 2. 在正常使用期间禁用 Vulkan 验证层
-3. 通过设置 `enable_accelerated_osr = false` 回退到软件渲染
+3. 设置 `enable_accelerated_osr = false`，对比软件渲染输出
 
 ## 平台支持摘要
 
 | 平台 | 架构 | Vulkan 加速 OSR | 备注 |
 |------|------|-----------------|------|
 | Windows | x86_64 | ✅ 支持 | 通过 `vkCreateDevice` 扩展注入钩子 |
-| Windows | ARM64 | ❌ 不支持 | retour 不支持 ARM64 |
 | Linux | x86_64 | ✅ 支持 | 通过 `vkCreateDevice` 扩展注入钩子 |
-| Linux | ARM64 | ❌ 不支持 | retour 不支持 ARM64 |
-| macOS | 任意 | ❌ 不适用 | MoltenVK 静态链接阻止钩子；使用 Metal 后端 |
 
 ## 未来：正式 Godot API
 
@@ -184,7 +181,7 @@ cat /sys/module/nvidia_drm/parameters/modeset
 [VulkanHook/Linux] Successfully created device with external memory extensions
 ```
 
-如果您看到关于扩展不支持或钩子安装失败的消息，加速渲染将回退到软件模式。
+原生 Vulkan 初始化失败时，请检查扩展与钩子的诊断日志。队列同步与快照所有权详见[加速帧交接](./accelerated-handoff)。
 
 ## 另请参见
 

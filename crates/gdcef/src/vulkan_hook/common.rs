@@ -109,6 +109,16 @@ macro_rules! define_vulkan_hook {
             false
         }
 
+        fn record_created_device(result: i32, p_device: *mut c_void) -> i32 {
+            if result == ash::vk::Result::SUCCESS.as_raw() && !p_device.is_null() {
+                let device = unsafe { *(p_device as *const ash::vk::Device) };
+                if let Err(error) = super::queue_sync::register_created_device(device) {
+                    eprintln!("{} Queue synchronization registration failed: {}", $log_prefix, error);
+                }
+            }
+            result
+        }
+
         extern "system" fn hooked_vk_create_device(
             physical_device: usize,
             p_create_info: *const c_void,
@@ -121,7 +131,10 @@ macro_rules! define_vulkan_hook {
             };
             unsafe {
                 if p_create_info.is_null() {
-                    return hook.call(physical_device, p_create_info, p_allocator, p_device);
+                    return record_created_device(
+                        hook.call(physical_device, p_create_info, p_allocator, p_device),
+                        p_device,
+                    );
                 }
 
                 let physical_device_handle =
@@ -143,7 +156,10 @@ macro_rules! define_vulkan_hook {
                     } else {
                         eprintln!("{} {} not supported by device", $log_prefix, $status_extension.to_string_lossy());
                     }
-                    return hook.call(physical_device, p_create_info, p_allocator, p_device);
+                    return record_created_device(
+                        hook.call(physical_device, p_create_info, p_allocator, p_device),
+                        p_device,
+                    );
                 }
 
                 eprintln!("{} Injecting external memory extensions", $log_prefix);
@@ -197,7 +213,7 @@ macro_rules! define_vulkan_hook {
                     eprintln!("{} Device creation failed: {:?}", $log_prefix, vk_result);
                 }
 
-                result
+                record_created_device(result, p_device)
             }
         }
 
@@ -286,14 +302,24 @@ macro_rules! define_vulkan_hook {
                     let _ = ENUMERATE_EXTENSIONS_FN.set(*f);
                 }
 
+                if VK_CREATE_DEVICE_HOOK.set(hook).is_err() {
+                    eprintln!("{} Hook already stored (this shouldn't happen)", $log_prefix);
+                }
+                let Some(hook) = VK_CREATE_DEVICE_HOOK.get() else {
+                    HOOK_INSTALLED.store(false, Ordering::SeqCst);
+                    return;
+                };
                 if let Err(e) = hook.enable() {
                     eprintln!("{} Failed to enable hook: {}", $log_prefix, e);
                     HOOK_INSTALLED.store(false, Ordering::SeqCst);
                     return;
                 }
 
-                if VK_CREATE_DEVICE_HOOK.set(hook).is_err() {
-                    eprintln!("{} Hook already stored (this shouldn't happen)", $log_prefix);
+                let create_device = std::mem::transmute::<VkCreateDeviceFn, ash::vk::PFN_vkCreateDevice>(
+                    hooked_vk_create_device as VkCreateDeviceFn,
+                );
+                if let Err(error) = super::queue_sync::install($vulkan_lib, create_device) {
+                    eprintln!("{} Queue host synchronization unavailable: {}", $log_prefix, error);
                 }
 
                 std::mem::forget(lib);

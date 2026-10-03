@@ -16,13 +16,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::accelerated_osr::{
-    self, AcceleratedRenderState, GodotTextureImporter, PlatformAcceleratedRenderHandler,
-};
+use crate::accelerated_osr::{self, AcceleratedRenderState, PlatformAcceleratedRenderHandler};
 use crate::browser::{App, BrowserState, PopupPolicyFlag, PopupStateQueue, RenderMode};
 use crate::error::CefError;
 use crate::utils::get_display_scale_factor;
-use crate::{godot_protocol, render, webrender};
+use crate::{godot_protocol, webrender};
 
 static SHARED_REQUEST_CONTEXT: Mutex<Option<cef::RequestContext>> = Mutex::new(None);
 
@@ -127,26 +125,6 @@ fn shared_request_context(log_prefix: &str) -> Result<cef::RequestContext, CefEr
     godot_protocol::register_user_scheme_handler_on_context(&mut context);
     *shared = Some(context.clone());
     Ok(context)
-}
-
-pub(crate) fn should_use_accelerated_osr(enable_accelerated_osr: bool, log_prefix: &str) -> bool {
-    if !enable_accelerated_osr {
-        godot::global::godot_print!(
-            "[{}] Accelerated OSR disabled by `enable_accelerated_osr = false`; using software rendering",
-            log_prefix
-        );
-        return false;
-    }
-
-    let (supported, reason) = accelerated_osr::accelerated_osr_support_diagnostic();
-    if !supported {
-        godot::global::godot_warn!(
-            "[{}] Accelerated OSR unavailable: {}. Falling back to software rendering.",
-            log_prefix,
-            reason
-        );
-    }
-    supported
 }
 
 fn resolve_preload_script(script: &str, path: &str) -> Result<Option<String>, CefError> {
@@ -283,6 +261,33 @@ pub(crate) fn request_external_begin_frame(app: &App) {
     }
 }
 
+/// Called from pre-draw only after all main-thread Texture2DRD bindings have
+/// been updated. This orders display replacement before old-pool retirement.
+pub(crate) fn queue_texture_publication(app: &App) {
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    if let Some(state) = &app.state
+        && let RenderMode::Accelerated { render_state, .. } = &state.render_mode
+    {
+        AcceleratedRenderState::queue_frame(render_state);
+        let pending = render_state
+            .lock()
+            .map(|state| state.pending_repaints())
+            .unwrap_or(0);
+        // Calling CEF can cause another paint. Release render state first, and
+        // keep requests pending across bootstrap/exhaustion until capture wins.
+        if pending != 0
+            && let Some(host) = state.browser.host()
+        {
+            if pending & accelerated_osr::REPAINT_VIEW != 0 {
+                host.invalidate(cef::PaintElementType::VIEW);
+            }
+            if pending & accelerated_osr::REPAINT_POPUP != 0 {
+                host.invalidate(cef::PaintElementType::POPUP);
+            }
+        }
+    }
+}
+
 pub(crate) fn apply_popup_policy(app: &App, policy: i32) {
     if let Some(state) = app.state.as_ref() {
         state.popup_policy.store(policy, Ordering::Relaxed);
@@ -295,7 +300,7 @@ pub(crate) fn apply_popup_policy(app: &App, policy: i32) {
 /// uses this to update its `TextureRect` texture binding immediately.
 pub(crate) fn update_primary_texture(
     state: &mut BrowserState,
-    log_prefix: &str,
+    _log_prefix: &str,
 ) -> Option<Gd<Texture2Drd>> {
     if let RenderMode::Software {
         frame_buffer,
@@ -390,42 +395,23 @@ pub(crate) fn update_primary_texture(
         texture_2d_rd,
     } = &mut state.render_mode
     {
-        let Ok(mut accel_state) = render_state.lock() else {
-            return None;
+        let rid = match render_state.lock() {
+            Ok(state) => state.dst_rd_rid,
+            Err(_) => return None,
         };
-
-        let texture_to_set = if let Some((new_w, new_h)) = accel_state.needs_resize.take()
-            && new_w > 0
-            && new_h > 0
-        {
-            render::free_rd_texture(accel_state.dst_rd_rid);
-
-            let (new_rd_rid, new_texture_2d_rd) =
-                match render::create_rd_texture(new_w as i32, new_h as i32) {
-                    Ok(result) => result,
-                    Err(e) => {
-                        godot::global::godot_error!("[{}] {}", log_prefix, e);
-                        return None;
-                    }
-                };
-
-            accel_state.dst_rd_rid = new_rd_rid;
-            accel_state.dst_width = new_w;
-            accel_state.dst_height = new_h;
-
-            *texture_2d_rd = new_texture_2d_rd.clone();
-            Some(new_texture_2d_rd)
+        let replacement = if rid.is_valid() && texture_2d_rd.get_texture_rd_rid() != rid {
+            // All retained references must leave the old RD resource before its
+            // publication generation can retire. Keep the wrapper stable across
+            // resizes, just as the standalone CefTexture2D resource does.
+            texture_2d_rd.set_texture_rd_rid(rid);
+            Some(texture_2d_rd.clone())
         } else {
             None
         };
-
-        if accel_state.has_pending_copy
-            && let Err(e) = accel_state.process_pending_copy()
-        {
-            godot::global::godot_error!("[{}] Failed to process pending copy: {}", log_prefix, e);
+        if let Ok(mut state) = render_state.lock() {
+            state.acknowledge_view(rid);
         }
-
-        return texture_to_set;
+        return replacement;
     }
 
     None
@@ -448,8 +434,7 @@ pub(crate) fn try_create_browser(
 
     let pixel_width = (params.logical_size.x * params.dpi) as i32;
     let pixel_height = (params.logical_size.y * params.dpi) as i32;
-    let use_accelerated =
-        should_use_accelerated_osr(params.enable_accelerated_osr, params.log_prefix);
+    let use_accelerated = params.enable_accelerated_osr;
 
     let popup_policy: PopupPolicyFlag = Arc::new(AtomicI32::new(params.popup_policy));
     let permission_policy = crate::settings::resolve_permission_policy(params.permission_policy);
@@ -544,12 +529,7 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
         if let Some(popup_texture_2d_rd) = popup_texture_2d_rd {
             popup_texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
         }
-        if let Ok(mut rs) = render_state.lock() {
-            render::free_rd_texture(rs.dst_rd_rid);
-            if let Some(popup_rid) = rs.popup_rd_rid.take() {
-                render::free_rd_texture(popup_rid);
-            }
-        }
+        AcceleratedRenderState::shutdown(render_state);
     }
 
     if let Some(state) = app.state.take()
@@ -688,23 +668,6 @@ fn create_accelerated_browser(
         "[{}] Creating browser in accelerated rendering mode",
         log_prefix
     );
-    let importer = match GodotTextureImporter::new() {
-        Some(imp) => imp,
-        None => {
-            godot::global::godot_warn!(
-                "[{}] Failed to create GPU texture importer, falling back to software rendering",
-                log_prefix
-            );
-            return create_software_browser(
-                app,
-                browser_settings,
-                context,
-                params,
-                None,
-                log_prefix,
-            );
-        }
-    };
     let BrowserCreateParams {
         dpi,
         pixel_width,
@@ -715,14 +678,15 @@ fn create_accelerated_browser(
         permission_policy,
     } = params;
 
-    let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height)?;
-    let render_state = Arc::new(Mutex::new(AcceleratedRenderState::new(
-        importer,
-        rd_texture_rid,
-        pixel_width as u32,
-        pixel_height as u32,
-    )));
-
+    let mut extra_info = build_browser_extra_info(preload_script.as_deref())?;
+    let render_state = AcceleratedRenderState::create(pixel_width as u32, pixel_height as u32)
+        .map_err(CefError::GpuDeviceError)?;
+    let rd_texture_rid = render_state
+        .lock()
+        .map_err(|_| CefError::GpuDeviceError("Snapshot state lock poisoned".into()))?
+        .dst_rd_rid;
+    let mut texture_2d_rd = Texture2Drd::new_gd();
+    texture_2d_rd.set_texture_rd_rid(rd_texture_rid);
     let mut render_handler = PlatformAcceleratedRenderHandler::new(
         dpi,
         PhysicalSize::new(pixel_width as f32, pixel_height as f32),
@@ -748,7 +712,7 @@ fn create_accelerated_browser(
         queues.clone(),
         popup_policy.clone(),
     );
-    let mut extra_info = build_browser_extra_info(preload_script.as_deref())?;
+
     let cef_url: CefStringUtf16 = url.as_str().into();
 
     let browser = match cef::browser_host_create_browser_sync(
@@ -762,7 +726,8 @@ fn create_accelerated_browser(
         Some(browser) => browser,
         None => {
             queues.permissions.close("browser_closed");
-            render::free_rd_texture(rd_texture_rid);
+            texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
+            AcceleratedRenderState::shutdown(&render_state);
             return Err(CefError::BrowserCreationFailed(
                 "browser_host_create_browser_sync returned None (accelerated)".into(),
             ));
@@ -793,14 +758,16 @@ fn create_accelerated_browser(
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn create_accelerated_browser(
-    app: &mut App,
-    window_info: &WindowInfo,
-    browser_settings: &BrowserSettings,
-    context: Option<&mut cef::RequestContext>,
-    params: BrowserCreateParams,
-    log_prefix: &str,
+    _app: &mut App,
+    _window_info: &WindowInfo,
+    _browser_settings: &BrowserSettings,
+    _context: Option<&mut cef::RequestContext>,
+    _params: BrowserCreateParams,
+    _log_prefix: &str,
 ) -> Result<(), CefError> {
-    create_software_browser(app, browser_settings, context, params, None, log_prefix)
+    Err(CefError::GpuDeviceError(
+        "Accelerated OSR is unsupported on this platform; no software fallback is performed".into(),
+    ))
 }
 
 #[cfg(test)]

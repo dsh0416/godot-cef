@@ -113,10 +113,6 @@ impl CefTexture2D {
             if let Some(ref mut stable) = self.stable_texture_2d_rd {
                 stable.set_texture_rd_rid(Rid::Invalid);
             }
-            if self.placeholder_rd_rid.is_valid() {
-                render::free_rd_texture(self.placeholder_rd_rid);
-                self.placeholder_rd_rid = Rid::Invalid;
-            }
         }
         self.runtime.cleanup_runtime(None);
     }
@@ -168,7 +164,7 @@ impl CefTexture2D {
         // Headless Godot does not emit frame_pre_draw. Browser lifecycle and
         // callbacks must also progress without drawing when minimized or with
         // the render loop disabled. Software frames can be produced here;
-        // accelerated frames stay ordered after their copy on frame_pre_draw.
+        // accelerated begin requests follow publication on frame_pre_draw.
         if self
             .runtime
             .app()

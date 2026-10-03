@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-This matrix summarizes the expected rendering mode behavior for each platform/backend combination.
+This matrix lists supported platform/backend combinations for GPU-accelerated OSR.
 
 This page covers architectures in the full GitHub Release addon. The smaller
 Asset Store addon omits Windows/Linux ARM64; use the full package for those
@@ -18,35 +18,24 @@ export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 
 This keeps the downloaded runtime files aligned with the Rust bindings.
 
-## Runtime Rendering Matrix
+## Supported GPU Backends
 
-| Platform | Architecture | Godot Backend | Accelerated OSR | Default Outcome |
-|----------|--------------|---------------|-----------------|-----------------|
-| Windows  | x86_64       | Direct3D12    | Yes             | Accelerated |
-| Windows  | x86_64       | Vulkan        | Yes (hook-based) | Accelerated |
-| Windows  | ARM64        | Direct3D12    | Yes             | Accelerated |
-| Windows  | any          | OpenGL        | No              | Software fallback |
-| Windows  | ARM64        | Vulkan        | No (hooks unsupported) | Software fallback |
-| macOS    | any          | Metal         | Yes             | Accelerated |
-| macOS    | any          | Vulkan        | No              | Software fallback |
-| macOS    | any          | OpenGL        | No              | Software fallback |
-| Linux    | x86_64       | Vulkan        | Yes (hook-based) | Accelerated |
-| Linux    | any          | OpenGL        | No              | Software fallback |
-| Linux    | ARM64        | Vulkan        | No (hooks unsupported) | Software fallback |
+| Platform | Architecture | Godot Backend | Integration |
+|----------|--------------|---------------|-------------|
+| Windows | x86_64, ARM64 | Direct3D12 | Native shared textures |
+| Windows | x86_64 | Vulkan | Extension and queue hooks |
+| macOS | x86_64, ARM64 | Metal | Native IOSurface sharing |
+| Linux | x86_64 | Vulkan | Extension and queue hooks |
 
-## Fallback Conditions
-
-Even on a supported backend, Godot CEF falls back to software rendering when:
-
-- `enable_accelerated_osr` is disabled on `CefTexture`.
-- Platform texture importer creation fails.
-- Required Vulkan external memory extensions cannot be injected or are unavailable.
+Set `enable_accelerated_osr = false` to use software rendering, including in
+headless tests. See [Accelerated frame handoff](./accelerated-handoff) for native
+GPU synchronization and resource lifetime details.
 
 ## Diagnostics
 
 At startup, Godot CEF logs:
 
 - Detected backend and whether accelerated OSR is supported.
-- Fallback reason when accelerated rendering cannot be used.
+- Native importer initialization or GPU handoff errors.
 
 During browser creation, logs also indicate whether each `CefTexture` instance starts in accelerated or software mode.

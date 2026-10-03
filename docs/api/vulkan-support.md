@@ -14,7 +14,6 @@ GPU-accelerated offscreen rendering (OSR) in CEF requires sharing textures betwe
 |----------|--------------|-------------------|
 | Windows  | DirectX 12   | NT Handles (native support) |
 | Windows  | Vulkan       | `VK_KHR_external_memory_win32` |
-| macOS    | Vulkan       | `VK_EXT_metal_objects` |
 | macOS    | Metal        | IOSurface (native support) |
 | Linux    | Vulkan       | `VK_EXT_external_memory_dma_buf` `VK_KHR_external_memory_fd` |
 
@@ -32,20 +31,24 @@ Since Godot doesn't provide an API to request additional Vulkan extensions durin
 4. The modified request is passed to the real `vkCreateDevice` function
 5. Godot now has a Vulkan device with external memory support enabled
 
+Queue interception also covers both Vulkan function resolvers and loader exports.
+It serializes host submissions per actual queue, including Godot's background
+transfer work, and verifies device/queue provenance before accelerated startup.
+See [Accelerated frame handoff](./accelerated-handoff) for GPU barriers and completion.
+
 ### Platform-Specific Extensions
 
 **Windows:**
 - `VK_KHR_external_memory` — Base extension for external memory
 - `VK_KHR_external_memory_win32` — Windows-specific HANDLE sharing
 
-**macOS:**
-- `VK_KHR_external_memory` — Base extension for external memory
-- `VK_EXT_metal_objects` — Metal objects sharing
-
 **Linux:**
 - `VK_KHR_external_memory` — Base extension for external memory
 - `VK_KHR_external_memory_fd` — File descriptor based sharing
-- `VK_EXT_external_memory_dma_buf` — DMA-BUF sharing for zero-copy transfers
+- `VK_EXT_external_memory_dma_buf` — DMA-BUF import
+- `VK_EXT_image_drm_format_modifier` — Producer image layout
+- `VK_EXT_queue_family_foreign` — External producer ownership
+- `VK_KHR_external_semaphore_fd` — Producer sync-file import
 
 ### Linux NVIDIA Driver Requirement
 
@@ -110,8 +113,6 @@ The hooking mechanism relies on the [retour](https://github.com/darfink/retour-r
 - **Linux ARM64** — Vulkan hooks not available
 - **macOS (Apple Silicon)** — Vulkan hooks not available
 
-On unsupported architectures, the extension automatically falls back to software rendering.
-
 ### macOS Vulkan Not Supported
 
 macOS Vulkan support (via MoltenVK) does not benefit from the hook mechanism due to fundamental technical limitations:
@@ -141,17 +142,14 @@ Function hooking is inherently fragile:
 If you experience issues with accelerated rendering, try:
 1. Updating your graphics drivers
 2. Disabling Vulkan validation layers during normal use
-3. Falling back to software rendering by setting `enable_accelerated_osr = false`
+3. Setting `enable_accelerated_osr = false` to compare software rendering output
 
 ## Platform Support Summary
 
 | Platform | Architecture | Vulkan Accelerated OSR | Notes |
 |----------|--------------|------------------------|-------|
 | Windows  | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
-| Windows  | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
 | Linux    | x86_64       | ✅ Supported           | Via `vkCreateDevice` extension injection hook |
-| Linux    | ARM64        | ❌ Not supported       | retour doesn't support ARM64 |
-| macOS    | Any          | ❌ Not applicable      | Static linking of MoltenVK prevents hooking; use Metal backend |
 
 ## Future: Proper Godot API
 
@@ -185,7 +183,7 @@ On Linux:
 [VulkanHook/Linux] Successfully created device with external memory extensions
 ```
 
-If you see messages about extensions not being supported or hook installation failures, accelerated rendering will fall back to software mode.
+Check extension and hook diagnostics when native Vulkan initialization fails. See [Accelerated frame handoff](./accelerated-handoff) for queue synchronization and snapshot ownership.
 
 ## See Also
 

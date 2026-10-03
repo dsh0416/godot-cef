@@ -1,0 +1,54 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body { margin:0; width:100%; height:100%; overflow:hidden; background:black }
+canvas { display:block; width:100%; height:100% }
+</style></head><body><canvas></canvas><script>
+const canvas = document.querySelector('canvas');
+const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00'];
+let current = 1;
+window.paint = sequence => {
+  current = sequence;
+  canvas.width = Math.round(innerWidth * devicePixelRatio);
+  canvas.height = Math.round(innerHeight * devicePixelRatio);
+  const context = canvas.getContext('2d', { alpha: false });
+  context.fillStyle = colors[sequence % colors.length];
+  context.fillRect(0, 0, canvas.width, canvas.height / 2);
+  for (let bit = 0; bit < 8; bit++) {
+    context.fillStyle = (sequence & (1 << bit)) ? '#ffffff' : '#000000';
+    const left = Math.floor(bit * canvas.width / 8);
+    const right = Math.ceil((bit + 1) * canvas.width / 8);
+    context.fillRect(left, canvas.height / 2, right - left, canvas.height);
+  }
+};
+window.paintWhenSize = (sequence, width, height, physicalPixels) => {
+  let lastDimensions = '';
+  const waitForSize = () => {
+    // CefTexture's get_view_rect divides its physical extent by screen scale
+    // and truncates to integer CSS pixels. CefTexture2D requests CSS pixels.
+    const expectedWidth = physicalPixels ? Math.trunc(width / devicePixelRatio) : width;
+    const expectedHeight = physicalPixels ? Math.trunc(height / devicePixelRatio) : height;
+    const matched = innerWidth === expectedWidth && innerHeight === expectedHeight;
+    if (matched) window.paint(sequence);
+    const dimensions = JSON.stringify({ sequence, physicalPixels,
+      requestedWidth: width, requestedHeight: height,
+      expectedWidth, expectedHeight, innerWidth, innerHeight, devicePixelRatio,
+      canvasWidth: canvas.width, canvasHeight: canvas.height, painted: matched });
+    if (dimensions !== lastDimensions) {
+      console.log('GDCEF_PAGE_DIMENSIONS ' + dimensions);
+      lastDimensions = dimensions;
+    }
+    if (!matched) setTimeout(waitForSize, 10);
+  };
+  waitForSize();
+};
+window.startBurst = (first, count, delay) => {
+  let offset = 0;
+  const paintNext = () => {
+    window.paint(first + offset++);
+    if (offset < count) setTimeout(paintNext, delay);
+  };
+  paintNext();
+};
+addEventListener('resize', () => window.paint(current));
+window.paint(current);
+</script></body></html>

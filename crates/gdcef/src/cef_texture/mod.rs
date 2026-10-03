@@ -13,10 +13,12 @@ use cef::{self, ImplBrowserHost, ImplDragData};
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
-    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, LineEdit, TextureRect,
+    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, LineEdit, RenderingServer,
+    TextureRect,
 };
 use godot::prelude::*;
 
+use crate::browser::RenderMode;
 use crate::cef_texture2d::CefTexture2D;
 use crate::{cef_init, input};
 
@@ -35,7 +37,7 @@ pub struct CefTexture {
     #[var(get = get_enable_accelerated_osr, set = set_enable_accelerated_osr)]
     /// Enable GPU-accelerated Off-Screen Rendering (OSR).
     /// If true, uses shared textures (Vulkan/D3D12/Metal) for high performance.
-    /// If false or unsupported, falls back to software rendering.
+    /// If false, uses software rendering.
     enable_accelerated_osr: bool,
 
     #[export]
@@ -81,6 +83,7 @@ pub struct CefTexture {
     last_cursor: cef_app::CursorType,
     last_max_fps: i32,
     browser_create_deferred_pending: bool,
+    frame_hook: Option<Callable>,
 
     // IME state
     ime_active: bool,
@@ -124,6 +127,7 @@ impl ITextureRect for CefTexture {
             last_cursor: cef_app::CursorType::Arrow,
             last_max_fps: 0,
             browser_create_deferred_pending: false,
+            frame_hook: None,
             ime_active: false,
             ime_proxy: None,
             focus_state: Default::default(),
@@ -139,6 +143,11 @@ impl ITextureRect for CefTexture {
 
     fn on_notification(&mut self, what: ControlNotification) {
         match what {
+            ControlNotification::ENTER_TREE => {
+                // Install the hook after the notification returns, including
+                // when an existing browser node is added to the tree again.
+                self.base_mut().call_deferred("_connect_frame_hook", &[]);
+            }
             ControlNotification::READY => {
                 self.on_ready();
             }
@@ -157,15 +166,18 @@ impl ITextureRect for CefTexture {
                 // React immediately to control size changes so CEF receives
                 // resize notifications even if process timing is delayed.
                 let _ = self.handle_size_change();
-                self.update_texture();
             }
             ControlNotification::PREDELETE => {
+                self.disconnect_frame_hook();
                 self.suspend_browser_input();
                 self.cleanup_instance();
             }
+            ControlNotification::EXIT_TREE => {
+                self.disconnect_frame_hook();
+                self.suspend_browser_input();
+            }
             ControlNotification::PAUSED
             | ControlNotification::DISABLED
-            | ControlNotification::EXIT_TREE
             | ControlNotification::WM_WINDOW_FOCUS_OUT => {
                 self.suspend_browser_input();
             }
@@ -359,13 +371,70 @@ impl CefTexture {
 
         self.handle_max_fps_change();
         _ = self.handle_size_change();
-        self.update_texture();
 
-        self.request_external_begin_frame();
+        // Software browsers must keep progressing in headless Godot, where
+        // frame_pre_draw is never emitted. Accelerated pacing follows the
+        // publication request in _on_frame_pre_draw instead.
+        if self.with_app(|app| {
+            app.state
+                .as_ref()
+                .is_some_and(|state| matches!(state.render_mode, RenderMode::Software { .. }))
+        }) {
+            self.request_external_begin_frame();
+        }
         self.update_cursor();
 
         // Process all event queues with a single lock (more efficient than per-queue locks)
         self.process_all_event_queues();
+    }
+
+    #[func]
+    fn _connect_frame_hook(&mut self) {
+        if self.frame_hook.is_some()
+            || !self.base().is_inside_tree()
+            || self.base().is_queued_for_deletion()
+        {
+            return;
+        }
+        let callable = self.base().callable("_on_frame_pre_draw");
+        let error = RenderingServer::singleton().connect("frame_pre_draw", &callable);
+        if error == godot::global::Error::OK {
+            self.frame_hook = Some(callable);
+        } else {
+            godot::global::godot_error!("[CefTexture] Failed to connect render frame: {error:?}");
+        }
+    }
+
+    fn disconnect_frame_hook(&mut self) {
+        if let Some(callable) = self.frame_hook.take() {
+            let mut rendering_server = RenderingServer::singleton();
+            if rendering_server.is_connected("frame_pre_draw", &callable) {
+                rendering_server.disconnect("frame_pre_draw", &callable);
+            }
+        }
+    }
+
+    #[func]
+    fn _on_frame_pre_draw(&mut self) {
+        // RenderingServer signals do not inherit a node's process mode. Keep
+        // publication subject to the same pause/disable rules as PROCESS.
+        if !self.base().is_inside_tree()
+            || self.base().is_queued_for_deletion()
+            || !self.base().can_process()
+            || !self.base().is_processing()
+        {
+            return;
+        }
+        self.update_texture();
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+        if self.with_app(|app| {
+            app.state
+                .as_ref()
+                .is_some_and(|state| matches!(state.render_mode, RenderMode::Accelerated { .. }))
+        }) {
+            // This orders CPU publication requests, not GPU completion.
+            self.request_external_begin_frame();
+        }
     }
 
     #[func]

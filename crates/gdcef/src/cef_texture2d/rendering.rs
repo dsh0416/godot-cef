@@ -72,5 +72,6 @@ impl CefTexture2D {
         if should_emit_changed {
             self.base_mut().emit_changed();
         }
+        backend::queue_texture_publication(self.runtime.app());
     }
 }

@@ -5,8 +5,8 @@ use godot::classes::texture_rect::ExpandMode;
 use godot::prelude::*;
 
 use crate::browser::RenderMode;
+use crate::cursor;
 use crate::utils::get_display_scale_factor;
-use crate::{cursor, render};
 
 impl CefTexture {
     pub(super) fn get_max_fps(&self) -> i32 {
@@ -59,48 +59,33 @@ impl CefTexture {
         }
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        let popup_resize = self.with_app_mut(|app| {
-            let Some(state) = &mut app.state else {
-                return None;
-            };
-            let RenderMode::Accelerated { render_state, .. } = &state.render_mode else {
-                return None;
-            };
-            let Ok(mut accel_state) = render_state.lock() else {
-                return None;
-            };
-            let (new_w, new_h) = accel_state.needs_popup_texture.take()?;
-            Some((accel_state.popup_rd_rid.take(), new_w, new_h))
-        });
-        if let Some((old_rid, new_w, new_h)) = popup_resize {
-            if let Some(old_rid) = old_rid {
-                render::free_rd_texture(old_rid);
-            }
-            match render::create_rd_texture(new_w as i32, new_h as i32) {
-                Ok((new_rid, new_texture_2d_rd)) => {
-                    self.popup_texture_2d_rd = Some(new_texture_2d_rd);
-                    self.with_app_mut(|app| {
-                        if let Some(state) = &mut app.state
-                            && let RenderMode::Accelerated { render_state, .. } = &state.render_mode
-                            && let Ok(mut accel_state) = render_state.lock()
-                        {
-                            accel_state.popup_rd_rid = Some(new_rid);
-                            accel_state.popup_width = new_w;
-                            accel_state.popup_height = new_h;
-                            // Ensure no stale resize request remains after completing popup resize.
-                            accel_state.needs_popup_texture = None;
-                        }
-                    });
+        {
+            let popup_target = self.with_app(|app| {
+                let state = app.state.as_ref()?;
+                let RenderMode::Accelerated { render_state, .. } = &state.render_mode else {
+                    return None;
+                };
+                render_state.lock().ok()?.popup_rd_rid
+            });
+            if let Some(rid) = popup_target {
+                let texture = self
+                    .popup_texture_2d_rd
+                    .get_or_insert_with(godot::classes::Texture2Drd::new_gd);
+                if texture.get_texture_rd_rid() != rid {
+                    texture.set_texture_rd_rid(rid);
                 }
-                Err(e) => {
-                    godot::global::godot_error!(
-                        "[CefTexture] Failed to create popup texture: {}",
-                        e
-                    );
-                }
+                self.with_app(|app| {
+                    if let Some(state) = &app.state
+                        && let RenderMode::Accelerated { render_state, .. } = &state.render_mode
+                        && let Ok(mut state) = render_state.lock()
+                    {
+                        state.acknowledge_popup(rid);
+                    }
+                });
             }
         }
         self.update_popup_overlay();
+        self.with_app(backend::queue_texture_publication);
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
