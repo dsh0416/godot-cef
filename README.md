@@ -6,6 +6,7 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/build.yml?label=Build)](https://github.com/dsh0416/godot-cef/actions/workflows/build.yml)
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/test.yml?label=Test)](https://github.com/dsh0416/godot-cef/actions/workflows/test.yml)
+[![Codecov](https://codecov.io/gh/dsh0416/godot-cef/branch/main/graph/badge.svg)](https://app.codecov.io/gh/dsh0416/godot-cef)
 [![GitHub Release](https://img.shields.io/github/v/release/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/releases)
 [![Godot Asset Library](https://img.shields.io/badge/Godot-Asset%20Library-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/asset-library/asset/4694)
 [![GitHub Issues](https://img.shields.io/github/issues/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/issues)

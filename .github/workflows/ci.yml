@@ -32,10 +32,18 @@ jobs:
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) }}
     uses: ./.github/workflows/deploy-docs.yml
 
+  coverage:
+    name: Coverage
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/coverage.yml
+
   gate:
     name: Gate
     if: ${{ always() }}
-    needs: [test, build, docs]
+    needs: [test, build, docs, coverage]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -46,6 +54,7 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
           TEST_JOBS: ${{ needs.test.outputs.required-results }}
           BUILD_JOBS: ${{ needs.build.outputs.required-results }}
           DOCS_JOBS: ${{ needs.docs.outputs.required-results }}
@@ -67,13 +76,13 @@ jobs:
           require_jobs Build "$BUILD_JOBS" '["build-macos","build-windows","build-linux","pack"]'
 
           if [[ "$TAG_PUSH" == "true" ]]; then
-            if [[ "$TEST_RESULT" != "skipped" || "$DOCS_RESULT" != "skipped" ]]; then
-              echo "::error::Unexpected tag-push results (Test: $TEST_RESULT, Documentation: $DOCS_RESULT)."
+            if [[ "$TEST_RESULT" != "skipped" || "$DOCS_RESULT" != "skipped" || "$COVERAGE_RESULT" != "skipped" ]]; then
+              echo "::error::Unexpected tag-push results (Test: $TEST_RESULT, Documentation: $DOCS_RESULT, Coverage: $COVERAGE_RESULT)."
               exit 1
             fi
           else
-            if [[ "$TEST_RESULT" != "success" || "$DOCS_RESULT" != "success" ]]; then
-              echo "::error::Required checks did not succeed (Test: $TEST_RESULT; Documentation: $DOCS_RESULT)."
+            if [[ "$TEST_RESULT" != "success" || "$DOCS_RESULT" != "success" || "$COVERAGE_RESULT" != "success" ]]; then
+              echo "::error::Required checks did not succeed (Test: $TEST_RESULT; Documentation: $DOCS_RESULT; Coverage: $COVERAGE_RESULT)."
               exit 1
             fi
             require_jobs Test "$TEST_JOBS" '["test","clippy","fmt","validate-versions"]'
