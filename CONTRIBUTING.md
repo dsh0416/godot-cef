@@ -41,7 +41,7 @@ Please be respectful and considerate in all interactions. We aim to maintain a w
   mise trust
   mise install
   ```
-- **Godot Engine 4.5+** — Download from [godotengine.org](https://godotengine.org/)
+- **Godot Engine** — Installed at the integration-test version by `mise install`
 - **Platform-specific dependencies** (see below)
 
 The commands below assume mise shell integration is active. If your shell is not configured for mise activation yet, prefix commands with `mise exec --`.
@@ -149,11 +149,13 @@ godot-cef/
 │   │       ├── godot_protocol/     # res:// and user:// scheme handlers
 │   │       └── vulkan_hook/        # Vulkan extension injection
 │   ├── gdcef_helper/       # CEF subprocess helper
+│   ├── gdcef_itest/        # Test-only GDExtension driven by the Godot main loop
 │   ├── cef_app/            # CEF application/browser configuration
 │   └── software_render/    # CPU popup compositing helpers
-├── xtask/                  # Build, bundle, pack, and validation tasks
+├── xtask/                  # Build, bundle, pack, validation, and integration runner
 ├── benches/                # Criterion benchmarks
 ├── addons/godot_cef/       # Godot addon files and bundled bin/ outputs
+├── tests/integration/      # Godot project and browser-page fixtures
 └── docs/                   # Documentation site (VitePress)
 ```
 
@@ -265,7 +267,8 @@ results. Failed, cancelled, or unexpectedly skipped required work cannot pass.
 
 On PRs, main pushes, and manual runs, Gate requires both five-target Test/Clippy
 matrices, formatting, version validation, macOS universal plus Windows/Linux x64
-and ARM64 packaging, packing/validating Full and Store addons, and the docs build.
+and ARM64 packaging, Linux x64 Godot headless integration tests, packing/validating
+Full and Store addons, and the docs build.
 On `v*` tag pushes, Test and Documentation are intentionally skipped as before;
 Gate still requires all platform builds and both packages. Tag pushes and manual
 tag runs create draft releases with both archives after Gate. Main pushes and
@@ -322,6 +325,44 @@ exporter, the docs package version, or `mise.toml`. It checks that
 `Cargo.toml`, `Cargo.lock`, `package.json`, and `mise.toml` agree. The CEF crates
 must have the same complete version. The exporter must match their major,
 minor, and patch versions, plus the runtime metadata when present in its pin.
+
+### Godot headless integration tests
+
+The separate Rust `gdcef_itest` addon exercises the production extension inside
+Godot 4.5, managed by `mise.toml` and `mise.lock`. Build a complete production
+bundle first, then run:
+
+```sh
+cargo xtask bundle --release --target x86_64-unknown-linux-gnu
+xvfb-run -a cargo xtask integration --release --target x86_64-unknown-linux-gnu \
+  --godot "$(mise which godot)"
+```
+
+On Windows, omit `xvfb-run -a` and use the `*_console.exe` inside
+`mise where godot`; the integration guide includes the PowerShell commands.
+`--addon` selects a complete existing addon, `--output` selects an evidence
+directory, and `--case CefTexture2D:permission_navigation` runs a single case.
+The command builds only the test addon and reuses the production bundle.
+Use `--test-addon <path>` to reuse an already built test library and skip that
+build as well. The Rust `xtask` runner handles project staging, the loopback HTTP
+server, process supervision, and reports; integration testing requires no Node.
+
+Run the Rust harness guards without Godot or CEF:
+
+```sh
+cargo test --locked -p xtask integration::
+```
+
+CI runs all 14 cases after the native Linux x64 release build, and their result
+is part of the required Build/Gate checks. Each case has a separate process and
+CEF profile, independent inner/outer deadlines, a structured result, and a clean
+exit requirement. JSON, JUnit and Godot logs are uploaded even on failures.
+
+The engine uses `--headless`; Xvfb supplies CEF's X11 backend. This verifies
+permissions, JavaScript/IPC and lifecycle behavior, but the dummy renderer does
+not verify texture upload/readback, viewport pixels or GPU shared textures.
+See [the integration guide](tests/integration/README.md) for coverage, local
+prerequisites, failure semantics, and the migrated permission scenarios.
 
 ### Writing Tests
 

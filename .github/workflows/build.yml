@@ -146,10 +146,51 @@ jobs:
           target: ${{ matrix.target }}
           install-linux-deps: "true"
 
+      - name: Validate integration runner failure handling
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: 'mise exec -- cargo test --locked -p xtask integration::'
+
       - name: Build and bundle for Linux
         env:
           RUSTC_WRAPPER: sccache
         run: mise exec -- cargo xtask bundle --release --target ${{ matrix.target }}
+
+      - name: Setup integration test toolchain
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: ./.github/actions/setup-toolchain
+        with:
+          tools: godot
+
+      - name: Install headless display dependencies
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth
+
+      - name: Run Godot headless integration tests
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        timeout-minutes: 20
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          # Xvfb supplies CEF's X11 backend; Godot itself uses its dummy renderer.
+          # Reuse the complete native bundle above and build only the test addon.
+          xvfb-run -a -s '-screen 0 1024x768x24' mise exec -- cargo xtask integration \
+            --release --target x86_64-unknown-linux-gnu \
+            --godot "$(mise which godot)"
+
+      - name: Upload integration evidence
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-linux-x64
+          path: |
+            target/integration/**/summary.json
+            target/integration/**/junit.xml
+            target/integration/**/result.json
+            target/integration/**/godot.log
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Prepare artifacts
         run: |

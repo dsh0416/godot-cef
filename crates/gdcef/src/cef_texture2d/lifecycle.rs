@@ -1,17 +1,59 @@
 use super::*;
 
 impl CefTexture2D {
-    pub(super) fn disconnect_frame_hook(&mut self) {
-        if !self.frame_hook_connected {
+    pub(super) fn connect_runtime_hooks(&mut self) {
+        // CefTexture shuts down its helper during construction and drives that
+        // helper itself. Its queued installation must not start a second browser
+        // or double-tick the shared runtime.
+        if !self.runtime.runtime_enabled()
+            || Engine::singleton().is_editor_hint()
+            || self.process_hook.is_some()
+        {
             return;
         }
 
-        if let Some(callable) = self.frame_hook_callable.as_ref() {
-            RenderingServer::singleton().disconnect("frame_pre_draw", callable);
-        }
+        let Some(mut tree) = Engine::singleton()
+            .get_main_loop()
+            .and_then(|main_loop| main_loop.try_cast::<SceneTree>().ok())
+        else {
+            godot::global::godot_error!(
+                "[CefTexture2D] Browser runtime requires a SceneTree main loop"
+            );
+            return;
+        };
 
-        self.frame_hook_callable = None;
-        self.frame_hook_connected = false;
+        let process_callable = self.base().callable("_on_process_frame");
+        let error = tree.connect("process_frame", &process_callable);
+        if error != godot::global::Error::OK {
+            godot::global::godot_error!(
+                "[CefTexture2D] Failed to connect process frame: {error:?}"
+            );
+            return;
+        }
+        self.process_hook = Some((tree.instance_id(), process_callable));
+
+        let frame_callable = self.base().callable("_on_frame_pre_draw");
+        let error = RenderingServer::singleton().connect("frame_pre_draw", &frame_callable);
+        if error == godot::global::Error::OK {
+            self.frame_hook = Some(frame_callable);
+        } else {
+            godot::global::godot_error!("[CefTexture2D] Failed to connect render frame: {error:?}");
+        }
+    }
+
+    pub(super) fn disconnect_runtime_hooks(&mut self) {
+        if let Some((tree_id, callable)) = self.process_hook.take()
+            && let Ok(mut tree) = Gd::<SceneTree>::try_from_instance_id(tree_id)
+            && tree.is_connected("process_frame", &callable)
+        {
+            tree.disconnect("process_frame", &callable);
+        }
+        if let Some(callable) = self.frame_hook.take() {
+            let mut rendering_server = RenderingServer::singleton();
+            if rendering_server.is_connected("frame_pre_draw", &callable) {
+                rendering_server.disconnect("frame_pre_draw", &callable);
+            }
+        }
     }
 
     pub(super) fn get_dpi(&self) -> f32 {
@@ -23,6 +65,9 @@ impl CefTexture2D {
     }
 
     pub(super) fn try_create_browser(&mut self) {
+        if self.runtime.app().state.is_some() || !self.runtime.app().can_create_browser() {
+            return;
+        }
         let logical_size = self.logical_size();
         let dpi = self.get_dpi();
         self.runtime.try_create_browser(RuntimeCreateConfig {
@@ -60,7 +105,8 @@ impl CefTexture2D {
     }
 
     pub(super) fn cleanup_instance(&mut self) {
-        self.disconnect_frame_hook();
+        self.runtime.shutdown();
+        self.disconnect_runtime_hooks();
         self.cancel_active_touches();
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
@@ -109,11 +155,8 @@ impl CefTexture2D {
     }
 
     pub(super) fn tick(&mut self) {
-        if !self.runtime.runtime_enabled() {
-            if Engine::singleton().is_editor_hint() {
-                return;
-            }
-            self.runtime.set_runtime_enabled(true);
+        if !self.runtime.runtime_enabled() || Engine::singleton().is_editor_hint() {
+            return;
         }
 
         self.try_create_browser();
@@ -122,8 +165,19 @@ impl CefTexture2D {
         let logical_size = self.logical_size();
         let dpi = self.get_dpi();
         let _ = self.runtime.handle_size_change(logical_size, dpi);
-        self.update_texture();
-        self.runtime.request_external_begin_frame();
+        // Headless Godot does not emit frame_pre_draw. Browser lifecycle and
+        // callbacks must also progress without drawing when minimized or with
+        // the render loop disabled. Software frames can be produced here;
+        // accelerated frames stay ordered after their copy on frame_pre_draw.
+        if self
+            .runtime
+            .app()
+            .state
+            .as_ref()
+            .is_some_and(|state| matches!(state.render_mode, RenderMode::Software { .. }))
+        {
+            self.runtime.request_external_begin_frame();
+        }
         self.drain_event_queues();
     }
 }

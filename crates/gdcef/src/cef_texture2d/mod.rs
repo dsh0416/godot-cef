@@ -4,7 +4,7 @@ use godot::classes::notify::ObjectNotification;
 use godot::classes::{
     Engine, ITexture2D, Image, ImageTexture, InputEvent, InputEventKey, InputEventMagnifyGesture,
     InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, InputEventScreenDrag,
-    InputEventScreenTouch, RenderingServer, Texture2D,
+    InputEventScreenTouch, RenderingServer, SceneTree, Texture2D,
 };
 use godot::prelude::*;
 use std::collections::HashMap;
@@ -100,8 +100,8 @@ pub struct CefTexture2D {
     last_find_match_case: bool,
     touch_id_map: HashMap<i32, i32>,
     next_touch_id: i32,
-    frame_hook_callable: Option<Callable>,
-    frame_hook_connected: bool,
+    process_hook: Option<(InstanceId, Callable)>,
+    frame_hook: Option<Callable>,
 }
 
 #[godot_api]
@@ -110,8 +110,13 @@ impl ITexture2D for CefTexture2D {
         let texture_size = Vector2i::new(1024, 1024);
         let fallback_texture = Self::make_placeholder_texture(texture_size);
         let editor_hint = Engine::singleton().is_editor_hint();
-        let frame_hook_callable = base.to_init_gd().callable("_on_frame_pre_draw");
-        RenderingServer::singleton().connect("frame_pre_draw", &frame_hook_callable);
+        // Wait until construction and scene loading finish. Method callables only
+        // keep the object ID, so neither this queued call nor the signal hooks
+        // keep an otherwise unused resource alive.
+        if !editor_hint {
+            base.to_init_gd()
+                .call_deferred("_connect_runtime_hooks", &[]);
+        }
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         let (stable_texture_2d_rd, placeholder_rd_rid) =
@@ -140,8 +145,8 @@ impl ITexture2D for CefTexture2D {
             last_find_match_case: false,
             touch_id_map: HashMap::new(),
             next_touch_id: 0,
-            frame_hook_callable: Some(frame_hook_callable),
-            frame_hook_connected: true,
+            process_hook: None,
+            frame_hook: None,
         }
     }
 
