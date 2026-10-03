@@ -9,6 +9,7 @@ rust = { version = "nightly", components = "rustfmt,clippy" }
 node = "26"
 pnpm = "latest"
 "cargo:export-cef-dir" = "154.2.0+154.0.28"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 
 [tools.godot]
 version = "4.5-stable"
