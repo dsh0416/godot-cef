@@ -70,12 +70,12 @@ pub(super) fn assess(outcome: &Outcome, expected: Option<Case>) -> Assessment {
         failures.push("Process exceeded the log size limit".into());
     }
     if outcome.log.lines().any(|line| {
-        let line = line.to_ascii_lowercase();
-        line.starts_with("error:")
-            || line.contains("script error:")
-            || line.contains("parse error:")
-            || line.contains("panicked at")
-            || (line.contains("thread") && line.contains("panicked"))
+        starts_with_ignore_ascii_case(line, "error:")
+            || contains_ignore_ascii_case(line, "script error:")
+            || contains_ignore_ascii_case(line, "parse error:")
+            || contains_ignore_ascii_case(line, "panicked at")
+            || (contains_ignore_ascii_case(line, "thread")
+                && contains_ignore_ascii_case(line, "panicked"))
     }) {
         failures
             .push("Godot error, extension loading error, or Rust panic diagnostic in log".into());
@@ -159,6 +159,27 @@ pub(super) fn junit(results: &[CaseResult]) -> serde_json::Result<String> {
     }
     xml.push_str("</testsuite>\n");
     Ok(xml)
+}
+
+/// ASCII-only case-insensitive `starts_with` that avoids allocating a lowercased
+/// copy of every scanned log line.
+fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
+    value
+        .as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
+/// ASCII-only case-insensitive substring search. Multi-byte UTF-8 sequences use
+/// bytes >= 0x80, so they can never produce a false ASCII match.
+fn contains_ignore_ascii_case(value: &str, needle: &str) -> bool {
+    let value = value.as_bytes();
+    let needle = needle.as_bytes();
+    !needle.is_empty()
+        && needle.len() <= value.len()
+        && value
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn escape(value: &str) -> String {
@@ -257,6 +278,20 @@ mod tests {
                 ..outcome()
             };
             assert!(!assess(&result, Some(CASE)).passed, "missed: {diagnostic}");
+        }
+        for benign in [
+            "info: café résumé — naïve",
+            "thread name without a failure",
+            "loaded module",
+        ] {
+            let result = Outcome {
+                log: format!("{}{benign}\n", outcome().log),
+                ..outcome()
+            };
+            assert!(
+                assess(&result, Some(CASE)).passed,
+                "false positive: {benign}"
+            );
         }
         for patch in [
             json!({"passed": false}),
