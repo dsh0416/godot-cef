@@ -127,6 +127,8 @@ impl ITexture2D for CefTexture2D {
 
         Self {
             base,
+            // Game and headless runs start enabled; editor tool instances do not.
+            // `shutdown()` flips this off for CefTexture's borrowed helper.
             runtime: CefTextureRuntime::new(!editor_hint),
             fallback_texture,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
