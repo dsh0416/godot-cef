@@ -10,5 +10,20 @@ node = "26"
 pnpm = "latest"
 "cargo:export-cef-dir" = "154.2.0+154.0.28"
 
+[tools.godot]
+version = "4.5-stable"
+# Select the standard editor, excluding Mono and export-template archives.
+matching_regex = '^Godot_v[^_]+_(linux\.|macos\.|win64|windows_arm64)'
+
+[tools.godot.platforms]
+linux-x64 = { rename_exe = { "Godot_v*_linux.x86_64" = "godot" } }
+linux-arm64 = { rename_exe = { "Godot_v*_linux.arm64" = "godot" } }
+macos-x64 = { bin_path = "Godot.app/Contents/MacOS" }
+macos-arm64 = { bin_path = "Godot.app/Contents/MacOS" }
+
+[tool_alias]
+# mise 2026.10.0's Aqua backend misreads Godot_v filenames as v-prefixed tags.
+godot = "github:godotengine/godot"
+
 [settings]
 lockfile = true

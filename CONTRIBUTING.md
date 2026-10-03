@@ -41,7 +41,7 @@ Please be respectful and considerate in all interactions. We aim to maintain a w
   mise trust
   mise install
   ```
-- **Godot Engine 4.5+** — Download from [godotengine.org](https://godotengine.org/)
+- **Godot Engine** — Installed at the integration-test version by `mise install`
 - **Platform-specific dependencies** (see below)
 
 The commands below assume mise shell integration is active. If your shell is not configured for mise activation yet, prefix commands with `mise exec --`.
@@ -327,15 +327,17 @@ minor, and patch versions, plus the runtime metadata when present in its pin.
 ### Godot headless integration tests
 
 The separate Rust `gdcef_itest` addon exercises the production extension inside
-Godot 4.5. Build a complete production bundle first, then run:
+Godot 4.5, managed by `mise.toml` and `mise.lock`. Build a complete production
+bundle first, then run:
 
 ```sh
 cargo xtask bundle --release --target x86_64-unknown-linux-gnu
 xvfb-run -a cargo xtask integration --release --target x86_64-unknown-linux-gnu \
-  --godot /absolute/path/to/Godot_v4.5-stable_linux.x86_64
+  --godot "$(mise which godot)"
 ```
 
-On Windows, omit `xvfb-run -a` and use the official Godot console executable.
+On Windows, omit `xvfb-run -a` and use the `*_console.exe` inside
+`mise where godot`; the integration guide includes the PowerShell commands.
 `--addon` selects a complete existing addon, `--output` selects an evidence
 directory, and `--case CefTexture2D:permission_navigation` runs a single case.
 The command builds only the test addon and reuses the production bundle.

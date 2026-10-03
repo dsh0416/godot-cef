@@ -8,30 +8,43 @@ API, without linking another copy of `gdcef` into the test addon.
 
 Linux x64 runs in the required Build workflow after the native release bundle.
 An integration failure therefore fails the existing Build and Gate checks. The
-job reuses that bundle, builds only `gdcef_itest`, and uses a fixed Godot 4.5
-archive verified with its pinned SHA-512. Xvfb supplies CEF's X11 environment;
-Godot runs with `--headless` and its dummy renderer. CEF acceleration is disabled
-per browser and with `disable-gpu`.
+job reuses that bundle, builds only `gdcef_itest`, and installs Godot through
+mise using the version in `mise.toml` and generated checksums in `mise.lock`.
+Xvfb supplies CEF's X11 environment; Godot runs with `--headless` and its dummy
+renderer. CEF acceleration is disabled per browser and with `disable-gpu`.
 
 ## Run
 
 Build the complete addon first, then build and run the test addon:
 
 ```sh
+mise install godot
 cargo xtask bundle --release --target x86_64-unknown-linux-gnu
 xvfb-run -a cargo xtask integration --release --target x86_64-unknown-linux-gnu \
-  --godot /absolute/path/to/Godot_v4.5-stable_linux.x86_64
+  --godot "$(mise which godot)"
 ```
 
 Linux requires the normal CEF runtime dependencies plus `xvfb` and `xauth`. The
 bundle must include its helper and matching CEF runtime; an extension SO alone
 is insufficient. The runner uses Node's built-in modules and needs no npm install.
 
-For a local Windows run, use the official Godot console executable:
+For a local Windows run, use the console executable from the mise installation:
 
 ```powershell
+mise install godot
+$godot = (Get-ChildItem (mise where godot) -Filter '*_console.exe').FullName
 cargo xtask bundle
-cargo xtask integration --godot 'C:/tools/Godot_v4.5-stable_win64_console.exe'
+cargo xtask integration --godot $godot
+```
+
+The GitHub backend avoids a Godot filename bug in mise 2026.10.0's Aqua
+backend. Windows keeps the original executable names because the console
+launcher needs its matching GUI executable. To change the engine version,
+update `tools.godot.version` in `mise.toml`, run the following command, and
+commit both files:
+
+```sh
+mise lock godot --platform 'linux-x64,linux-arm64,macos-x64,macos-arm64,windows-x64,windows-arm64'
 ```
 
 `--addon <directory>` selects a complete production addon, `--output <directory>`
