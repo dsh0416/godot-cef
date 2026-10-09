@@ -18,7 +18,7 @@ runs:
       uses: jdx/mise-action@v5
       with:
         # Pin mise independently of the action's major-tag updates.
-        version: 2026.10.0
+        version: 2026.10.5
         install_args: ${{ inputs.tools }}
         cache: true
         github_token: ${{ github.event_name != 'pull_request' && github.token || '' }}
