@@ -1606,6 +1606,7 @@ mod tests {
 
     #[test]
     fn file_dialog_lists_preserve_values_without_taking_the_cef_list() {
+        crate::dialogs::ensure_cef_exports_for_tests();
         let mut list = CefStringList::new();
         for value in ["image/*", "", "图片😀"] {
             assert!(list.append(value));

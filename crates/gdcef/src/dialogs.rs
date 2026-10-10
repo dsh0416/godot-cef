@@ -535,6 +535,26 @@ fn valid_file_paths(mode: i32, paths: &[String]) -> bool {
 }
 
 #[cfg(test)]
+pub(crate) fn ensure_cef_exports_for_tests() {
+    #[cfg(target_os = "macos")]
+    {
+        // macOS links the CEF loader; utility exports are available only after
+        // loading the framework. Share one load across parallel unit tests.
+        static LOAD_FRAMEWORK: std::sync::Once = std::sync::Once::new();
+        LOAD_FRAMEWORK.call_once(|| {
+            let framework_binary = cef::sys::get_cef_dir()
+                .expect("CEF not found for unit tests")
+                .join(cef::sys::FRAMEWORK_PATH);
+            let framework_dir = framework_binary
+                .parent()
+                .expect("CEF framework path has no parent directory");
+            cef_app::load_cef_framework_from_path(framework_dir)
+                .expect("failed to load CEF framework for unit tests");
+        });
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use cef::rc::{ConvertReturnValue, RcImpl};
@@ -553,6 +573,7 @@ mod tests {
     fn js_probe(
         controller: &DialogController,
     ) -> (cef::JsdialogCallback, JsCalls, Arc<AtomicBool>) {
+        ensure_cef_exports_for_tests();
         unsafe extern "C" fn continue_js(
             this: *mut cef::sys::cef_jsdialog_callback_t,
             accepted: i32,

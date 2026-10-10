@@ -13,7 +13,7 @@ pub(super) struct DialogState {
     pub(super) requests: Vec<Value>,
     pub(super) finished: BTreeMap<i64, String>,
     answered: BTreeSet<i64>,
-    requested_at: BTreeMap<i64, Instant>,
+    triggered_at: Option<Instant>,
     finished_at: BTreeMap<i64, Instant>,
     old_ids: Vec<i64>,
     step: usize,
@@ -231,7 +231,6 @@ impl Runner {
                 );
             }
         }
-        self.dialogs.requested_at.insert(id, Instant::now());
         if signal == "dialog_immediate" {
             self.check(args.get(1).is_some_and(|value| value.try_to::<bool>().is_ok_and(|value| value)),
                 "Same-instance continuation must succeed inside a signal callback without reentrant binding failure");
@@ -392,11 +391,14 @@ impl Runner {
     fn next_dialog_step(&mut self) {
         self.dialogs.step += 1;
         self.dialogs.stage = 0;
+        self.dialogs.triggered_at = None;
     }
 
     fn begin_js_step(&mut self, kind: &str) {
         if self.dialogs.stage == 0 {
             self.dialogs.stage = 1;
+            // Start timing before the operation, so queued signals cannot shorten the measured interval.
+            self.dialogs.triggered_at = Some(Instant::now());
             self.eval(&format!(
                 "window.runJsFixture('{}',{})",
                 kind, self.dialogs.step
@@ -418,6 +420,8 @@ impl Runner {
                 .is_some()
         {
             self.dialogs.stage = 2;
+            // Start timing before the trusted click can create the CEF request.
+            self.dialogs.triggered_at = Some(Instant::now());
             self.dialog_click(Vector2::new(50.0, 34.0));
         }
     }
@@ -689,10 +693,9 @@ impl Runner {
         }
         let elapsed = self
             .dialogs
-            .requested_at
-            .get(&id)
+            .triggered_at
             .zip(self.dialogs.finished_at.get(&id))
-            .map(|(start, end)| end.duration_since(*start));
+            .map(|(start, end)| end.duration_since(start));
         self.check(elapsed.is_some_and(|elapsed| elapsed >= Duration::from_millis(700) && elapsed < Duration::from_secs(5)),
             "One-second dialog deadline must cancel asynchronously, without waiting for the outer test deadline");
         if step == 0 {
