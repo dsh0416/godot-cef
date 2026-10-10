@@ -70,7 +70,7 @@ distributed addons.
 
 ## Cases and assertions
 
-Every case runs separately for `CefTexture` and `CefTexture2D`, giving 14 cases:
+Every case runs separately for `CefTexture` and `CefTexture2D`, giving 32 cases:
 
 | Case | Required behavior |
 | --- | --- |
@@ -81,6 +81,15 @@ Every case runs separately for `CefTexture` and `CefTexture2D`, giving 14 cases:
 | `permission_unhandled_then_listen` | An absent listener dismisses the first request. Adding a listener permits a fresh request in the same browser/origin without a cached permanent denial. |
 | `js_ipc` | Preload executes before the page; eval returns an observable result; text with Unicode, binary bytes, and structured data arrive intact in JavaScript. `CefTexture` also checks the echoed messages through its public inbound IPC signals. `CefTexture2D` has no such signals, so its public outbound API is checked through page reports over HTTP. |
 | `lifecycle` | Three generations each load a page, resize with DOM dimensions checked, and execute JavaScript; destruction invalidates the old Godot instance before the next browser is created. `CefTexture2D` also checks shutdown before deferred startup, retaining a shutdown resource across process frames without restarting its browser, and dropping a resource without explicit shutdown. |
+| `dialog_js` | Real `alert`, accepted/rejected `confirm`, and `prompt` with Unicode, accepted empty text, and explicit cancellation return their exact JavaScript values. DTO fields, wrong-kind decisions, duplicate/stale decisions, and exactly-once completion are checked. |
+| `dialog_file` | Browser mouse activation opens an actual HTML file input. Single and multiple selections populate `FileList`; page `FileReader` reads retained UTF-8 fixture files with a Unicode filename. Explicit cancellation and an empty selection both produce the DOM cancellation event. |
+| `dialog_timeout` | Undecided JS and file dialogs finish as `timed_out` under the one-second test deadline, unblocking JavaScript/file input and rejecting stale decisions. |
+| `dialog_unhandled` | Signal policy without request listeners cancels JS and file requests as `unhandled`. Connecting listeners afterward allows a new request with a fresh ID in the same browser. |
+| `dialog_navigation` | Navigating with a pending JS dialog cancels its request; the new page loads, stale responses fail, and CEF reset notifications cannot complete the ID twice. |
+| `dialog_policy` | Changing Signal to Cancel cancels a pending prompt. A subsequent confirm returns false without opening native UI or emitting a decision request; restoring Signal permits a new prompt. |
+| `dialog_lifecycle` | Destroying a Node or explicitly shutting down a retained Resource with a pending prompt releases it. A recreated browser rejects previous IDs and successfully selects/reads a real file. A retained Resource must report `browser_closed`; callbacks cannot leak into the next generation. |
+| `dialog_before_unload` | Browser mouse events provide trusted activation, then a link triggers `before_unload`. Rejecting the first decision keeps the document active; accepting a second decision completes navigation. |
+| `dialog_reentrant` | A callback immediately invokes the same instance's public JS continuation method during request signal dispatch, and the Unicode response reaches JavaScript without a recursive binding failure. |
 
 Permission cases use per-instance SIGNAL policy over project DENY_ALL and check
 pending, duplicate, stale-id, and exactly-once completion behavior. Only fake
@@ -89,6 +98,23 @@ because it would bypass the callbacks under test. Returned tracks are stopped
 immediately. The fixture binds to `127.0.0.1` on an ephemeral port, serves its own
 pages, and isolates event history by a random run id. There is no external web
 dependency during the tests.
+
+Dialog cases verify the default Native policy before opting into Signal (1);
+the policy-change case also exercises Cancel (2). Native desktop dialog UI is
+not opened by the headless suite. The test addon sets
+`godot_cef/dialogs/request_timeout_seconds` to one second before CEF startup.
+Most request callbacks only enqueue DTOs, and replies run on a later main-loop
+frame; `dialog_reentrant` deliberately exercises an immediate reply separately.
+The dialog fixture is served from `xtask/src/integration/dialogs.html`. The runner
+creates two real text files under the retained run's `dialog-files/` directory
+and supplies their absolute paths to Godot. Files are never selected by page
+JavaScript or an OS UI automation fallback. For `CefTexture`, input travels
+through a test-owned embedded Window's viewport; this acquires logical focus
+because the headless root Window cannot acquire OS focus. It creates no native
+desktop window or render frames. `CefTexture2D` uses its public input-forwarding
+API. The page waits for loading and two CEF animation frames before reporting
+input readiness, with control geometry and device pixel ratio retained in the
+report. This prevents native browser mouse events from racing the first layout.
 
 Startup waits for a successful loopback HTTP health handshake before launching
 Godot, with a two-second deadline. Only connection refusal/timeouts are retried;
@@ -116,7 +142,8 @@ also retains staged binaries and isolated profiles. CI always uploads JSON,
 JUnit and logs as `integration-linux-x64`; it does not upload profiles/binaries.
 
 The test protocol is `GDCEF_ITEST=1` plus `GDCEF_ITEST_CLASS`, `GDCEF_ITEST_CASE`,
-`GDCEF_ITEST_ORIGIN`, `GDCEF_ITEST_RUN`, and `GDCEF_ITEST_PROFILE`. The Rust runner
+`GDCEF_ITEST_ORIGIN`, `GDCEF_ITEST_RUN`, `GDCEF_ITEST_PROFILE`,
+`GDCEF_ITEST_DIALOG_FILE`, and `GDCEF_ITEST_DIALOG_FILE_SECOND`. The Rust runner
 supplies these; manual environment configuration is normally unnecessary.
 
 Run the harness's own failure-path checks with:

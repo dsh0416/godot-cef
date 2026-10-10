@@ -176,6 +176,15 @@ const SCENARIOS: &[&str] = &[
     "permission_unhandled_then_listen",
     "js_ipc",
     "lifecycle",
+    "dialog_js",
+    "dialog_file",
+    "dialog_timeout",
+    "dialog_unhandled",
+    "dialog_navigation",
+    "dialog_policy",
+    "dialog_lifecycle",
+    "dialog_before_unload",
+    "dialog_reentrant",
 ];
 
 fn select_cases(filter: Option<&str>) -> Result<Vec<Case>> {
@@ -295,6 +304,14 @@ impl Suite {
             let name = format!("{}-{}", case.class, case.case);
             let id = format!("{name}-{}", random_id()?);
             server.register(&id);
+            // Files selected by CEF must be real, retained files, not mocked paths.
+            // Keep them outside the profile so browser cleanup cannot remove them.
+            let fixture_dir = self.run_root.join("dialog-files").join(&name);
+            fs::create_dir_all(&fixture_dir)?;
+            let selected_file = fixture_dir.join("selected-unicode-雪.txt");
+            let second_file = fixture_dir.join("selected-second.txt");
+            fs::write(&selected_file, "gdcef dialog fixture: 雪 ✓\n")?;
+            fs::write(&second_file, "gdcef second file: λ\n")?;
             let mut command = self.command();
             command
                 .arg("--headless")
@@ -303,6 +320,8 @@ impl Suite {
                 .env("GDCEF_ITEST_CASE", case.case)
                 .env("GDCEF_ITEST_ORIGIN", server.origin())
                 .env("GDCEF_ITEST_RUN", &id)
+                .env("GDCEF_ITEST_DIALOG_FILE", &selected_file)
+                .env("GDCEF_ITEST_DIALOG_FILE_SECOND", &second_file)
                 .env(
                     "GDCEF_ITEST_PROFILE",
                     self.run_root.join(&name).join("cef-profile"),
@@ -393,7 +412,7 @@ mod tests {
 
     #[test]
     fn selection_preserves_full_matrix_and_rejects_unknown_cases() -> Result<()> {
-        assert_eq!(select_cases(None)?.len(), 14);
+        assert_eq!(select_cases(None)?.len(), SCENARIOS.len() * 2);
         let selected = select_cases(Some("CefTexture2D:permission_navigation"))?;
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].class, "CefTexture2D");

@@ -4,6 +4,7 @@
 //! Callbacks only enqueue events: assertions and Godot calls run on subsequent main-loop frames,
 //! outside production signal dispatch and without blocking CEF's message pump.
 
+mod dialogs;
 mod permissions;
 mod scenarios;
 
@@ -135,6 +136,7 @@ struct Runner {
     stale_signals: usize,
     process_frames: usize,
     draw_frames: usize,
+    dialogs: dialogs::DialogState,
 }
 
 impl Runner {
@@ -176,6 +178,7 @@ impl Runner {
             stale_signals: 0,
             process_frames: 0,
             draw_frames: 0,
+            dialogs: dialogs::DialogState::default(),
         };
         if let Err(error) = runner.setup(&env("GDCEF_ITEST_PROFILE")) {
             runner.fail(error);
@@ -194,6 +197,15 @@ impl Runner {
                     | "permission_unhandled_then_listen"
                     | "js_ipc"
                     | "lifecycle"
+                    | "dialog_js"
+                    | "dialog_file"
+                    | "dialog_timeout"
+                    | "dialog_unhandled"
+                    | "dialog_navigation"
+                    | "dialog_policy"
+                    | "dialog_lifecycle"
+                    | "dialog_before_unload"
+                    | "dialog_reentrant"
             )
         {
             return Err("Harness supplied an unknown class or case".into());
@@ -217,6 +229,10 @@ impl Runner {
         }
         ProjectSettings::singleton()
             .set_setting("godot_cef/storage/data_path", &profile.to_variant());
+        ProjectSettings::singleton().set_setting(
+            "godot_cef/dialogs/request_timeout_seconds",
+            &1_i64.to_variant(),
+        );
         self.check(
             DisplayServer::singleton().get_name() == "headless",
             "Integration run must use Godot's headless display server",
@@ -286,11 +302,24 @@ impl Runner {
         }
         browser.set("enable_accelerated_osr", &false.to_variant());
         browser.set("permission_policy", &2_i64.to_variant());
+        if self.case.starts_with("dialog_") {
+            self.check(
+                browser
+                    .get("dialog_policy")
+                    .try_to::<i64>()
+                    .is_ok_and(|policy| policy == 0),
+                "Dialogs must default to Native before opting into Signal",
+            );
+            browser.set("dialog_policy", &1_i64.to_variant());
+            self.setup_dialog_signals()?;
+        }
         browser.set(
             "preload_script",
             &"window.__gdcef_preload = true;".to_variant(),
         );
-        let path = if self.case == "js_ipc" {
+        let path = if self.case.starts_with("dialog_") {
+            "dialogs"
+        } else if self.case == "js_ipc" {
             "js"
         } else if self.case == "lifecycle" {
             "lifecycle"
@@ -298,8 +327,8 @@ impl Runner {
             "case"
         };
         let url = format!(
-            "{}/{path}?run={}&generation={}",
-            self.origin, self.run, self.generation
+            "{}/{path}?run={}&generation={}&case={}",
+            self.origin, self.run, self.generation, self.case
         );
         browser.set("url", &url.to_variant());
         self.check(
@@ -337,7 +366,11 @@ impl Runner {
             let Some(mut root) = scene_tree().and_then(|tree| tree.get_root()) else {
                 return Err("SceneTree root disappeared".into());
             };
-            root.add_child(&node);
+            if self.case.starts_with("dialog_") {
+                self.attach_dialog_node(&node)?;
+            } else {
+                root.add_child(&node);
+            }
         } else {
             browser.set("texture_size", &Vector2i::new(640, 360).to_variant());
         }
@@ -407,6 +440,8 @@ impl Runner {
             self.tick_permissions();
         } else if self.case == "js_ipc" {
             self.tick_ipc();
+        } else if self.case.starts_with("dialog_") {
+            self.tick_dialogs();
         } else {
             self.tick_lifecycle();
         }
@@ -450,6 +485,15 @@ impl Runner {
             return;
         }
         if event.generation != self.generation || self.browser.is_none() {
+            // Closing the old Node may report its cancellation during queued deletion.
+            // It is valid until the next browser generation is instantiated.
+            if self.case == "dialog_lifecycle"
+                && event.name == "dialog_request_finished"
+                && event.generation == self.generation
+            {
+                self.dialog_finished(&event.args);
+                return;
+            }
             self.stale_signals += 1;
             self.check(
                 false,
@@ -463,6 +507,10 @@ impl Runner {
         match event.name {
             "permission_requested" => self.permission_requested(&event.args),
             "permission_request_finished" => self.permission_finished(&event.args),
+            "file_dialog_requested" | "js_dialog_requested" | "dialog_immediate" => {
+                self.dialog_requested(event.name, &event.args)
+            }
+            "dialog_request_finished" => self.dialog_finished(&event.args),
             "load_finished" => {
                 self.load_finished += 1;
             }
@@ -531,6 +579,9 @@ impl Runner {
                 if explicit_shutdown {
                     browser.call("shutdown", &[]);
                 }
+            } else if let Some(mut window) = self.dialogs.window.take() {
+                // The test-owned embedded window frees its browser child as well.
+                window.queue_free();
             } else if let Ok(mut node) = browser.try_cast::<Node>() {
                 node.queue_free();
             }
@@ -578,6 +629,8 @@ impl Runner {
                 "generation": self.generation, "ipc_received": self.ipc_received,
                 "load_finished": self.load_finished, "stale_signals": self.stale_signals,
                 "process_frames": self.process_frames, "draw_frames": self.draw_frames,
+                "dialog_requests": self.dialogs.requests,
+                "dialog_finished": self.dialogs.finished,
                 "elapsed_ms": self.started.elapsed().as_millis(),
             })
         );
