@@ -726,7 +726,7 @@ wrap_dialog_handler! {
             let Some(callback) = callback else { return 0; };
             let event = crate::browser::FileDialogRequestEvent {
                 request_id: 0,
-                mode: mode.get_raw(),
+                mode: crate::cef_raw_to_i32!(mode.get_raw()),
                 title: title.map(|value| value.to_string()).unwrap_or_default(),
                 default_file_path: default_file_path.map(|value| value.to_string()).unwrap_or_default(),
                 accept_filters: copy_dialog_strings(accept_filters),

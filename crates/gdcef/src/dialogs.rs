@@ -518,7 +518,7 @@ impl<C> DialogState<C> {
 }
 
 fn valid_file_paths(mode: i32, paths: &[String]) -> bool {
-    let multiple = mode == cef::FileDialogMode::OPEN_MULTIPLE.get_raw();
+    let multiple = mode == crate::cef_raw_to_i32!(cef::FileDialogMode::OPEN_MULTIPLE.get_raw());
     let known = [
         cef::FileDialogMode::OPEN,
         cef::FileDialogMode::OPEN_MULTIPLE,
@@ -526,7 +526,7 @@ fn valid_file_paths(mode: i32, paths: &[String]) -> bool {
         cef::FileDialogMode::SAVE,
     ]
     .iter()
-    .any(|candidate| candidate.get_raw() == mode);
+    .any(|candidate| crate::cef_raw_to_i32!(candidate.get_raw()) == mode);
     known
         && (multiple || paths.len() == 1)
         && paths.iter().all(|path| {
@@ -607,7 +607,7 @@ mod tests {
     fn file(mode: cef::FileDialogMode) -> RequestEvent {
         RequestEvent::File(FileDialogRequestEvent {
             request_id: 0,
-            mode: mode.get_raw(),
+            mode: crate::cef_raw_to_i32!(mode.get_raw()),
             title: "选择文件".into(),
             default_file_path: String::new(),
             accept_filters: vec!["image/*".into()],
