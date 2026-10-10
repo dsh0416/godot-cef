@@ -199,7 +199,7 @@ url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/616153638"
 provenance = "github-attestations"
 
 [[tools.rust]]
-version = "nightly-2026-10-09"
+version = "nightly-2026-10-10"
 backend = "core:rust"
 specifiers = ["nightly"]
 
