@@ -36,6 +36,7 @@ pub(crate) struct BackendCreateParams {
     pub background_color: Color,
     pub popup_policy: i32,
     pub permission_policy: i32,
+    pub dialog_policy: i32,
     pub preload_script: String,
     pub preload_script_path: String,
     pub software_target_texture: Option<Gd<ImageTexture>>,
@@ -51,6 +52,7 @@ struct BrowserCreateParams {
     preload_script: Option<String>,
     popup_policy: PopupPolicyFlag,
     permission_policy: i32,
+    dialog_policy: i32,
 }
 
 fn color_to_cef_color(color: Color) -> u32 {
@@ -492,6 +494,7 @@ pub(crate) fn try_create_browser(
         preload_script,
         popup_policy,
         permission_policy,
+        dialog_policy: params.dialog_policy,
     };
 
     if use_accelerated {
@@ -534,6 +537,7 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
 
     if let Some(state) = &app.state {
         state.permissions.close("browser_closed");
+        state.dialogs.close("browser_closed");
     }
 
     if let Some(state) = &app.state
@@ -583,6 +587,7 @@ fn create_software_browser(
         preload_script,
         popup_policy,
         permission_policy,
+        dialog_policy,
     } = params;
     godot::global::godot_print!(
         "[{}] Creating browser in software rendering mode",
@@ -612,7 +617,12 @@ fn create_software_browser(
     let popup_state: PopupStateQueue = render_handler.get_popup_state();
     let sample_rate = AudioServer::singleton().get_mix_rate();
     let enable_audio_capture = crate::settings::is_audio_capture_enabled();
-    let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture, permission_policy);
+    let queues = webrender::ClientQueues::new(
+        sample_rate,
+        enable_audio_capture,
+        permission_policy,
+        dialog_policy,
+    );
 
     let mut texture = software_target_texture.unwrap_or_else(ImageTexture::new_gd);
     // Avoid Godot's magenta placeholder while waiting for the first CEF paint.
@@ -653,12 +663,14 @@ fn create_software_browser(
     )
     .ok_or_else(|| {
         queues.permissions.close("browser_closed");
+        queues.dialogs.close("browser_closed");
         CefError::BrowserCreationFailed("browser_host_create_browser_sync returned None".into())
     })?;
 
     let event_queues = queues.event_queues.clone();
     let source_drag = queues.source_drag.clone();
     let permissions = queues.permissions.clone();
+    let dialogs = queues.dialogs.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Software {
@@ -674,6 +686,7 @@ fn create_software_browser(
         source_drag,
         popup_policy,
         permissions,
+        dialogs,
     });
 
     Ok(())
@@ -726,6 +739,7 @@ fn create_accelerated_browser(
         preload_script: _,
         popup_policy,
         permission_policy,
+        dialog_policy,
     } = params;
 
     let rd_texture_rid = render_state
@@ -746,7 +760,12 @@ fn create_accelerated_browser(
     let popup_state: PopupStateQueue = render_handler.get_popup_state();
     let sample_rate = AudioServer::singleton().get_mix_rate();
     let enable_audio_capture = crate::settings::is_audio_capture_enabled();
-    let queues = webrender::ClientQueues::new(sample_rate, enable_audio_capture, permission_policy);
+    let queues = webrender::ClientQueues::new(
+        sample_rate,
+        enable_audio_capture,
+        permission_policy,
+        dialog_policy,
+    );
 
     let cef_render_handler = webrender::AcceleratedOsrHandler::build(
         render_handler,
@@ -773,6 +792,7 @@ fn create_accelerated_browser(
         Some(browser) => browser,
         None => {
             queues.permissions.close("browser_closed");
+            queues.dialogs.close("browser_closed");
             texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
             AcceleratedRenderState::shutdown(&render_state);
             return Err(CefError::BrowserCreationFailed(
@@ -784,6 +804,7 @@ fn create_accelerated_browser(
     let event_queues = queues.event_queues.clone();
     let source_drag = queues.source_drag.clone();
     let permissions = queues.permissions.clone();
+    let dialogs = queues.dialogs.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Accelerated {
@@ -799,6 +820,7 @@ fn create_accelerated_browser(
         source_drag,
         popup_policy,
         permissions,
+        dialogs,
     });
     Ok(())
 }

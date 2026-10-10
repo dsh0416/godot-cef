@@ -38,6 +38,34 @@ pub mod permission_policy {
     pub const SIGNAL: i32 = 2;
 }
 
+/// Browser dialog handling policies.
+pub mod dialog_policy {
+    pub const NATIVE: i32 = 0;
+    pub const SIGNAL: i32 = 1;
+    pub const CANCEL: i32 = 2;
+}
+
+#[derive(Debug, Clone)]
+pub struct FileDialogRequestEvent {
+    pub request_id: i64,
+    pub mode: i32,
+    pub title: String,
+    pub default_file_path: String,
+    pub accept_filters: Vec<String>,
+    pub accept_extensions: Vec<String>,
+    pub accept_descriptions: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsDialogRequestEvent {
+    pub request_id: i64,
+    pub kind: String,
+    pub origin_url: String,
+    pub message_text: String,
+    pub default_prompt_text: String,
+    pub is_reload: bool,
+}
+
 /// Represents a loading state event from the browser.
 #[derive(Debug, Clone)]
 pub enum LoadingStateEvent {
@@ -362,6 +390,10 @@ pub struct EventQueues {
     pub permission_requests: VecDeque<PermissionRequestEvent>,
     /// Final results for every public id belonging to a completed permission request.
     pub permission_request_finished: VecDeque<(i64, String)>,
+    /// Custom file chooser and JavaScript dialog requests.
+    pub file_dialog_requests: VecDeque<FileDialogRequestEvent>,
+    pub js_dialog_requests: VecDeque<JsDialogRequestEvent>,
+    pub dialog_request_finished: VecDeque<(i64, String)>,
     /// Find-in-page result events.
     pub find_results: VecDeque<FindResultEvent>,
     /// Cookie operation results.
@@ -491,6 +523,7 @@ pub struct BrowserState {
     pub popup_policy: PopupPolicyFlag,
     /// Shared permission policy and pending callback ownership.
     pub permissions: crate::permissions::PermissionController,
+    pub dialogs: crate::dialogs::DialogController,
 }
 
 /// CEF browser state and shared resources.

@@ -1,6 +1,7 @@
 pub(crate) mod backend;
 mod browser_lifecycle;
 mod cookie_ops;
+mod dialogs;
 mod focus_state;
 mod ime;
 mod input_routing;
@@ -58,6 +59,11 @@ pub struct CefTexture {
     #[var(get = get_permission_policy, set = set_permission_policy)]
     /// Browser permission handling. ProjectDefault inherits the project setting at creation.
     permission_policy: i32,
+
+    #[export(enum = (Native = 0, Signal = 1, Cancel = 2))]
+    #[var(get = get_dialog_policy, set = set_dialog_policy)]
+    /// Native CEF dialogs, application-owned asynchronous signals, or cancellation.
+    dialog_policy: i32,
 
     #[export]
     #[var(get = get_preload_script, set = set_preload_script)]
@@ -118,6 +124,7 @@ impl ITextureRect for CefTexture {
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
             popup_policy: crate::browser::popup_policy::BLOCK,
             permission_policy: -1,
+            dialog_policy: 0,
             preload_script: GString::new(),
             preload_script_path: GString::new(),
             ime_position: Vector2i::new(0, 0),
@@ -231,6 +238,19 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
+    #[func]
+    pub fn get_dialog_policy(&self) -> i32 {
+        self.dialog_policy
+    }
+
+    #[func]
+    pub fn set_dialog_policy(&mut self, policy: i32) {
+        self.dialog_policy = policy.clamp(0, 2);
+        if let Some(controller) = self.dialog_controller() {
+            controller.set_policy(self.dialog_policy);
+        }
+    }
+
     fn with_app<R>(&self, f: impl FnOnce(&crate::browser::App) -> R) -> R {
         let helper = self.texture2d_helper.bind();
         f(helper.runtime_app())
@@ -249,6 +269,15 @@ impl CefTexture {
 
     #[signal]
     fn ipc_message(message: GString);
+
+    #[signal]
+    fn file_dialog_requested(info: Gd<crate::dialog_info::FileDialogRequestInfo>);
+
+    #[signal]
+    fn js_dialog_requested(info: Gd<crate::dialog_info::JsDialogRequestInfo>);
+
+    #[signal]
+    fn dialog_request_finished(request_id: i64, result: GString);
 
     #[signal]
     fn ipc_binary_message(data: PackedByteArray);

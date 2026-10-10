@@ -48,6 +48,7 @@ pub(crate) fn ensure_installed() -> Result<(), String> {
         // by OnScheduleMessagePumpWork, which only touches the Rust scheduler.
         let callable = Callable::from_fn("gdcef_message_pump", |_| {
             crate::permissions::expire_pending();
+            crate::dialogs::expire_pending();
             MESSAGE_PUMP.run_due(cef::do_message_loop_work);
         });
         let error = tree.connect("process_frame", &callable);

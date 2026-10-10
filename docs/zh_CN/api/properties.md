@@ -18,6 +18,7 @@
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色。将 alpha 设为 0 表示透明背景，或使用实色以禁用透明效果。 |
 | `popup_policy` | `int` | `0` | 控制弹出窗口的处理方式。`0` = BLOCK（静默阻止），`1` = REDIRECT（在当前浏览器中导航到弹出 URL），`2` = SIGNAL_ONLY（触发 `popup_requested` 信号）。可在运行时更改。 |
 | `permission_policy` | `int` | `-1` | `-1` 继承项目权限策略，`0` 拒绝，`1` 允许已知请求，`2` 发出权限信号。运行时更改会取消待处理请求，参见[权限](./permissions.md)。 |
+| `dialog_policy` | `int` | `0` | 文件与 JavaScript 对话框策略：Native（`0`，CEF 默认）、Signal（`1`，应用界面）、Cancel（`2`）。运行时更改会取消待处理请求，参见[对话框](./dialogs.md)。 |
 | `preload_script` | `String` | `""` | 在 JS Bridge 注册之后、document 加载之前，为浏览器主 Frame 执行的 JavaScript 源码。与 `preload_script_path` 互斥。 |
 | `preload_script_path` | `String` | `""` | 要预加载的 JavaScript 文件路径。支持 `res://`、`user://` 等 Godot 路径。与 `preload_script` 互斥。 |
 
@@ -30,13 +31,16 @@
 | `background_color` | `Color` | `Color(0, 0, 0, 0)` | 浏览器背景色（支持透明）。 |
 | `popup_policy` | `int` | `0` | 弹窗策略：BLOCK / REDIRECT / SIGNAL_ONLY。 |
 | `permission_policy` | `int` | `-1` | 与 `CefTexture` 使用相同的权限策略和信号；运行时更改会取消待处理请求，参见[权限](./permissions.md)。 |
+| `dialog_policy` | `int` | `0` | 与 `CefTexture` 使用相同的文件 / JavaScript 对话框策略、信号与应答方法，参见[对话框](./dialogs.md)。 |
 | `preload_script` | `String` | `""` | 在 JS Bridge 注册之后、document 加载之前，为浏览器主 Frame 执行的 JavaScript 源码。与 `preload_script_path` 互斥。 |
 | `preload_script_path` | `String` | `""` | 要预加载的 JavaScript 文件路径。支持 `res://`、`user://` 等 Godot 路径。与 `preload_script` 互斥。 |
 | `texture_size` | `Vector2i` | `Vector2i(1024, 1024)` | 浏览器纹理逻辑尺寸（像素）。 |
 
 `CefTexture2D` 仍以渲染为主，不包含内置的 3D 表面输入映射/射线投射路由。
 它提供 `permission_requested`、`permission_request_finished` 信号，
-以及与 `CefTexture` 相同的权限应答方法；不提供 `load_finished`、`title_changed`、
+以及与 `CefTexture` 相同的权限应答方法；还提供 `file_dialog_requested`、
+`js_dialog_requested`、`dialog_request_finished` 及相同的对话框应答方法。
+不提供 `load_finished`、`title_changed`、
 `console_message` 或 `popup_requested` 等其他浏览器事件信号。
 需要加载事件时，请使用 `CefTexture` 节点并连接其信号。
 
@@ -126,6 +130,15 @@ IPC。它不是安全隔离边界，也不应包含不允许被页面读取的�
 
 浏览器可通过 `permission_policy` 覆盖项目权限策略。
 请求分组、失效清理和完整示例见[权限](./permissions.md)。
+
+### 对话框设置
+
+| 设置 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `godot_cef/dialogs/request_timeout_seconds` | `int` | `60` | 未回答的 Signal 文件 / JavaScript 对话框的期限，单位为秒，最小 `1`。请在创建浏览器之前配置。 |
+
+每个浏览器可通过 `dialog_policy` 选择 Native、Signal 或 Cancel。
+Signal 需要应用提供界面，参见[对话框](./dialogs.md)。
 
 ### 调试设置
 

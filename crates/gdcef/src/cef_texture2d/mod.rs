@@ -40,6 +40,7 @@ pub(crate) struct RuntimeCreateConfig {
     background_color: Color,
     popup_policy: i32,
     permission_policy: i32,
+    dialog_policy: i32,
     preload_script: GString,
     preload_script_path: GString,
     software_target_texture: Option<Gd<ImageTexture>>,
@@ -84,6 +85,10 @@ pub struct CefTexture2D {
     #[export(enum = (ProjectDefault = -1, DenyAll = 0, AllowAll = 1, Signal = 2))]
     #[var(get = get_permission_policy, set = set_permission_policy)]
     permission_policy: i32,
+
+    #[export(enum = (Native = 0, Signal = 1, Cancel = 2))]
+    #[var(get = get_dialog_policy, set = set_dialog_policy)]
+    dialog_policy: i32,
 
     #[export]
     #[var(get = get_preload_script, set = set_preload_script)]
@@ -137,6 +142,7 @@ impl ITexture2D for CefTexture2D {
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
             popup_policy: crate::browser::popup_policy::BLOCK,
             permission_policy: -1,
+            dialog_policy: 0,
             preload_script: GString::new(),
             preload_script_path: GString::new(),
             texture_size,

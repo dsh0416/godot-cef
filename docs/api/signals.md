@@ -2,8 +2,9 @@
 
 The `CefTexture` node emits various signals to notify your game about browser events and state changes.
 
-The two permission signals below are also available on `CefTexture2D`.
-See [Permissions](./permissions.md) for a complete dialog example.
+The permission and file/JavaScript dialog signals below are also available on
+`CefTexture2D`. See [Permissions](./permissions.md) and [Dialogs](./dialogs.md)
+for complete Godot UI examples.
 
 ## `ipc_message(message: String)`
 
@@ -393,6 +394,36 @@ guarantee a final signal; clear its permission UI during your own teardown.
 Use this signal to remove queued requests and close stale permission dialogs.
 Check `is_permission_pending(request_id)` before answering from asynchronous UI.
 See [Permissions](./permissions.md#queueing-a-godot-permission-dialog).
+
+## `file_dialog_requested(info: FileDialogRequestInfo)`
+
+Available on `CefTexture` and `CefTexture2D`. Emitted in Signal dialog policy
+(`dialog_policy = 1`) when CEF requests a file chooser. `info` contains the ID,
+mode, title, default path, and accept-filter metadata. Answer with
+`continue_file_dialog()` or `cancel_file_dialog()`.
+
+See [Dialogs](./dialogs.md#filedialogrequestinfo) for the DTO fields and a Godot
+`FileDialog` example. Signal mode does not create a dialog automatically.
+
+## `js_dialog_requested(info: JsDialogRequestInfo)`
+
+Available on both browser types in Signal dialog policy. `info.kind` is `alert`,
+`confirm`, `prompt`, or `before_unload`. Other fields include the ID, origin URL,
+message, default prompt input, and reload flag. Answer with
+`continue_js_dialog()` or `cancel_js_dialog()`.
+
+See [Dialogs](./dialogs.md#jsdialogrequestinfo) for the DTO and examples.
+
+## `dialog_request_finished(request_id: int, result: String)`
+
+Available on both browser types. Emitted when a custom dialog request completes
+or is invalidated. Hide its UI and remove its ID from application state. Results
+include `accepted`, `canceled`, `timed_out`, `unhandled`, `navigation`,
+`policy_changed`, `reset`, `dialog_closed`, `browser_closed`, and
+`renderer_terminated`. See [dialog lifetime](./dialogs.md#policy-and-lifetime).
+
+Freeing a browser does not guarantee a final signal; also clean up the UI in
+the application's browser teardown path.
 
 ## `find_result(count: int, active_index: int, final_update: bool)`
 

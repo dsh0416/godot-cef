@@ -74,6 +74,7 @@ impl CefTexture {
             background_color: self.background_color,
             popup_policy: self.popup_policy,
             permission_policy: self.permission_policy,
+            dialog_policy: self.dialog_policy,
             preload_script: self.preload_script.to_string(),
             preload_script_path: self.preload_script_path.to_string(),
             software_target_texture: None,

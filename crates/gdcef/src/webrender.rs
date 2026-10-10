@@ -53,16 +53,27 @@ pub(crate) struct ClientQueues {
     /// Whether audio capture is enabled.
     pub enable_audio_capture: bool,
     pub permissions: crate::permissions::PermissionController,
+    pub dialogs: crate::dialogs::DialogController,
 }
 
 impl ClientQueues {
-    pub fn new(sample_rate: f32, enable_audio_capture: bool, permission_policy: i32) -> Self {
+    pub fn new(
+        sample_rate: f32,
+        enable_audio_capture: bool,
+        permission_policy: i32,
+        dialog_policy: i32,
+    ) -> Self {
         use std::sync::atomic::AtomicBool;
         let event_queues = Arc::new(Mutex::new(EventQueues::new()));
         let permissions = crate::permissions::PermissionController::new(
             event_queues.clone(),
             permission_policy,
             crate::settings::get_permission_request_timeout(),
+        );
+        let dialogs = crate::dialogs::DialogController::new(
+            event_queues.clone(),
+            dialog_policy,
+            crate::settings::get_dialog_request_timeout(),
         );
         Self {
             event_queues,
@@ -73,6 +84,7 @@ impl ClientQueues {
             audio_shutdown_flag: Arc::new(AtomicBool::new(false)),
             enable_audio_capture,
             permissions,
+            dialogs,
         }
     }
 
@@ -684,16 +696,136 @@ wrap_context_menu_handler! {
 
 impl_build_new!(pub ContextMenuHandlerImpl => cef::ContextMenuHandler;);
 
+fn copy_dialog_strings(list: Option<&mut CefStringList>) -> Vec<String> {
+    list.map(|list| {
+        // cef-rs iterates through a mutable raw view; a const wrapper cannot
+        // produce that view and would silently yield an empty iterator.
+        let raw: *mut cef::sys::_cef_string_list_t = list.into();
+        CefStringList::from(raw).into_iter().collect()
+    })
+    .unwrap_or_default()
+}
+
+wrap_dialog_handler! {
+    pub(crate) struct DialogHandlerImpl {
+        dialogs: crate::dialogs::DialogController,
+    }
+
+    impl DialogHandler {
+        fn on_file_dialog(
+            &self,
+            _browser: Option<&mut Browser>,
+            mode: FileDialogMode,
+            title: Option<&CefString>,
+            default_file_path: Option<&CefString>,
+            accept_filters: Option<&mut CefStringList>,
+            accept_extensions: Option<&mut CefStringList>,
+            accept_descriptions: Option<&mut CefStringList>,
+            callback: Option<&mut FileDialogCallback>,
+        ) -> i32 {
+            let Some(callback) = callback else { return 0; };
+            let event = crate::browser::FileDialogRequestEvent {
+                request_id: 0,
+                mode: mode.get_raw(),
+                title: title.map(|value| value.to_string()).unwrap_or_default(),
+                default_file_path: default_file_path.map(|value| value.to_string()).unwrap_or_default(),
+                accept_filters: copy_dialog_strings(accept_filters),
+                accept_extensions: copy_dialog_strings(accept_extensions),
+                accept_descriptions: copy_dialog_strings(accept_descriptions),
+            };
+            (self.dialogs.request_file(callback.clone(), event) != crate::dialogs::DialogDisposition::Native) as i32
+        }
+    }
+}
+
+impl_build_new!(pub DialogHandlerImpl => cef::DialogHandler; dialogs: crate::dialogs::DialogController);
+
+wrap_jsdialog_handler! {
+    pub(crate) struct JsDialogHandlerImpl {
+        dialogs: crate::dialogs::DialogController,
+    }
+
+    impl JsdialogHandler {
+        fn on_jsdialog(
+            &self,
+            _browser: Option<&mut Browser>,
+            origin_url: Option<&CefString>,
+            dialog_type: JsdialogType,
+            message_text: Option<&CefString>,
+            default_prompt_text: Option<&CefString>,
+            callback: Option<&mut JsdialogCallback>,
+            suppress_message: Option<&mut i32>,
+        ) -> i32 {
+            let Some(callback) = callback else { return 0; };
+            let kind = match dialog_type {
+                JsdialogType::ALERT => "alert",
+                JsdialogType::CONFIRM => "confirm",
+                JsdialogType::PROMPT => "prompt",
+                _ => {
+                    if let Some(suppress) = suppress_message { *suppress = 1; }
+                    return 0;
+                }
+            };
+            let event = crate::browser::JsDialogRequestEvent {
+                request_id: 0,
+                kind: kind.into(),
+                origin_url: origin_url.map(|value| value.to_string()).unwrap_or_default(),
+                message_text: message_text.map(|value| value.to_string()).unwrap_or_default(),
+                default_prompt_text: default_prompt_text.map(|value| value.to_string()).unwrap_or_default(),
+                is_reload: false,
+            };
+            let disposition = self.dialogs.request_js(callback.clone(), event);
+            if let Some(suppress) = suppress_message {
+                *suppress = (disposition == crate::dialogs::DialogDisposition::Suppress) as i32;
+            }
+            (disposition == crate::dialogs::DialogDisposition::Handled) as i32
+        }
+
+        fn on_before_unload_dialog(
+            &self,
+            browser: Option<&mut Browser>,
+            message_text: Option<&CefString>,
+            is_reload: i32,
+            callback: Option<&mut JsdialogCallback>,
+        ) -> i32 {
+            let Some(callback) = callback else { return 0; };
+            let origin_url = browser.and_then(|browser| browser.main_frame())
+                .map(|frame| CefStringUtf16::from(&frame.url()).to_string()).unwrap_or_default();
+            let event = crate::browser::JsDialogRequestEvent {
+                request_id: 0,
+                kind: "before_unload".into(),
+                origin_url,
+                message_text: message_text.map(|value| value.to_string()).unwrap_or_default(),
+                default_prompt_text: String::new(),
+                is_reload: is_reload != 0,
+            };
+            (self.dialogs.request_js(callback.clone(), event) == crate::dialogs::DialogDisposition::Handled) as i32
+        }
+
+        fn on_reset_dialog_state(&self, _browser: Option<&mut Browser>) {
+            self.dialogs.reset_js("reset");
+        }
+
+        fn on_dialog_closed(&self, _browser: Option<&mut Browser>) {
+            self.dialogs.reset_js("dialog_closed");
+        }
+    }
+}
+
+impl_build_new!(pub JsDialogHandlerImpl => cef::JsdialogHandler; dialogs: crate::dialogs::DialogController);
+
 wrap_life_span_handler! {
     pub(crate) struct LifeSpanHandlerImpl {
         event_queues: EventQueuesHandle,
         popup_policy: crate::browser::PopupPolicyFlag,
         permissions: crate::permissions::PermissionController,
+        dialogs: crate::dialogs::DialogController,
     }
 
     impl LifeSpanHandler {
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
             self.permissions.invalidate("browser_closed");
+            self.dialogs.close("browser_closed");
         }
 
         fn on_before_popup(
@@ -758,7 +890,8 @@ impl_build_new!(
     pub LifeSpanHandlerImpl => cef::LifeSpanHandler;
     event_queues: EventQueuesHandle,
     popup_policy: crate::browser::PopupPolicyFlag,
-    permissions: crate::permissions::PermissionController
+    permissions: crate::permissions::PermissionController,
+    dialogs: crate::dialogs::DialogController
 );
 
 wrap_load_handler! {
@@ -1098,6 +1231,7 @@ wrap_request_handler! {
     pub(crate) struct RequestHandlerImpl {
         event_queues: EventQueuesHandle,
         permissions: crate::permissions::PermissionController,
+        dialogs: crate::dialogs::DialogController,
     }
 
     impl RequestHandler {
@@ -1112,6 +1246,7 @@ wrap_request_handler! {
             if let Some(frame) = frame {
                 if frame.is_main() != 0 {
                     self.permissions.cancel_all("navigation");
+                    self.dialogs.cancel_all("navigation");
                 } else {
                     self.permissions.cancel_frame(&CefStringUtf16::from(&frame.identifier()).to_string());
                 }
@@ -1127,6 +1262,7 @@ wrap_request_handler! {
             _error_string: Option<&cef::CefStringUtf16>,
         ) {
             self.permissions.invalidate("renderer_terminated");
+            self.dialogs.cancel_all("renderer_terminated");
             let reason = match status {
                 cef::TerminationStatus::ABNORMAL_TERMINATION => "Abnormal Termination",
                 cef::TerminationStatus::PROCESS_WAS_KILLED => "Process Was Killed",
@@ -1144,7 +1280,8 @@ wrap_request_handler! {
 
 impl_build_new!(pub RequestHandlerImpl => cef::RequestHandler;
     event_queues: EventQueuesHandle,
-    permissions: crate::permissions::PermissionController
+    permissions: crate::permissions::PermissionController,
+    dialogs: crate::dialogs::DialogController
 );
 
 wrap_permission_handler! {
@@ -1212,6 +1349,8 @@ pub(crate) struct ClientHandlers {
     pub render_handler: cef::RenderHandler,
     pub display_handler: cef::DisplayHandler,
     pub context_menu_handler: cef::ContextMenuHandler,
+    pub dialog_handler: cef::DialogHandler,
+    pub jsdialog_handler: cef::JsdialogHandler,
     pub life_span_handler: cef::LifeSpanHandler,
     pub load_handler: cef::LoadHandler,
     pub find_handler: cef::FindHandler,
@@ -1250,6 +1389,14 @@ wrap_client! {
 
         fn context_menu_handler(&self) -> Option<cef::ContextMenuHandler> {
             Some(self.handlers.context_menu_handler.clone())
+        }
+
+        fn dialog_handler(&self) -> Option<cef::DialogHandler> {
+            Some(self.handlers.dialog_handler.clone())
+        }
+
+        fn jsdialog_handler(&self) -> Option<cef::JsdialogHandler> {
+            Some(self.handlers.jsdialog_handler.clone())
         }
 
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
@@ -1317,10 +1464,13 @@ fn build_client_handlers(
         render_handler,
         display_handler: DisplayHandlerImpl::build(cursor_type, queues.event_queues.clone()),
         context_menu_handler: ContextMenuHandlerImpl::build(),
+        dialog_handler: DialogHandlerImpl::build(queues.dialogs.clone()),
+        jsdialog_handler: JsDialogHandlerImpl::build(queues.dialogs.clone()),
         life_span_handler: LifeSpanHandlerImpl::build(
             queues.event_queues.clone(),
             popup_policy,
             queues.permissions.clone(),
+            queues.dialogs.clone(),
         ),
         load_handler: LoadHandlerImpl::build(
             queues.event_queues.clone(),
@@ -1333,6 +1483,7 @@ fn build_client_handlers(
         request_handler: RequestHandlerImpl::build(
             queues.event_queues.clone(),
             queues.permissions.clone(),
+            queues.dialogs.clone(),
         ),
         permission_handler: PermissionHandlerImpl::build(queues.permissions.clone()),
     }
@@ -1452,6 +1603,25 @@ impl_build_new!(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_dialog_lists_preserve_values_without_taking_the_cef_list() {
+        let mut list = CefStringList::new();
+        for value in ["image/*", "", "图片😀"] {
+            assert!(list.append(value));
+        }
+        assert_eq!(
+            copy_dialog_strings(Some(&mut list)),
+            ["image/*", "", "图片😀"]
+        );
+        // CEF owns the passed list. Reading it must neither free nor consume it.
+        assert!(list.append(".png;.jpg"));
+        assert_eq!(
+            copy_dialog_strings(Some(&mut list)),
+            ["image/*", "", "图片😀", ".png;.jpg"]
+        );
+        assert!(copy_dialog_strings(None).is_empty());
+    }
 
     #[test]
     fn test_bgra_to_rgba_single_pixel() {

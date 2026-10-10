@@ -45,6 +45,8 @@ uses internally and advanced users can call directly:
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
 - `grant_permission(...)`, `deny_permission(...)`, `is_permission_pending(...)`
 - `get_permission_setting(...)`
+- `continue_file_dialog(...)`, `cancel_file_dialog(...)`
+- `continue_js_dialog(...)`, `cancel_js_dialog(...)`, `is_dialog_pending(...)`
 
 For API consistency, these core controls intentionally keep the same names as
 their `CefTexture` counterparts (including shared properties such as `url`,
@@ -529,6 +531,26 @@ This is a profile lookup, not a check of effective application, browser, and OS
 authorization. It does not modify policy or answer pending requests. See
 [Querying profile settings](./permissions.md#querying-profile-settings) for
 supported labels, URL scope, and the camera/microphone limitation.
+
+## File and JavaScript Dialogs
+
+These methods are available on `CefTexture` and `CefTexture2D`. Connect the
+request signals and set `dialog_policy = 1` to answer requests with your own
+Godot UI. See [Dialogs](./dialogs.md) for request metadata, policy, completion
+results, and `FileDialog` / JavaScript dialog examples.
+
+| Method | Meaning |
+|--------|---------|
+| `continue_file_dialog(request_id: int, file_paths: PackedStringArray) -> bool` | Return absolute filesystem paths; an empty array cancels |
+| `cancel_file_dialog(request_id: int) -> bool` | Cancel a file chooser |
+| `continue_js_dialog(request_id: int, accepted: bool, user_input: String) -> bool` | Answer alert/confirm/prompt/before-unload; input is used for prompt |
+| `cancel_js_dialog(request_id: int) -> bool` | Cancel/reject a JavaScript dialog |
+| `is_dialog_pending(request_id: int) -> bool` | Whether the request still accepts an answer |
+
+Answer methods return `false` for stale, expired, completed, unknown, or
+wrong-type IDs. An invalid file path selection returns `false` and leaves the
+request pending. Resolve application-provided `res://` or `user://` paths with
+`ProjectSettings.globalize_path()` before passing them to CEF.
 
 ## Cookie & Session Management
 

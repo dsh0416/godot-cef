@@ -2,7 +2,8 @@
 
 `CefTexture` 会发出一系列信号，用于通知游戏侧浏览器事件与状态变化。
 
-下方的两个权限信号也适用于 `CefTexture2D`，完整对话框示例见[权限](./permissions.md)。
+下方的权限及文件 / JavaScript 对话框信号也适用于 `CefTexture2D`。
+完整 Godot 界面示例见[权限](./permissions.md)和[对话框](./dialogs.md)。
 
 ## `ipc_message(message: String)`
 
@@ -348,6 +349,32 @@ func _on_permission_requested(permission_type: String, url: String, request_id: 
 
 可用此信号移除队列中的请求、关闭失效的权限对话框。
 异步界面回答前应检查 `is_permission_pending(request_id)`，完整示例见[权限](./permissions.md)。
+
+## `file_dialog_requested(info: FileDialogRequestInfo)`
+
+`CefTexture` 和 `CefTexture2D` 均提供此信号。当 `dialog_policy = 1`（Signal）
+且 CEF 请求文件选择时发出。`info` 包含 ID、模式、标题、默认路径与筛选元数据。
+通过 `continue_file_dialog()` 或 `cancel_file_dialog()` 回答。
+
+完整字段与 Godot `FileDialog` 示例见[对话框](./dialogs.md#filedialogrequestinfo)。
+Signal 模式不会自动创建界面。
+
+## `js_dialog_requested(info: JsDialogRequestInfo)`
+
+两种浏览器类型均在 Signal 策略下提供此信号。`info.kind` 为 `alert`、`confirm`、
+`prompt` 或 `before_unload`，其他字段包括 ID、来源 URL、消息、默认输入与重载标记。
+通过 `continue_js_dialog()` 或 `cancel_js_dialog()` 回答。
+
+完整字段与示例见[对话框](./dialogs.md#jsdialogrequestinfo)。
+
+## `dialog_request_finished(request_id: int, result: String)`
+
+两种浏览器类型均提供此信号。在应用对话框请求完成或失效时发出。
+应隐藏其界面并从应用状态中移除 ID。结果包括 `accepted`、`canceled`、`timed_out`、
+`unhandled`、`navigation`、`policy_changed`、`reset`、`dialog_closed`、
+`browser_closed` 和 `renderer_terminated`，参见[对话框生命周期](./dialogs.md#策略与生命周期)。
+
+释放浏览器时不保证最终信号一定送达，应用的浏览器清理流程也应清理界面。
 
 ## `render_process_terminated(status: int, error_message: String)`
 

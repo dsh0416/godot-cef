@@ -8,6 +8,8 @@ mod cef_texture2d;
 mod compat;
 mod cookie;
 mod cursor;
+mod dialog_info;
+mod dialogs;
 mod drag;
 mod error;
 mod godot_protocol;

@@ -43,6 +43,8 @@ func _unhandled_input(event: InputEvent) -> void:
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
 - `grant_permission(...)`, `deny_permission(...)`, `is_permission_pending(...)`
 - `get_permission_setting(...)`
+- `continue_file_dialog(...)`、`cancel_file_dialog(...)`
+- `continue_js_dialog(...)`、`cancel_js_dialog(...)`、`is_dialog_pending(...)`
 
 为保持 API 一致性，这些核心控制在命名上与 `CefTexture` 保持一致（也包括
 `url`、`enable_accelerated_osr`、`background_color`、`popup_policy` 等共享属性）。
@@ -425,6 +427,24 @@ CEF 值返回为 `allow`、`block`、`ask`、`default`、`session_only` 或 `unk
 此方法查询配置值，不判断应用、浏览器与操作系统合并后的实际授权状态，
 也不修改策略或回答待处理请求。支持的标签、URL 范围及摄像头和麦克风的限制见
 [查询配置中的权限设置](./permissions.md#查询配置中的权限设置)。
+
+## 文件与 JavaScript 对话框
+
+下列方法在 `CefTexture` 和 `CefTexture2D` 上均可用。连接请求信号，并设置
+`dialog_policy = 1`，即可通过应用自己的 Godot 界面回答请求。请求元数据、策略、
+完成结果与 `FileDialog` / JavaScript 对话框示例见[对话框](./dialogs.md)。
+
+| 方法 | 含义 |
+|------|------|
+| `continue_file_dialog(request_id: int, file_paths: PackedStringArray) -> bool` | 返回绝对文件系统路径，空数组表示取消 |
+| `cancel_file_dialog(request_id: int) -> bool` | 取消文件选择 |
+| `continue_js_dialog(request_id: int, accepted: bool, user_input: String) -> bool` | 回答 alert/confirm/prompt/离开页面确认；输入用于 prompt |
+| `cancel_js_dialog(request_id: int) -> bool` | 取消或拒绝 JavaScript 对话框 |
+| `is_dialog_pending(request_id: int) -> bool` | 请求是否仍可回答 |
+
+对已失效、已超时、已完成、不存在或类型错误的 ID 调用应答方法会返回 `false`。
+无效的文件路径列表也会返回 `false`，并保留待处理请求。应用提供的 `res://` 或
+`user://` 路径需先用 `ProjectSettings.globalize_path()` 转换，再传给 CEF。
 
 ## Cookie 与会话管理
 

@@ -78,6 +78,7 @@ impl CefTexture2D {
             background_color: self.background_color,
             popup_policy: self.popup_policy,
             permission_policy: self.permission_policy,
+            dialog_policy: self.dialog_policy,
             preload_script: self.preload_script.clone(),
             preload_script_path: self.preload_script_path.clone(),
             software_target_texture: Some(self.fallback_texture.clone()),
@@ -123,6 +124,16 @@ impl CefTexture2D {
 
     pub(super) fn drain_event_queues(&mut self) {
         let events = self.runtime.drain_event_queues("CefTexture2D");
+        let dialogs = self.dialog_controller();
+        crate::dialog_info::emit_events(dialogs.as_ref(), &events, |name, args| {
+            if name != "dialog_request_finished"
+                && self.base().get_signal_connection_list(name).is_empty()
+            {
+                return false;
+            }
+            self.base_mut().emit_signal(name, args);
+            true
+        });
         for (request_id, result) in events.permission_request_finished {
             self.base_mut().emit_signal(
                 "permission_request_finished",

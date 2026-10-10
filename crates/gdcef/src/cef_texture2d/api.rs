@@ -3,6 +3,75 @@ use crate::utils::should_enable_ipc_inspector;
 #[godot_api]
 impl CefTexture2D {
     #[signal]
+    fn file_dialog_requested(info: Gd<crate::dialog_info::FileDialogRequestInfo>);
+
+    #[signal]
+    fn js_dialog_requested(info: Gd<crate::dialog_info::JsDialogRequestInfo>);
+
+    #[signal]
+    fn dialog_request_finished(request_id: i64, result: GString);
+
+    fn dialog_controller(&self) -> Option<crate::dialogs::DialogController> {
+        self.runtime
+            .app()
+            .state
+            .as_ref()
+            .map(|state| state.dialogs.clone())
+    }
+
+    #[func]
+    pub fn get_dialog_policy(&self) -> i32 {
+        self.dialog_policy
+    }
+
+    #[func]
+    pub fn set_dialog_policy(&mut self, policy: i32) {
+        self.dialog_policy = policy.clamp(0, 2);
+        if let Some(controller) = self.dialog_controller() {
+            controller.set_policy(self.dialog_policy);
+        }
+    }
+
+    #[func]
+    pub fn continue_file_dialog(&self, request_id: i64, file_paths: PackedStringArray) -> bool {
+        self.dialog_controller().is_some_and(|controller| {
+            controller.resolve_file(
+                request_id,
+                file_paths
+                    .as_slice()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            )
+        })
+    }
+
+    #[func]
+    pub fn cancel_file_dialog(&self, request_id: i64) -> bool {
+        self.dialog_controller()
+            .is_some_and(|controller| controller.cancel_file(request_id))
+    }
+
+    #[func]
+    pub fn continue_js_dialog(&self, request_id: i64, accepted: bool, user_input: GString) -> bool {
+        self.dialog_controller().is_some_and(|controller| {
+            controller.resolve_js(request_id, accepted, user_input.to_string())
+        })
+    }
+
+    #[func]
+    pub fn cancel_js_dialog(&self, request_id: i64) -> bool {
+        self.dialog_controller()
+            .is_some_and(|controller| controller.cancel_js(request_id))
+    }
+
+    #[func]
+    pub fn is_dialog_pending(&self, request_id: i64) -> bool {
+        self.dialog_controller()
+            .is_some_and(|controller| controller.is_pending(request_id))
+    }
+
+    #[signal]
     fn permission_requested(permission_type: GString, url: GString, request_id: i64);
 
     #[signal]
@@ -10,19 +79,28 @@ impl CefTexture2D {
 
     #[func]
     pub fn grant_permission(&self, request_id: i64) -> bool {
-        self.runtime.app().state.as_ref()
+        self.runtime
+            .app()
+            .state
+            .as_ref()
             .is_some_and(|state| state.permissions.resolve(request_id, true))
     }
 
     #[func]
     pub fn deny_permission(&self, request_id: i64) -> bool {
-        self.runtime.app().state.as_ref()
+        self.runtime
+            .app()
+            .state
+            .as_ref()
             .is_some_and(|state| state.permissions.resolve(request_id, false))
     }
 
     #[func]
     pub fn is_permission_pending(&self, request_id: i64) -> bool {
-        self.runtime.app().state.as_ref()
+        self.runtime
+            .app()
+            .state
+            .as_ref()
             .is_some_and(|state| state.permissions.is_pending(request_id))
     }
 
@@ -52,7 +130,11 @@ impl CefTexture2D {
     pub fn set_permission_policy(&mut self, policy: i32) {
         self.permission_policy = policy.clamp(-1, 2);
         if let Some(state) = self.runtime.app().state.as_ref() {
-            state.permissions.set_policy(crate::settings::resolve_permission_policy(self.permission_policy));
+            state
+                .permissions
+                .set_policy(crate::settings::resolve_permission_policy(
+                    self.permission_policy,
+                ));
         }
     }
 
@@ -107,9 +189,13 @@ impl CefTexture2D {
         if self.runtime.runtime_enabled() {
             self.update_texture();
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-            if self.runtime.app().state.as_ref().is_some_and(|state| {
-                matches!(state.render_mode, RenderMode::Accelerated { .. })
-            }) {
+            if self
+                .runtime
+                .app()
+                .state
+                .as_ref()
+                .is_some_and(|state| matches!(state.render_mode, RenderMode::Accelerated { .. }))
+            {
                 // Queue publication before asking CEF for its next accelerated
                 // frame. The signal itself does not imply GPU completion.
                 self.runtime.request_external_begin_frame();
@@ -180,18 +266,37 @@ impl CefTexture2D {
 
     #[func]
     pub fn shutdown(&mut self) {
-        let event_queues = self.runtime.app().state.as_ref().map(|state| state.event_queues.clone());
+        let event_queues = self
+            .runtime
+            .app()
+            .state
+            .as_ref()
+            .map(|state| state.event_queues.clone());
         self.runtime.shutdown();
         self.cleanup_instance();
         // Explicit shutdown can close a permission dialog while the resource is
         // still alive. Drop/PREDELETE cleanup must not emit Godot signals.
-        let finished = event_queues.and_then(|queues| {
-            queues.lock().ok().map(|mut queues| std::mem::take(&mut queues.permission_request_finished))
-        }).unwrap_or_default();
+        let (finished, dialogs_finished) = event_queues
+            .and_then(|queues| {
+                queues.lock().ok().map(|mut queues| {
+                    (
+                        std::mem::take(&mut queues.permission_request_finished),
+                        std::mem::take(&mut queues.dialog_request_finished),
+                    )
+                })
+            })
+            .unwrap_or_default();
         for (request_id, result) in finished {
-            self.base_mut().emit_signal("permission_request_finished", &[
-                request_id.to_variant(), GString::from(&result).to_variant(),
-            ]);
+            self.base_mut().emit_signal(
+                "permission_request_finished",
+                &[request_id.to_variant(), GString::from(&result).to_variant()],
+            );
+        }
+        for (request_id, result) in dialogs_finished {
+            self.base_mut().emit_signal(
+                "dialog_request_finished",
+                &[request_id.to_variant(), GString::from(&result).to_variant()],
+            );
         }
     }
 
