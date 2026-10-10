@@ -185,6 +185,8 @@ const SCENARIOS: &[&str] = &[
     "dialog_lifecycle",
     "dialog_before_unload",
     "dialog_reentrant",
+    "display_events",
+    "browser_hidden",
 ];
 
 fn select_cases(filter: Option<&str>) -> Result<Vec<Case>> {

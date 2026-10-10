@@ -34,6 +34,8 @@ The `CefTexture` node extends `TextureRect` and provides a Chromium-based web br
 - **Bidirectional communication** between Godot and JavaScript
 - **Input handling** including mouse, keyboard, and IME support
 - **Navigation controls** and browser state management
+- **Display events** for tooltips, fullscreen, loading progress, hovered links, and favicon URLs
+- **Rendering visibility controls** for hidden browser views
 - **Drag-and-drop** between Godot and web content
 - **File and JavaScript dialogs** handled with application-provided Godot UI
 - **Download handling** with full control over file downloads
@@ -118,6 +120,7 @@ When remote debugging is enabled, CEF listens on the configured port (default: *
 - [**Properties**](./properties.md) - Node properties and configuration
 - [**Methods**](./methods.md) - Available methods for controlling the browser
 - [**Signals**](./signals.md) - Events emitted by the CefTexture node
+- [**Display Events and Visibility**](./display-events.md) - Godot UI integration and hidden browser rendering
 - [**Permissions**](./permissions.md) - Camera, microphone, local network access, application dialogs, and profile setting queries
 - [**Dialogs**](./dialogs.md) - File choosers, JavaScript alert/confirm/prompt, and before-unload confirmation
 - [**IPC Inspector**](./ipc-inspector.md) - Visual inspector for IPC traffic during development

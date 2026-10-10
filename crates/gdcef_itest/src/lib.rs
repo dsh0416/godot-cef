@@ -5,6 +5,7 @@
 //! outside production signal dispatch and without blocking CEF's message pump.
 
 mod dialogs;
+mod display;
 mod permissions;
 mod scenarios;
 
@@ -137,6 +138,7 @@ struct Runner {
     process_frames: usize,
     draw_frames: usize,
     dialogs: dialogs::DialogState,
+    display: display::DisplayState,
 }
 
 impl Runner {
@@ -179,6 +181,7 @@ impl Runner {
             process_frames: 0,
             draw_frames: 0,
             dialogs: dialogs::DialogState::default(),
+            display: display::DisplayState::default(),
         };
         if let Err(error) = runner.setup(&env("GDCEF_ITEST_PROFILE")) {
             runner.fail(error);
@@ -206,6 +209,8 @@ impl Runner {
                     | "dialog_lifecycle"
                     | "dialog_before_unload"
                     | "dialog_reentrant"
+                    | "display_events"
+                    | "browser_hidden"
             )
         {
             return Err("Harness supplied an unknown class or case".into());
@@ -302,6 +307,12 @@ impl Runner {
         }
         browser.set("enable_accelerated_osr", &false.to_variant());
         browser.set("permission_policy", &2_i64.to_variant());
+        if matches!(self.case.as_str(), "display_events" | "browser_hidden") {
+            self.setup_display_signals()?;
+            if self.case == "browser_hidden" {
+                browser.set("browser_hidden", &true.to_variant());
+            }
+        }
         if self.case.starts_with("dialog_") {
             self.check(
                 browser
@@ -319,6 +330,8 @@ impl Runner {
         );
         let path = if self.case.starts_with("dialog_") {
             "dialogs"
+        } else if matches!(self.case.as_str(), "display_events" | "browser_hidden") {
+            "display"
         } else if self.case == "js_ipc" {
             "js"
         } else if self.case == "lifecycle" {
@@ -368,6 +381,8 @@ impl Runner {
             };
             if self.case.starts_with("dialog_") {
                 self.attach_dialog_node(&node)?;
+            } else if matches!(self.case.as_str(), "display_events" | "browser_hidden") {
+                self.attach_display_node(&node)?;
             } else {
                 root.add_child(&node);
             }
@@ -442,6 +457,10 @@ impl Runner {
             self.tick_ipc();
         } else if self.case.starts_with("dialog_") {
             self.tick_dialogs();
+        } else if self.case == "display_events" {
+            self.tick_display_events();
+        } else if self.case == "browser_hidden" {
+            self.tick_browser_hidden();
         } else {
             self.tick_lifecycle();
         }
@@ -511,6 +530,11 @@ impl Runner {
                 self.dialog_requested(event.name, &event.args)
             }
             "dialog_request_finished" => self.dialog_finished(&event.args),
+            "tooltip_changed"
+            | "fullscreen_changed"
+            | "loading_progress_changed"
+            | "status_message_changed"
+            | "favicon_urls_changed" => self.display_signal(event.name, &event.args),
             "load_finished" => {
                 self.load_finished += 1;
             }
@@ -580,6 +604,13 @@ impl Runner {
                     browser.call("shutdown", &[]);
                 }
             } else if let Some(mut window) = self.dialogs.window.take() {
+                if self.display.detached
+                    && let Ok(mut node) = browser.try_cast::<Node>()
+                {
+                    // Failure while outside the tree must still free the manually owned Node.
+                    node.queue_free();
+                    self.display.detached = false;
+                }
                 // The test-owned embedded window frees its browser child as well.
                 window.queue_free();
             } else if let Ok(mut node) = browser.try_cast::<Node>() {
@@ -631,6 +662,8 @@ impl Runner {
                 "process_frames": self.process_frames, "draw_frames": self.draw_frames,
                 "dialog_requests": self.dialogs.requests,
                 "dialog_finished": self.dialogs.finished,
+                "display_signals": self.display.signals,
+                "display_stage": self.display.stage,
                 "elapsed_ms": self.started.elapsed().as_millis(),
             })
         );

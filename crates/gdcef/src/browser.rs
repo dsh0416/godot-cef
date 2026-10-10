@@ -184,6 +184,16 @@ pub struct FindResultEvent {
     pub final_update: bool,
 }
 
+/// Display metadata copied from CEF callbacks, in callback order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DisplayEvent {
+    Tooltip(String),
+    Fullscreen(bool),
+    LoadingProgress(f64),
+    StatusMessage(String),
+    FaviconUrls(Vec<String>),
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum DebugIpcDirection {
     ToGodot,
@@ -370,6 +380,8 @@ pub struct EventQueues {
     pub url_changes: VecDeque<String>,
     /// Title change notifications.
     pub title_changes: VecDeque<String>,
+    /// Browser display metadata notifications, including empty clear values.
+    pub display_events: VecDeque<DisplayEvent>,
     /// Loading state events.
     pub loading_states: VecDeque<LoadingStateEvent>,
     /// IME enable/disable requests.
@@ -550,6 +562,8 @@ pub struct App {
     pub drag_state: DragState,
     /// Tracks whether this instance currently holds one `cef_retain()` reference.
     pub cef_retained: bool,
+    /// Desired OSR visibility, retained even before browser creation.
+    pub browser_hidden: bool,
     /// Tracks browser lifecycle transitions for invariant checks.
     lifecycle_state: LifecycleState,
 }

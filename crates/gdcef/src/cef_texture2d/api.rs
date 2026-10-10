@@ -3,6 +3,37 @@ use crate::utils::should_enable_ipc_inspector;
 #[godot_api]
 impl CefTexture2D {
     #[signal]
+    fn tooltip_changed(text: GString);
+
+    #[signal]
+    fn fullscreen_changed(fullscreen: bool);
+
+    #[signal]
+    fn loading_progress_changed(progress: f64);
+
+    #[signal]
+    fn status_message_changed(message: GString);
+
+    #[signal]
+    fn favicon_urls_changed(urls: PackedStringArray);
+
+    #[func]
+    pub fn get_browser_hidden(&self) -> bool {
+        self.browser_hidden
+    }
+
+    #[func]
+    pub fn set_browser_hidden(&mut self, hidden: bool) {
+        self.browser_hidden = hidden;
+        backend::set_browser_hidden(self.runtime.app_mut(), hidden);
+    }
+
+    #[func]
+    pub fn is_browser_hidden(&self) -> bool {
+        self.browser_hidden
+    }
+
+    #[signal]
     fn file_dialog_requested(info: Gd<crate::dialog_info::FileDialogRequestInfo>);
 
     #[signal]

@@ -70,7 +70,7 @@ distributed addons.
 
 ## Cases and assertions
 
-Every case runs separately for `CefTexture` and `CefTexture2D`, giving 32 cases:
+Every case runs separately for `CefTexture` and `CefTexture2D`, giving 36 cases:
 
 | Case | Required behavior |
 | --- | --- |
@@ -90,6 +90,8 @@ Every case runs separately for `CefTexture` and `CefTexture2D`, giving 32 cases:
 | `dialog_lifecycle` | Destroying a Node or explicitly shutting down a retained Resource with a pending prompt releases it. A recreated browser rejects previous IDs and successfully selects/reads a real file. A retained Resource must report `browser_closed`; callbacks cannot leak into the next generation. |
 | `dialog_before_unload` | Browser mouse events provide trusted activation, then a link triggers `before_unload`. Rejecting the first decision keeps the document active; accepting a second decision completes navigation. |
 | `dialog_reentrant` | A callback immediately invokes the same instance's public JS continuation method during request signal dispatch, and the Unicode response reaches JavaScript without a recursive binding failure. |
+| `display_events` | Real page loading reports bounded progress and completion; replacing `rel=icon` delivers an updated favicon URL list. Browser mouse motion produces the exact Unicode tooltip and link URL, then clears both when leaving the link. A trusted mouse click enters DOM fullscreen and `exitFullscreen()` exits it, with matching CEF signals. |
+| `browser_hidden` | An initially hidden browser loads and reports progress while its animation frames remain paused. Manual hide/show stops/resumes real CEF animation frames while timers and eval continue. `CefTexture` also checks the default automatic-visibility opt-out, opt-in Node hide/show, parent hide/show, removal from and reentry into the SceneTree without recreating the page, and explicit hiding while automatic control is disabled. |
 
 Permission cases use per-instance SIGNAL policy over project DENY_ALL and check
 pending, duplicate, stale-id, and exactly-once completion behavior. Only fake
@@ -115,6 +117,15 @@ desktop window or render frames. `CefTexture2D` uses its public input-forwarding
 API. The page waits for loading and two CEF animation frames before reporting
 input readiness, with control geometry and device pixel ratio retained in the
 report. This prevents native browser mouse events from racing the first layout.
+
+The display fixture is served from `xtask/src/integration/display.html`. Its
+favicon SVG is served by the same loopback fixture, and fullscreen and hover
+use the same real public browser input paths as the dialog cases. Visibility
+checks allow 500 ms for in-flight frames to drain, then sample a 1.5-second
+interval: JavaScript timers must advance while `requestAnimationFrame` stays
+unchanged. A subsequent animation-frame report proves that showing the
+browser resumes rendering. These checks exercise CEF scheduling and DOM
+visibility; they do not inspect Godot texture pixels or GPU publication.
 
 Startup waits for a successful loopback HTTP health handshake before launching
 Godot, with a two-second deadline. Only connection refusal/timeouts are retried;

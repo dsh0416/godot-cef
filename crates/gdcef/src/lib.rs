@@ -10,6 +10,7 @@ mod cookie;
 mod cursor;
 mod dialog_info;
 mod dialogs;
+mod display_events;
 mod drag;
 mod error;
 mod godot_protocol;

@@ -279,8 +279,23 @@ pub(crate) fn handle_size_change(
     true
 }
 
-pub(crate) fn request_external_begin_frame(app: &App) {
+pub(crate) fn set_browser_hidden(app: &mut App, hidden: bool) {
+    if app.browser_hidden == hidden {
+        return;
+    }
+    app.browser_hidden = hidden;
     if let Some(host) = app.host() {
+        host.was_hidden(hidden as _);
+        if !hidden {
+            host.invalidate(cef::PaintElementType::VIEW);
+        }
+    }
+}
+
+pub(crate) fn request_external_begin_frame(app: &App) {
+    if !app.browser_hidden
+        && let Some(host) = app.host()
+    {
         host.send_external_begin_frame();
     }
 }
@@ -299,7 +314,8 @@ pub(crate) fn queue_texture_publication(app: &App) {
             .unwrap_or(0);
         // Calling CEF can cause another paint. Release render state first, and
         // keep requests pending across bootstrap/exhaustion until capture wins.
-        if pending != 0
+        if !app.browser_hidden
+            && pending != 0
             && let Some(host) = state.browser.host()
         {
             if pending & accelerated_osr::REPAINT_VIEW != 0 {
@@ -518,6 +534,13 @@ pub(crate) fn try_create_browser(
         )?;
     }
 
+    // Set initial visibility after creation, including browsers whose owner
+    // was hidden before its first main-loop tick. The CEF pump remains active.
+    if app.browser_hidden
+        && let Some(host) = app.host()
+    {
+        host.was_hidden(true as _);
+    }
     Ok(())
 }
 

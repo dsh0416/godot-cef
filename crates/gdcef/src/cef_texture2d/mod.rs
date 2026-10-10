@@ -78,6 +78,11 @@ pub struct CefTexture2D {
     )]
     background_color: Color,
 
+    #[export]
+    #[var(get = get_browser_hidden, set = set_browser_hidden)]
+    /// Resources have no scene visibility; their owner explicitly controls OSR.
+    browser_hidden: bool,
+
     #[export(enum = (Block = 0, Redirect = 1, SignalOnly = 2))]
     #[var(get = get_popup_policy, set = set_popup_policy)]
     popup_policy: i32,
@@ -140,6 +145,7 @@ impl ITexture2D for CefTexture2D {
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
+            browser_hidden: false,
             popup_policy: crate::browser::popup_policy::BLOCK,
             permission_policy: -1,
             dialog_policy: 0,

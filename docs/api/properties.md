@@ -19,6 +19,8 @@ foundation for runtime/settings behavior. It can be assigned directly to
 | `popup_policy` | `int` | `0` | Controls how popup windows are handled. `0` = BLOCK (suppress silently), `1` = REDIRECT (navigate current browser to popup URL), `2` = SIGNAL_ONLY (emit `popup_requested` signal). Can be changed at runtime. |
 | `permission_policy` | `int` | `-1` | Inherit the project permission policy (`-1`), deny (`0`), allow known requests (`1`), or emit permission signals (`2`). Runtime changes cancel pending requests. See [Permissions](./permissions.md). |
 | `dialog_policy` | `int` | `0` | File/JavaScript dialogs: Native (`0`, CEF defaults), Signal (`1`, application UI), or Cancel (`2`). Runtime changes cancel pending requests. See [Dialogs](./dialogs.md). |
+| `browser_hidden` | `bool` | `false` | Manually hide browser rendering while retaining the latest texture. See [Display Events and Visibility](./display-events.md). |
+| `pause_rendering_when_hidden` | `bool` | `false` | Opt in to hiding browser rendering when this node is not visible in the scene tree, including when an ancestor is hidden. Combines with `browser_hidden`. |
 | `preload_script` | `String` | `""` | JavaScript source executed once for the browser's main frame after the JS bridge is registered and before the document loads. Mutually exclusive with `preload_script_path`. |
 | `preload_script_path` | `String` | `""` | Godot file path for JavaScript source to preload. Supports Godot paths such as `res://` and `user://`. Mutually exclusive with `preload_script`. |
 
@@ -32,6 +34,7 @@ foundation for runtime/settings behavior. It can be assigned directly to
 | `popup_policy` | `int` | `0` | Popup behavior policy: BLOCK/REDIRECT/SIGNAL_ONLY. |
 | `permission_policy` | `int` | `-1` | Same permission policy and signals as `CefTexture`; runtime changes cancel pending requests. See [Permissions](./permissions.md). |
 | `dialog_policy` | `int` | `0` | Same file/JavaScript dialog policy, signals, and methods as `CefTexture`. See [Dialogs](./dialogs.md). |
+| `browser_hidden` | `bool` | `false` | Manually hide browser rendering while retaining the latest texture. Resource consumers manage visibility explicitly. See [Display Events and Visibility](./display-events.md). |
 | `preload_script` | `String` | `""` | JavaScript source executed once for the browser's main frame after the JS bridge is registered and before the document loads. Mutually exclusive with `preload_script_path`. |
 | `preload_script_path` | `String` | `""` | Godot file path for JavaScript source to preload. Supports Godot paths such as `res://` and `user://`. Mutually exclusive with `preload_script`. |
 | `texture_size` | `Vector2i` | `Vector2i(1024, 1024)` | Logical browser texture size in pixels. |
@@ -41,9 +44,11 @@ foundation for runtime/settings behavior. It can be assigned directly to
 `permission_request_finished`, with the same permission methods as `CefTexture`.
 It also exposes `file_dialog_requested`, `js_dialog_requested`, and
 `dialog_request_finished`, with the same dialog answer methods.
-It does not expose the node's other browser event signals, such as
+Both browser types expose tooltip, fullscreen, loading progress, status message,
+and favicon URL signals. See [Display Events and Visibility](./display-events.md).
+The resource does not expose the node's other browser event signals, such as
 `load_finished`, `title_changed`, `console_message`, or `popup_requested`.
-For loading notifications, use a `CefTexture` node and connect to its signals.
+For detailed load completion/error notifications, use a `CefTexture` node.
 The resource itself can be assigned to a `Sprite2D` or material texture slot.
 
 `CefTexture2D` does provide optional low-level `forward_*` input helper methods.

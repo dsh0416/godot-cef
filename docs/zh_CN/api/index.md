@@ -34,6 +34,8 @@ func _ready():
 - **双向通信（IPC）**：Godot ↔ JavaScript
 - **输入处理**：鼠标、键盘与输入法（IME）
 - **导航与状态**：前进/后退、加载状态等
+- **显示事件**：tooltip、全屏、加载进度、悬停链接和 favicon URL
+- **渲染可见性控制**：隐藏浏览器视图时减少渲染工作
 - **拖放**：Godot 与网页间的双向拖放
 - **文件与 JavaScript 对话框**：通过应用提供的 Godot 界面回答
 - **下载处理**：拦截下载请求并由游戏侧决定策略
@@ -116,6 +118,7 @@ func _ready():
 - [**属性**](./properties.md) - 节点属性和配置
 - [**方法**](./methods.md) - 控制浏览器的可用方法
 - [**信号**](./signals.md) - CefTexture 节点发出的事件
+- [**显示事件与可见性**](./display-events.md) - Godot 界面集成与隐藏浏览器渲染
 - [**权限**](./permissions.md) - 摄像头、麦克风、局域网访问、应用权限对话框与配置查询
 - [**对话框**](./dialogs.md) - 文件选择、JavaScript alert/confirm/prompt 与离开页面确认
 - [**IPC 检查器**](./ipc-inspector.md) - 用于查看 IPC 流量的调试工具

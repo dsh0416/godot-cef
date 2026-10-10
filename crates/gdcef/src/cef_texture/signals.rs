@@ -146,6 +146,9 @@ impl CefTexture {
         };
 
         // Now process events without holding the lock
+        crate::display_events::emit_events(&events.display_events, |name, args| {
+            self.base_mut().emit_signal(name, args);
+        });
         let dialogs = self.dialog_controller();
         crate::dialog_info::emit_events(dialogs.as_ref(), &events, |name, args| {
             if name != "dialog_request_finished"

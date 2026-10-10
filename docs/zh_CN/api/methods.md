@@ -45,12 +45,27 @@ func _unhandled_input(event: InputEvent) -> void:
 - `get_permission_setting(...)`
 - `continue_file_dialog(...)`、`cancel_file_dialog(...)`
 - `continue_js_dialog(...)`、`cancel_js_dialog(...)`、`is_dialog_pending(...)`
+- `set_browser_hidden(...)`、`get_browser_hidden()`、`is_browser_hidden()`
 
 为保持 API 一致性，这些核心控制在命名上与 `CefTexture` 保持一致（也包括
 `url`、`enable_accelerated_osr`、`background_color`、`popup_policy` 等共享属性）。
 
 当你直接使用 `CefTexture2D` 时，需要自行在场景中完成这些方法的集成（例如坐标
 映射与焦点状态管理）。
+
+## 渲染可见性
+
+以下方法同时适用于 `CefTexture` 和 `CefTexture2D`：
+
+| 方法 | 描述 |
+|------|------|
+| `set_browser_hidden(hidden: bool)` | 设置手动 `browser_hidden` 属性，可在浏览器创建前或运行时调用。 |
+| `get_browser_hidden() -> bool` | 返回手动 `browser_hidden` 属性。 |
+| `is_browser_hidden() -> bool` | 返回实际渲染隐藏状态，包括节点的自动可见性策略。`true` 表示浏览器渲染已隐藏。 |
+
+`CefTexture` 还提供 `set_pause_rendering_when_hidden(enabled: bool)` 和
+`get_pause_rendering_when_hidden() -> bool`，用于设置和查询可选的自动策略。
+隐藏 / 恢复示例及渲染可见性与浏览器执行的区别见[显示事件与可见性](./display-events.md)。
 
 ## 导航
 

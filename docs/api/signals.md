@@ -2,9 +2,24 @@
 
 The `CefTexture` node emits various signals to notify your game about browser events and state changes.
 
-The permission and file/JavaScript dialog signals below are also available on
-`CefTexture2D`. See [Permissions](./permissions.md) and [Dialogs](./dialogs.md)
-for complete Godot UI examples.
+The display, permission, and file/JavaScript dialog signals below are also
+available on `CefTexture2D`. See [Display Events and Visibility](./display-events.md),
+[Permissions](./permissions.md), and [Dialogs](./dialogs.md) for Godot UI examples.
+
+## Display Events
+
+Available on `CefTexture` and `CefTexture2D`:
+
+| Signal | Description |
+|--------|-------------|
+| `tooltip_changed(text: String)` | The browser tooltip text changed. Empty text clears it. |
+| `fullscreen_changed(fullscreen: bool)` | Web content entered or exited fullscreen mode. The application decides how to adjust its Godot window or layout. |
+| `loading_progress_changed(progress: float)` | CEF's estimated loading progress, from `0.0` to `1.0`. |
+| `status_message_changed(message: String)` | The browser status message changed, including hovered link target URLs. Empty text clears it. |
+| `favicon_urls_changed(urls: PackedStringArray)` | Candidate favicon URLs changed. An empty array clears them; images are not downloaded automatically. |
+
+See [Display Events and Visibility](./display-events.md) for tooltip, progress,
+fullscreen, status label, and favicon URL examples.
 
 ## `ipc_message(message: String)`
 

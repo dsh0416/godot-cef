@@ -8,8 +8,8 @@ use wide::u8x16;
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
-    AudioState, ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo,
-    DragEvent, EventQueues, EventQueuesHandle, FindResultEvent, ImeCompositionRange,
+    AudioState, ConsoleMessageEvent, DisplayEvent, DownloadRequestEvent, DownloadUpdateEvent,
+    DragDataInfo, DragEvent, EventQueues, EventQueuesHandle, FindResultEvent, ImeCompositionRange,
     LoadingStateEvent,
 };
 use crate::utils::get_display_scale_factor;
@@ -666,6 +666,61 @@ wrap_display_handler! {
 
             // Return false to allow default console output
             false as _
+        }
+
+        fn on_tooltip(
+            &self,
+            _browser: Option<&mut Browser>,
+            text: Option<&mut CefString>,
+        ) -> i32 {
+            let text = text.map(|text| text.to_string()).unwrap_or_default();
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::Tooltip(text));
+            });
+            // Godot decides how to display tooltips for an off-screen browser.
+            true as _
+        }
+
+        fn on_fullscreen_mode_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            fullscreen: i32,
+        ) {
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::Fullscreen(fullscreen != 0));
+            });
+        }
+
+        fn on_loading_progress_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            progress: f64,
+        ) {
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::LoadingProgress(progress));
+            });
+        }
+
+        fn on_status_message(
+            &self,
+            _browser: Option<&mut Browser>,
+            value: Option<&CefString>,
+        ) {
+            let message = value.map(|value| value.to_string()).unwrap_or_default();
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::StatusMessage(message));
+            });
+        }
+
+        fn on_favicon_urlchange(
+            &self,
+            _browser: Option<&mut Browser>,
+            icon_urls: Option<&mut CefStringList>,
+        ) {
+            let urls = copy_dialog_strings(icon_urls);
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::FaviconUrls(urls));
+            });
         }
     }
 }
@@ -1603,6 +1658,57 @@ impl_build_new!(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_callbacks_preserve_metadata_order_and_clear_values() -> Result<(), String> {
+        crate::dialogs::ensure_cef_exports_for_tests();
+        let queues = Arc::new(Mutex::new(EventQueues::new()));
+        let handler =
+            DisplayHandlerImpl::build(Arc::new(Mutex::new(CursorType::Arrow)), queues.clone());
+        let mut tooltip = CefString::from("提示😀");
+        let link = CefString::from("https://example.test/链接");
+        let mut icons = CefStringList::new();
+        for icon in [
+            "https://example.test/图标.png",
+            "https://example.test/icon.svg",
+        ] {
+            assert!(icons.append(icon));
+        }
+
+        assert_eq!(handler.on_tooltip(None, Some(&mut tooltip)), 1);
+        handler.on_fullscreen_mode_change(None, 1);
+        handler.on_loading_progress_change(None, 0.375);
+        handler.on_status_message(None, Some(&link));
+        handler.on_favicon_urlchange(None, Some(&mut icons));
+        // Reading the URLs must leave the CEF-owned list usable.
+        assert!(icons.append("https://example.test/extra.ico"));
+        assert_eq!(handler.on_tooltip(None, None), 1);
+        handler.on_fullscreen_mode_change(None, 0);
+        handler.on_loading_progress_change(None, 1.0);
+        handler.on_status_message(None, Some(&CefString::from("")));
+        handler.on_favicon_urlchange(None, Some(&mut CefStringList::new()));
+
+        let queues = queues.lock().map_err(|error| error.to_string())?;
+        assert_eq!(
+            queues.display_events,
+            VecDeque::from([
+                DisplayEvent::Tooltip("提示😀".into()),
+                DisplayEvent::Fullscreen(true),
+                DisplayEvent::LoadingProgress(0.375),
+                DisplayEvent::StatusMessage("https://example.test/链接".into()),
+                DisplayEvent::FaviconUrls(vec![
+                    "https://example.test/图标.png".into(),
+                    "https://example.test/icon.svg".into(),
+                ]),
+                DisplayEvent::Tooltip(String::new()),
+                DisplayEvent::Fullscreen(false),
+                DisplayEvent::LoadingProgress(1.0),
+                DisplayEvent::StatusMessage(String::new()),
+                DisplayEvent::FaviconUrls(Vec::new()),
+            ])
+        );
+        Ok(())
+    }
 
     #[test]
     fn file_dialog_lists_preserve_values_without_taking_the_cef_list() {

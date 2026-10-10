@@ -65,6 +65,7 @@ impl CefTexture2D {
     }
 
     pub(super) fn try_create_browser(&mut self) {
+        backend::set_browser_hidden(self.runtime.app_mut(), self.browser_hidden);
         if self.runtime.app().state.is_some() || !self.runtime.app().can_create_browser() {
             return;
         }
@@ -124,6 +125,9 @@ impl CefTexture2D {
 
     pub(super) fn drain_event_queues(&mut self) {
         let events = self.runtime.drain_event_queues("CefTexture2D");
+        crate::display_events::emit_events(&events.display_events, |name, args| {
+            self.base_mut().emit_signal(name, args);
+        });
         let dialogs = self.dialog_controller();
         crate::dialog_info::emit_events(dialogs.as_ref(), &events, |name, args| {
             if name != "dialog_request_finished"

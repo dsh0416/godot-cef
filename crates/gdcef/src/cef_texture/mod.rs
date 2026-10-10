@@ -47,6 +47,16 @@ pub struct CefTexture {
     /// Useful for transparent pages.
     background_color: Color,
 
+    #[export]
+    #[var(get = get_browser_hidden, set = set_browser_hidden)]
+    /// Stop browser painting while keeping browser tasks and events active.
+    browser_hidden: bool,
+
+    #[export]
+    #[var(get = get_pause_rendering_when_hidden, set = set_pause_rendering_when_hidden)]
+    /// Also hide CEF when this control or an ancestor is not visible in the tree.
+    pause_rendering_when_hidden: bool,
+
     #[export(enum = (Block = 0, Redirect = 1, SignalOnly = 2))]
     #[var(get = get_popup_policy, set = set_popup_policy)]
     /// Controls how popup windows (window.open, target="_blank") are handled.
@@ -122,6 +132,8 @@ impl ITextureRect for CefTexture {
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
+            browser_hidden: false,
+            pause_rendering_when_hidden: false,
             popup_policy: crate::browser::popup_policy::BLOCK,
             permission_policy: -1,
             dialog_policy: 0,
@@ -151,6 +163,7 @@ impl ITextureRect for CefTexture {
     fn on_notification(&mut self, what: ControlNotification) {
         match what {
             ControlNotification::ENTER_TREE => {
+                self.reconcile_browser_visibility();
                 // Install the hook after the notification returns, including
                 // when an existing browser node is added to the tree again.
                 self.base_mut().call_deferred("_connect_frame_hook", &[]);
@@ -180,6 +193,9 @@ impl ITextureRect for CefTexture {
                 self.cleanup_instance();
             }
             ControlNotification::EXIT_TREE => {
+                // Godot may still report tree membership during EXIT_TREE.
+                let hidden = self.browser_hidden || self.pause_rendering_when_hidden;
+                self.with_app_mut(|app| backend::set_browser_hidden(app, hidden));
                 self.disconnect_frame_hook();
                 self.suspend_browser_input();
             }
@@ -195,6 +211,7 @@ impl ITextureRect for CefTexture {
                 self.defer_browser_focus_update();
             }
             ControlNotification::VISIBILITY_CHANGED => {
+                self.reconcile_browser_visibility();
                 if !self.base().is_visible_in_tree() {
                     self.suspend_browser_input();
                 } else {
@@ -238,6 +255,55 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
+    #[signal]
+    fn tooltip_changed(text: GString);
+
+    #[signal]
+    fn fullscreen_changed(fullscreen: bool);
+
+    #[signal]
+    fn loading_progress_changed(progress: f64);
+
+    #[signal]
+    fn status_message_changed(message: GString);
+
+    #[signal]
+    fn favicon_urls_changed(urls: PackedStringArray);
+
+    #[func]
+    pub fn get_browser_hidden(&self) -> bool {
+        self.browser_hidden
+    }
+
+    #[func]
+    pub fn set_browser_hidden(&mut self, hidden: bool) {
+        self.browser_hidden = hidden;
+        self.reconcile_browser_visibility();
+    }
+
+    #[func]
+    pub fn get_pause_rendering_when_hidden(&self) -> bool {
+        self.pause_rendering_when_hidden
+    }
+
+    #[func]
+    pub fn set_pause_rendering_when_hidden(&mut self, enabled: bool) {
+        self.pause_rendering_when_hidden = enabled;
+        self.reconcile_browser_visibility();
+    }
+
+    /// Reports the effective rendering visibility, including ancestor visibility.
+    #[func]
+    pub fn is_browser_hidden(&self) -> bool {
+        self.browser_hidden
+            || (self.pause_rendering_when_hidden && !self.base().is_visible_in_tree())
+    }
+
+    fn reconcile_browser_visibility(&mut self) {
+        let hidden = self.is_browser_hidden();
+        self.with_app_mut(|app| backend::set_browser_hidden(app, hidden));
+    }
+
     #[func]
     pub fn get_dialog_policy(&self) -> i32 {
         self.dialog_policy
@@ -386,6 +452,7 @@ impl CefTexture {
 
     #[func]
     fn on_process(&mut self) {
+        self.reconcile_browser_visibility();
         // Lazy browser creation: if browser doesn't exist yet (e.g., size was 0 in on_ready
         // because we're inside a Container), try to create it now that layout may be complete.
         if self.with_app(|app| app.state.is_none() && app.can_create_browser()) {

@@ -264,6 +264,9 @@ func stress_independent_streams(current_sequence: int, generation: int) -> bool:
 
 
 func run() -> void:
+	if scenario == "hidden":
+		await run_hidden()
+		return
 	if scenario == "pacing":
 		await run_pacing()
 		return
@@ -346,6 +349,45 @@ func run() -> void:
 				return
 			checks += 1
 	finish()
+
+
+func run_hidden() -> void:
+	create_browser()
+	if not await expect_sequence(1, "visible-initial"):
+		return
+	# The producer continues running eval while hidden, but its last published
+	# pixels remain usable by this visible TextureRect in either OSR backend.
+	for sequence in range(2, 5):
+		browser.set("browser_hidden", true)
+		if not browser.call("is_browser_hidden"):
+			fail("Manual hide did not update browser visibility")
+			return
+		checks += 1
+		# Allow the visibility IPC and any already submitted frame to settle.
+		await get_tree().create_timer(0.15).timeout
+		paint(sequence)
+		if not await expect_frozen(sequence - 1, "hidden browser"):
+			return
+		browser.set("browser_hidden", false)
+		if browser.call("is_browser_hidden"):
+			fail("Manual show did not update browser visibility")
+			return
+		checks += 1
+		if not await expect_sequence(sequence, "reshown-%d" % sequence):
+			return
+	# Resizes may retire GPU generations even while hidden. Publication and
+	# completion servicing must remain alive, and showing must repaint at size.
+	browser.set("browser_hidden", true)
+	if not resize_browser(Vector2i(320, 180)):
+		return
+	await get_tree().create_timer(0.15).timeout
+	paint(5)
+	browser.set("browser_hidden", false)
+	if not await expect_sequence(5, "resize-while-hidden", true):
+		return
+	await destroy_browser()
+	if not finished:
+		finish()
 
 
 func run_pacing() -> void:

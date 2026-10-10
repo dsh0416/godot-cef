@@ -47,6 +47,7 @@ uses internally and advanced users can call directly:
 - `get_permission_setting(...)`
 - `continue_file_dialog(...)`, `cancel_file_dialog(...)`
 - `continue_js_dialog(...)`, `cancel_js_dialog(...)`, `is_dialog_pending(...)`
+- `set_browser_hidden(...)`, `get_browser_hidden()`, `is_browser_hidden()`
 
 For API consistency, these core controls intentionally keep the same names as
 their `CefTexture` counterparts (including shared properties such as `url`,
@@ -55,6 +56,21 @@ their `CefTexture` counterparts (including shared properties such as `url`,
 When using `CefTexture2D` directly, you are responsible for integrating these
 helpers with your scene/input flow (for example, mapping coordinates and focus
 state).
+
+## Rendering Visibility
+
+These methods are available on `CefTexture` and `CefTexture2D`:
+
+| Method | Description |
+|--------|-------------|
+| `set_browser_hidden(hidden: bool)` | Set the manual `browser_hidden` property. Can be called before browser creation or at runtime. |
+| `get_browser_hidden() -> bool` | Return the manual `browser_hidden` property. |
+| `is_browser_hidden() -> bool` | Return the effective rendering visibility state, including the node's automatic visibility policy. `true` means browser rendering is hidden. |
+
+`CefTexture` additionally exposes `set_pause_rendering_when_hidden(enabled: bool)`
+and `get_pause_rendering_when_hidden() -> bool` for its opt-in automatic policy.
+See [Display Events and Visibility](./display-events.md) for hide/resume examples
+and the distinction between rendering visibility and browser execution.
 
 ## Navigation
 

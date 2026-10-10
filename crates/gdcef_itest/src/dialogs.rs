@@ -426,7 +426,7 @@ impl Runner {
         }
     }
 
-    fn dialog_click(&mut self, position: Vector2) {
+    pub(super) fn dialog_click(&mut self, position: Vector2) {
         let mut motion = InputEventMouseMotion::new_gd();
         motion.set_position(position);
         motion.set_global_position(position);

@@ -2,8 +2,23 @@
 
 `CefTexture` 会发出一系列信号，用于通知游戏侧浏览器事件与状态变化。
 
-下方的权限及文件 / JavaScript 对话框信号也适用于 `CefTexture2D`。
-完整 Godot 界面示例见[权限](./permissions.md)和[对话框](./dialogs.md)。
+下方的显示、权限及文件 / JavaScript 对话框信号也适用于 `CefTexture2D`。
+Godot 界面示例见[显示事件与可见性](./display-events.md)、[权限](./permissions.md)
+和[对话框](./dialogs.md)。
+
+## 显示事件
+
+以下信号同时适用于 `CefTexture` 和 `CefTexture2D`：
+
+| 信号 | 描述 |
+|------|------|
+| `tooltip_changed(text: String)` | 浏览器 tooltip 文本变化，空文本用于清除提示。 |
+| `fullscreen_changed(fullscreen: bool)` | 网页内容进入或退出全屏模式。应用决定如何调整 Godot 窗口或布局。 |
+| `loading_progress_changed(progress: float)` | CEF 估计的加载进度，范围为 `0.0` 到 `1.0`。 |
+| `status_message_changed(message: String)` | 浏览器状态消息变化，包括悬停链接的目标 URL。空文本用于清除消息。 |
+| `favicon_urls_changed(urls: PackedStringArray)` | 候选 favicon URL 变化。空数组用于清除候选项，不会自动下载图像。 |
+
+tooltip、进度条、全屏、状态栏和 favicon URL 示例见[显示事件与可见性](./display-events.md)。
 
 ## `ipc_message(message: String)`
 

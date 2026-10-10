@@ -55,6 +55,7 @@ impl CefTexture {
     }
 
     pub(super) fn try_create_browser(&mut self) -> Result<(), CefError> {
+        self.reconcile_browser_visibility();
         if self.with_app(|app| app.state.is_some()) {
             return Ok(());
         }

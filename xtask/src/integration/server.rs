@@ -368,6 +368,21 @@ fn handle_client(mut stream: TcpStream, state: &State, page: &[u8]) {
         return;
     };
     let (status, content_type, body) = match (request.method.as_str(), path) {
+        ("GET", "/display") => {
+            let _ = response(
+                &mut stream,
+                200,
+                "text/html; charset=utf-8",
+                include_bytes!("display.html"),
+                &state.stopping,
+            );
+            return;
+        }
+        ("GET", "/display-icon.svg") => (
+            200,
+            "image/svg+xml",
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="purple"/></svg>"#.to_vec(),
+        ),
         ("GET", "/dialogs") => {
             let _ = response(
                 &mut stream,

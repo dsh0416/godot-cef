@@ -28,6 +28,12 @@ actually initialized in the log. D3D12 requires the Windows Graphics Tools debug
 layer, while Vulkan requires an installed Khronos validation layer. An absent
 layer is not equivalent to a successful validation run.
 
+Use `--scenario hidden` to check manual hide/show and resize while hidden on
+both browser classes and OSR backends. The page still accepts JavaScript while
+hidden, its last published pixels remain visible on the Godot texture, and
+showing publishes the updated page. The normal matrix also covers rendering
+thread models 0 and 2 and retains viewport PNGs alongside each result.
+
 To check sustained accelerated frame pacing with VSync enabled, run:
 
 ```powershell

@@ -25,7 +25,7 @@ const classes = select(values.class, ["CefTexture", "CefTexture2D"], "class");
 const modes = select(values.mode, ["software", "accelerated"], "mode");
 const models = select(values["thread-model"], ["0", "2"], "thread-model");
 const gpuValidationRequested = values["gpu-validation"];
-if (!["lifecycle", "pacing", "popup"].includes(values.scenario)) throw new Error("--scenario must be lifecycle, pacing, or popup");
+if (!["lifecycle", "pacing", "popup", "hidden"].includes(values.scenario)) throw new Error("--scenario must be lifecycle, pacing, popup, or hidden");
 const pacing = values.scenario === "pacing";
 const popup = values.scenario === "popup";
 if (!["d3d12", "vulkan", "metal"].includes(values.driver)) throw new Error("Unknown --driver");
