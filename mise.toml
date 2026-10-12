@@ -61,7 +61,8 @@ flag "-r --release" help="Build release binaries"
 flag "--target <target>" default="host" help="Rust target, or host (universal on macOS)"
 flag "--target-dir <dir>" default="" help="Cargo output root (defaults to CARGO_TARGET_DIR or target/)"
 '''
-depends = [{ task = "build", args = ["--profile", "{% if usage.release %}release{% else %}debug{% endif %}", "--target", "{{ usage.target }}", "--target-dir", "{{ usage.target_dir }}"] }]
+# Keep an omitted directory in the option token: mise drops standalone empty arguments.
+depends = [{ task = "build", args = ["--profile", "{% if usage.release %}release{% else %}debug{% endif %}", "--target", "{{ usage.target }}", "--target-dir={{ usage.target_dir }}"] }]
 # Read parsed usage_* environment variables in Node; never interpolate paths into shell code.
 run = "node scripts/build/main.ts assemble"
 

@@ -174,7 +174,7 @@ test("macOS assembly preserves helper layout, plist metadata and inside-out sign
     } else assert.fail(`Unexpected command: ${command}`);
   } });
   assert.equal(signed.length, 11);
-  assert.ok(signed[0].endsWith("Libraries/libEGL.dylib"));
+  assert.ok(signed[0].endsWith(join("Libraries", "libEGL.dylib")));
   assert.ok(signed[1].endsWith("(ARM64).framework"));
   assert.ok(signed[9].endsWith("Godot CEF.app"));
   assert.ok(signed[10].endsWith("Godot CEF.framework"));
@@ -224,14 +224,21 @@ export const assemble = options => appendFileSync(process.env.PROBE_LOG, JSON.st
     MISE_GLOBAL_CONFIG_FILE: join(base, "empty.toml"), MISE_SYSTEM_CONFIG_FILE: join(base, "empty.toml"),
     PROBE_LOG: log,
   };
-  for (const release of [false, true]) {
+  for (const { release, target, targetDir } of [
+    { release: false, target: "host", targetDir: "" },
+    { release: true, target: "host", targetDir: "" },
+    { release: true, target: "aarch64-unknown-linux-gnu", targetDir: "" },
+    { release: false, target: "aarch64-unknown-linux-gnu", targetDir: join(base, "output with spaces") },
+    { release: true, target: "aarch64-unknown-linux-gnu", targetDir: join(base, "output with spaces") },
+  ]) {
     await writeFile(log, "");
-    const args = ["run", "bundle", ...(release ? ["--release"] : []), "--target", "aarch64-unknown-linux-gnu", "--target-dir", join(base, "output with spaces")];
+    const args = ["run", "bundle", ...(release ? ["--release"] : []),
+      ...(target === "host" ? [] : ["--target", target]), ...(targetDir ? ["--target-dir", targetDir] : [])];
     const result = spawnSync("mise", args, { cwd: base, env, encoding: "utf8" });
     assert.equal(result.status, 0, result.error?.message ?? result.stderr);
     const calls = (await readFile(log, "utf8")).trim().split("\n").map(line => JSON.parse(line));
     assert.deepEqual(calls, ["build", "assemble"].map(command => ({
-      command, options: { release, target: "aarch64-unknown-linux-gnu", targetDir: join(base, "output with spaces") },
+      command, options: { release, target, targetDir },
     })));
   }
 });
