@@ -13,7 +13,6 @@ godot = { version = "0.5.5", features = ["api-4-6", "experimental-threads"] }
 cef = { version = "154.5.0", features = ["sandbox", "accelerated_osr"] }
 cef-dll-sys = { version = "154.5.0", features = ["sandbox"] }
 process_path = "0.1.4"
-plist = { version = "1.10.1" }
 serde = { version = "1.0.229", features = ["derive"] }
 libloading = { version = "0.9.0" }
 wide = "1.7.0"

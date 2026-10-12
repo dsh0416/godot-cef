@@ -2979,13 +2979,12 @@ name = "xtask"
 version = "2.1.0"
 dependencies = [
  "clap",
+ "form_urlencoded",
  "getrandom 0.4.3",
  "httparse",
  "libc",
- "plist",
  "serde",
  "serde_json",
- "url",
  "windows-sys 0.61.2",
 ]
 

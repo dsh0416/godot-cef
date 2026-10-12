@@ -127,7 +127,7 @@ jobs:
 
           # Keep the instrumented objects for llvm-cov, including libgdcef.so.
           # This job never supplies binaries to the release packaging workflow.
-          mise exec -- cargo xtask bundle --target "$target" --target-dir "$CARGO_TARGET_DIR"
+          mise run bundle --target "$target" --target-dir "$CARGO_TARGET_DIR"
           xvfb-run -a -s '-screen 0 1024x768x24' mise exec -- cargo xtask integration \
             --target "$target" --godot "$(mise which godot)" \
             --output target/coverage/integration
@@ -299,8 +299,11 @@ jobs:
         run: mise exec -- cargo fmt --all -- --check
 
   validate-versions:
-    runs-on: ubuntu-latest
-    name: Validate Versions
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: Build scripts (${{ matrix.os }})
 
     steps:
       - name: Checkout repository
@@ -308,13 +311,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup mise toolchain
-        uses: ./.github/actions/setup-toolchain
+      - name: Setup build scripts
+        uses: ./.github/actions/setup-build-scripts
         with:
-          tools: rust
+          check: "true"
 
-      - name: Setup Cargo caches
-        uses: ./.github/actions/setup-cargo-cache
+      - name: Type-check build scripts
+        run: mise exec -- pnpm --dir scripts/build check
+
+      - name: Test build scripts
+        run: mise exec -- pnpm --dir scripts/build test
 
       - name: Validate version pins
-        run: mise exec -- cargo xtask validate-versions
+        run: mise run validate-versions

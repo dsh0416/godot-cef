@@ -4,7 +4,7 @@ The five permission scenarios for both browser classes now live in the
 [headless integration suite](../integration/README.md), with test logic in the
 separate Rust `gdcef_itest` addon. The old GDScript runner has been removed.
 
-After `cargo xtask bundle`, run:
+After `mise run bundle`, run:
 
 ```sh
 cargo xtask integration --godot /absolute/path/to/godot

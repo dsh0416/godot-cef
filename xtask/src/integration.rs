@@ -4,7 +4,7 @@ mod process;
 mod report;
 mod server;
 
-use crate::bundle_common::{copy_directory, workspace_root};
+use crate::support::{copy_directory, workspace_root};
 use clap::Args;
 use report::{Case, CaseResult};
 use serde::Serialize;

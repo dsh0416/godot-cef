@@ -13,7 +13,7 @@ CEF 运行时版本由 `Cargo.lock` 中 Rust `cef` / `cef-dll-sys` crate 的构�
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"
-CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 ```
 

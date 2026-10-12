@@ -16,15 +16,14 @@ runs:
       if: runner.os != 'Windows'
       shell: bash
       run: |
-        version=$(mise exec -- cargo run --locked --quiet -p xtask -- cef-version)
+        version=$(mise exec -- node scripts/build/main.ts cef-version)
         echo "CEF_VERSION=$version" >> "$GITHUB_ENV"
 
     - name: Resolve CEF runtime from Cargo.lock (Windows)
       if: runner.os == 'Windows'
-      # Git Bash puts its coreutils link.exe ahead of the MSVC linker.
       shell: pwsh
       run: |
-        $version = mise exec -- cargo run --locked --quiet -p xtask -- cef-version
+        $version = mise exec -- node scripts/build/main.ts cef-version
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         "CEF_VERSION=$version" >> $env:GITHUB_ENV
 

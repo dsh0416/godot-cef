@@ -37,14 +37,14 @@ Store 打包器自动移除其中 Windows/Linux ARM64 库条目和依赖块，�
 ## 在本地生成两种分发包
 
 构件输入布局为 `artifacts/gdcef-<target>/`，其中包含该目标的扩展、helper 和 CEF 运行时资源。
-`cargo xtask pack` 默认选择 `full`，保持此前行为；Store 版本需显式指定。
+`mise run pack` 默认选择 `full`，保持此前行为；Store 版本需显式指定。
 在仓库根目录运行以下命令（已启用 mise 环境）：
 
 ```bash
-cargo xtask pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
-cargo xtask validate --addon staging/full/dist/addons/godot_cef --variant full
-cargo xtask pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
-cargo xtask validate --addon staging/store/dist/addons/godot_cef --variant store
+mise run pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
+mise run validate --addon staging/full/dist/addons/godot_cef --variant full
+mise run pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
+mise run validate --addon staging/store/dist/addons/godot_cef --variant store
 (cd staging/full && zip -r ../../godot_cef.zip dist)
 (cd staging/store && zip -r ../../godot_cef-store.zip dist)
 ```
@@ -68,7 +68,7 @@ cargo xtask validate --addon staging/store/dist/addons/godot_cef --variant store
 激活工具链后，以下命令从该 checkout 的 `Cargo.lock` 提取 `CEF_VERSION`，确保运行时与 Rust 绑定一致。
 还需要 C++ 编译器、CMake，以及目标系统/架构的 Godot 4.6+。构建可能占用较多磁盘和内存。
 
-`cargo xtask bundle` 按**宿主操作系统**选择打包器：Windows 构建应在 Windows 上运行，
+`mise run bundle` 按**宿主操作系统**选择打包器：Windows 构建应在 Windows 上运行，
 Linux 构建应在 Linux 上运行。在 macOS 上传入 Windows/Linux 目标并不能跨系统构建。
 
 ## 在 Windows x64 宿主上构建 Windows ARM64
@@ -90,11 +90,11 @@ mise install
 mise exec -- pwsh -NoProfile
 # The following commands run inside this mise environment.
 $env:CEF_PATH = "$env:USERPROFILE/.local/share/cef_windows_arm64"
-$env:CEF_VERSION = cargo run --locked --quiet -p xtask -- cef-version
+$env:CEF_VERSION = mise run --quiet cef-version
 if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
 rustup target add aarch64-pc-windows-msvc
-cargo xtask bundle --release --target aarch64-pc-windows-msvc
+mise run bundle --release --target aarch64-pc-windows-msvc
 ```
 
 不要让 `CEF_PATH` 指向 x64 运行时。打包器将扩展、helper、DLL、locales 和 CEF 资源复制到
@@ -120,10 +120,10 @@ mise exec -- bash
 export CEF_PATH="$HOME/.local/share/cef_linux_arm64"
 export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
 export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
 rustup target add aarch64-unknown-linux-gnu
-cargo xtask bundle --release --target aarch64-unknown-linux-gnu
+mise run bundle --release --target aarch64-unknown-linux-gnu
 ```
 
 仓库 `.cargo/config.toml` 选择 `aarch64-linux-gnu-gcc`，并允许交叉链接时 `libcef.so`
@@ -139,7 +139,7 @@ Linux 打包器使用 `aarch64-linux-gnu-strip`，将运行时资源部署到
 
 ## 安装与验证自编译插件
 
-`cargo xtask bundle` 将完整资源部署到仓库 `addons/godot_cef/bin/<target>/`。
+`mise run bundle` 将完整资源部署到仓库 `addons/godot_cef/bin/<target>/`。
 复制整个 `addons/godot_cef/` 到项目，或将目标目录复制到同一提交的完整插件。
 仓库的完整 `.gdextension` 已注册 Windows/Linux ARM64，无需手工添加清单条目。
 如果项目此前使用 Store 包，应切换为完整包的清单，并确保其引用的目标文件与实际部署相符。

@@ -41,6 +41,9 @@ jobs:
       - name: Setup Cargo caches
         uses: ./.github/actions/setup-cargo-cache
 
+      - name: Setup build scripts
+        uses: ./.github/actions/setup-build-scripts
+
       - name: Setup CEF runtime (ARM64)
         uses: ./.github/actions/setup-cef
         with:
@@ -56,7 +59,7 @@ jobs:
       - name: Build and bundle for macOS (Universal)
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo xtask bundle --release
+        run: mise run bundle --release
 
       - name: Validate macOS bundle
         run: |
@@ -109,7 +112,7 @@ jobs:
       - name: Build and bundle for Windows
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo xtask bundle --release --target ${{ matrix.target }}
+        run: mise run bundle --release --target ${{ matrix.target }}
 
       - name: Prepare artifacts
         shell: pwsh
@@ -153,7 +156,7 @@ jobs:
       - name: Build and bundle for Linux
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo xtask bundle --release --target ${{ matrix.target }}
+        run: mise run bundle --release --target ${{ matrix.target }}
 
       - name: Setup integration test toolchain
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -215,13 +218,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup mise toolchain
-        uses: ./.github/actions/setup-toolchain
-        with:
-          tools: rust
-
-      - name: Setup Cargo caches
-        uses: ./.github/actions/setup-cargo-cache
+      - name: Setup build scripts
+        uses: ./.github/actions/setup-build-scripts
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -230,17 +228,15 @@ jobs:
           path: artifacts
 
       - name: Pack full and Asset Store addons
-        env:
-          RUSTC_WRAPPER: sccache
         run: |
           # Stage each variant independently; both ZIPs retain the existing dist/addons layout.
           for variant in full store; do
-            mise exec -- cargo xtask pack \
+            mise run pack \
               --artifacts artifacts \
               --output staging/$variant/dist/addons/godot_cef \
               --addon-src addons/godot_cef \
               --variant "$variant"
-            mise exec -- cargo xtask validate \
+            mise run validate \
               --addon staging/$variant/dist/addons/godot_cef --variant "$variant"
           done
           (cd staging/full && zip -r ../../godot_cef.zip dist)

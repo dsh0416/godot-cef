@@ -22,7 +22,7 @@ Build the complete addon first, then build and run the test addon:
 
 ```sh
 mise install godot
-cargo xtask bundle --release --target x86_64-unknown-linux-gnu
+mise run bundle --release --target x86_64-unknown-linux-gnu
 xvfb-run -a cargo xtask integration --release --target x86_64-unknown-linux-gnu \
   --godot "$(mise which godot)"
 ```
@@ -36,7 +36,7 @@ For a local Windows run, use the console executable from the mise installation:
 ```powershell
 mise install godot
 $godot = (Get-ChildItem (mise where godot) -Filter '*_console.exe').FullName
-cargo xtask bundle
+mise run bundle
 cargo xtask integration --godot $godot
 ```
 

@@ -1,0 +1,45 @@
+name: Setup TypeScript build scripts
+description: Install Node and the isolated build package, without documentation dependencies.
+
+inputs:
+  check:
+    description: Also install TypeScript and Node type definitions for checks.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node and pnpm
+      uses: ./.github/actions/setup-toolchain
+      with:
+        tools: node pnpm
+
+    - name: Locate build package store
+      id: store
+      shell: bash
+      run: echo "path=$(mise exec -- pnpm --dir scripts/build store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore build package cache
+      id: cache
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: godot-cef-build-scripts-${{ runner.os }}-${{ runner.arch }}-${{ inputs.check }}-${{ hashFiles('scripts/build/pnpm-lock.yaml', 'mise.lock') }}
+
+    - name: Install locked build dependencies
+      shell: bash
+      env:
+        CHECK_BUILD_SCRIPTS: ${{ inputs.check }}
+      run: |
+        if [[ "$CHECK_BUILD_SCRIPTS" == "true" ]]; then
+          mise exec -- pnpm --dir scripts/build install --frozen-lockfile
+        else
+          mise exec -- pnpm --dir scripts/build install --frozen-lockfile --prod
+        fi
+
+    - name: Save build package cache
+      if: ${{ steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}

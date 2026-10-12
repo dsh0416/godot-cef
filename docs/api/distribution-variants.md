@@ -44,15 +44,15 @@ by itself confirm compliance with the Asset Store's exact byte limit.
 ## Generate both packages locally
 
 Inputs use `artifacts/gdcef-<target>/`, containing the extension, helper and CEF
-runtime assets for that target. `cargo xtask pack` defaults to `full`, preserving
+runtime assets for that target. `mise run pack` defaults to `full`, preserving
 existing behavior; the Store variant is explicit. From the repository root with
 the mise environment active:
 
 ```bash
-cargo xtask pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
-cargo xtask validate --addon staging/full/dist/addons/godot_cef --variant full
-cargo xtask pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
-cargo xtask validate --addon staging/store/dist/addons/godot_cef --variant store
+mise run pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
+mise run validate --addon staging/full/dist/addons/godot_cef --variant full
+mise run pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
+mise run validate --addon staging/store/dist/addons/godot_cef --variant store
 (cd staging/full && zip -r ../../godot_cef.zip dist)
 (cd staging/store && zip -r ../../godot_cef-store.zip dist)
 ```
@@ -83,7 +83,7 @@ the toolchain, the commands below derive `CEF_VERSION` from that checkout's
 Godot 4.6+ for the target OS/architecture are also required. Builds can consume
 substantial disk space and memory.
 
-`cargo xtask bundle` dispatches by the **host OS**: use Windows for Windows
+`mise run bundle` dispatches by the **host OS**: use Windows for Windows
 builds and Linux for Linux builds. Passing a Windows/Linux target on macOS does
 not provide a cross-OS build path.
 
@@ -108,11 +108,11 @@ mise install
 mise exec -- pwsh -NoProfile
 # The following commands run inside this mise environment.
 $env:CEF_PATH = "$env:USERPROFILE/.local/share/cef_windows_arm64"
-$env:CEF_VERSION = cargo run --locked --quiet -p xtask -- cef-version
+$env:CEF_VERSION = mise run --quiet cef-version
 if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
 rustup target add aarch64-pc-windows-msvc
-cargo xtask bundle --release --target aarch64-pc-windows-msvc
+mise run bundle --release --target aarch64-pc-windows-msvc
 ```
 
 Do not point `CEF_PATH` at an x64 runtime. The bundled output includes the helper,
@@ -141,10 +141,10 @@ mise exec -- bash
 export CEF_PATH="$HOME/.local/share/cef_linux_arm64"
 export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
 export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
 rustup target add aarch64-unknown-linux-gnu
-cargo xtask bundle --release --target aarch64-unknown-linux-gnu
+mise run bundle --release --target aarch64-unknown-linux-gnu
 ```
 
 The repository's `.cargo/config.toml` selects `aarch64-linux-gnu-gcc` and permits
@@ -163,7 +163,7 @@ other names. No native ARM64 host setup is validated here.
 
 ## Install and validate a custom build
 
-`cargo xtask bundle` deploys the complete runtime to the repository's
+`mise run bundle` deploys the complete runtime to the repository's
 `addons/godot_cef/bin/<target>/`. Copy the whole `addons/godot_cef/` into the project,
 or copy the target directory into a full addon from the same commit. The full
 repository descriptor already registers Windows/Linux ARM64; no manual manifest

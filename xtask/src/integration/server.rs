@@ -355,7 +355,7 @@ fn handle_client(mut stream: TcpStream, state: &State, page: &[u8]) {
         let _ = response(&mut stream, 204, "text/plain", &[], &state.stopping);
         return;
     }
-    let run = url::form_urlencoded::parse(query.as_bytes())
+    let run = form_urlencoded::parse(query.as_bytes())
         .find_map(|(key, value)| (key == "run").then(|| value.into_owned()));
     let Some(run) = run.filter(|id| lock(&state.runs).contains_key(id)) else {
         let _ = response(

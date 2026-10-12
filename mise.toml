@@ -28,3 +28,55 @@ godot = "github:godotengine/godot"
 
 [settings]
 lockfile = true
+
+# Build tooling is an independent package: native CI does not install the docs site.
+[tasks."build:setup"]
+description = "Install the locked build-script runtime dependencies"
+run = "pnpm --dir scripts/build install --frozen-lockfile --prod 1>&2"
+sources = ["scripts/build/package.json", "scripts/build/pnpm-lock.yaml"]
+outputs = ["scripts/build/node_modules/.modules.yaml"]
+
+[tasks.cef-version]
+description = "Print the CEF runtime version locked by Cargo"
+depends = ["build:setup"]
+run = "node scripts/build/main.ts cef-version"
+
+[tasks.validate-versions]
+description = "Check workspace and CEF version pins"
+depends = ["build:setup"]
+run = "node scripts/build/main.ts validate-versions"
+
+[tasks.build]
+description = "Compile native libraries and helpers with Cargo"
+run = "node scripts/build/main.ts build"
+
+[tasks.assemble]
+description = "Assemble an addon from existing native binaries and CEF"
+run = "node scripts/build/main.ts assemble"
+
+[tasks.bundle]
+description = "Build native binaries, then assemble the addon"
+usage = '''
+flag "-r --release" help="Build release binaries"
+flag "--target <target>" default="host" help="Rust target, or host (universal on macOS)"
+flag "--target-dir <dir>" default="" help="Cargo output root (defaults to CARGO_TARGET_DIR or target/)"
+'''
+depends = [{ task = "build", args = ["--profile", "{% if usage.release %}release{% else %}debug{% endif %}", "--target", "{{ usage.target }}", "--target-dir", "{{ usage.target_dir }}"] }]
+# Read parsed usage_* environment variables in Node; never interpolate paths into shell code.
+run = "node scripts/build/main.ts assemble"
+
+[tasks.pack]
+description = "Pack downloaded platform artifacts into a Full or Store addon"
+run = "node scripts/build/main.ts pack"
+
+[tasks.validate]
+description = "Validate addon artifacts and optional distribution variant"
+run = "node scripts/build/main.ts validate"
+
+[tasks."build:check"]
+description = "Type-check and test the build scripts"
+run = [
+  "pnpm --dir scripts/build install --frozen-lockfile",
+  "pnpm --dir scripts/build check",
+  "pnpm --dir scripts/build test",
+]

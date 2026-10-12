@@ -1,36 +1,12 @@
-//! xtask - Build tasks for gdcef
-//!
-//! Usage:
-//!   cargo xtask bundle [--release] [--target <triple>] # Bundle for current platform and deploy to addons/
-//!   cargo xtask bundle-framework [--release] # Bundle framework (macOS only)
-//!   cargo xtask pack --artifacts <path> --output <path> [--variant full|store]    # Pack CI artifacts into distributable addon
-//!   cargo xtask validate --addon <path>      # Validate addon artifact completeness
-//!   cargo xtask validate-versions            # Validate workspace/toolchain version pins
-//!   cargo xtask integration --godot <executable> # Build and run the test-only addon
-//!   cargo xtask cef-version                  # Print the locked CEF runtime version
+//! Rust integration runner. Build and packaging tasks live in scripts/build/.
 
-#[cfg(target_os = "macos")]
-mod bundle_app;
-mod bundle_common;
-#[cfg(target_os = "macos")]
-mod bundle_framework;
-#[cfg(target_os = "linux")]
-mod bundle_linux;
-#[cfg(target_os = "windows")]
-mod bundle_windows;
 mod integration;
-mod pack;
-mod platform;
-mod validate;
-mod validate_versions;
+mod support;
 
 use clap::{Parser, Subcommand};
-use platform::PackageVariant;
-use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "xtask")]
-#[command(about = "Build tasks for gdcef", long_about = None)]
+#[command(name = "xtask", about = "Godot CEF integration test runner")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -40,131 +16,11 @@ struct Cli {
 enum Commands {
     /// Build the test-only addon and run headless tests against a complete addon
     Integration(integration::Options),
-
-    /// Bundle for the current platform and deploy to addons/godot_cef/bin/
-    Bundle {
-        /// Build in release mode
-        #[arg(long, short)]
-        release: bool,
-
-        /// Custom target directory
-        #[arg(long)]
-        target_dir: Option<PathBuf>,
-
-        /// Rust target triple to build and bundle
-        #[arg(long)]
-        target: Option<String>,
-    },
-
-    /// Bundle the GDExtension framework for macOS
-    BundleFramework {
-        /// Build in release mode
-        #[arg(long, short)]
-        release: bool,
-
-        /// Custom target directory
-        #[arg(long)]
-        target_dir: Option<PathBuf>,
-    },
-
-    /// Pack CI artifacts from multiple platforms into a distributable addon
-    Pack {
-        /// Directory containing downloaded CI artifacts
-        #[arg(long, short)]
-        artifacts: PathBuf,
-
-        /// Output directory for the packed addon
-        #[arg(long, short)]
-        output: PathBuf,
-
-        /// Path to addon source files (gdextension, icons)
-        #[arg(long)]
-        addon_src: Option<PathBuf>,
-
-        /// Distribution variant (full includes every supported architecture)
-        #[arg(long, value_enum, default_value_t = PackageVariant::Full)]
-        variant: PackageVariant,
-    },
-
-    /// Validate addon artifact completeness
-    Validate {
-        /// Path to addon directory containing bin/<platform> outputs
-        #[arg(long)]
-        addon: PathBuf,
-
-        /// Require all targets for this variant and reject excluded targets
-        #[arg(long, value_enum)]
-        variant: Option<PackageVariant>,
-    },
-
-    /// Validate version and toolchain pins across workspace files
-    ValidateVersions,
-
-    /// Print the CEF runtime version from Cargo.lock
-    CefVersion,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
-
-    match cli.command {
+    match Cli::parse().command {
         Commands::Integration(options) => integration::run(options)?,
-        Commands::Bundle {
-            release,
-            target_dir,
-            target,
-        } => {
-            #[cfg(target_os = "macos")]
-            {
-                if target.is_some() {
-                    return Err(
-                        "--target is not supported for `cargo xtask bundle` on macOS".into(),
-                    );
-                }
-                bundle_framework::run(release, target_dir.as_deref())?;
-            }
-
-            #[cfg(target_os = "windows")]
-            {
-                bundle_windows::run(release, target_dir.as_deref(), target.as_deref())?;
-            }
-
-            #[cfg(target_os = "linux")]
-            {
-                bundle_linux::run(release, target_dir.as_deref(), target.as_deref())?;
-            }
-        }
-        Commands::BundleFramework {
-            release,
-            target_dir,
-        } => {
-            #[cfg(target_os = "macos")]
-            bundle_framework::run(release, target_dir.as_deref())?;
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = (release, target_dir);
-                eprintln!("bundle-framework is only supported on macOS");
-            }
-        }
-        Commands::Pack {
-            artifacts,
-            output,
-            addon_src,
-            variant,
-        } => {
-            pack::run(&artifacts, &output, addon_src.as_deref(), variant)?;
-        }
-        Commands::Validate { addon, variant } => {
-            validate::run(&addon, variant)?;
-        }
-        Commands::ValidateVersions => {
-            validate_versions::run()?;
-        }
-        Commands::CefVersion => {
-            validate_versions::print_cef_version()?;
-        }
     }
-
     Ok(())
 }

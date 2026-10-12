@@ -9,7 +9,7 @@ ephemeral loopback HTTP server. None needs internet access.
 Build a complete native addon first, then run with the repository's Node 26:
 
 ```powershell
-cargo xtask bundle
+mise run bundle
 $godot = (Get-ChildItem (mise where godot) -Filter '*_console.exe').FullName
 node tests/rendering/run.ts --godot $godot --driver d3d12
 ```

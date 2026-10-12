@@ -193,18 +193,26 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 3. **Install CEF binaries**:
    ```bash
    export CEF_PATH="$HOME/.local/share/cef"
-   CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
+   CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
    export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
    ```
 
-   `cargo xtask cef-version` reads the matching CEF runtime version from the `cef` / `cef-dll-sys` build metadata in `Cargo.lock`. The command above uses quiet output and preserves the lockfile while capturing that version.
+   `mise run cef-version` reads the matching CEF runtime version from the `cef` / `cef-dll-sys` build metadata in `Cargo.lock`. The command above uses quiet output and preserves the lockfile while capturing that version.
 
 4. **Build**:
    ```bash
-   cargo xtask bundle --release
+   mise run bundle --release
    ```
 
-5. **Copy to Godot project**: Copy built artifacts from `target/release/` to your project's `addons/godot_cef/bin/<platform>/` folder.
+5. **Copy to Godot project**: Copy the assembled `addons/godot_cef/` directory into your project's `addons/` folder.
+
+Build tasks run TypeScript directly with the pinned Node 26. `mise run cef-version`
+installs only the small `scripts/build` package on first use; it does not compile
+Rust or install the documentation site's dependencies. `mise run bundle` runs
+`build` before `assemble`. Use `mise run assemble` with the same flags to assemble
+existing binaries without invoking Cargo. Rust outputs use `target/<triple>/<profile>/`
+(or `--target-dir` / `CARGO_TARGET_DIR`); the macOS universal framework also lives
+in `target/<profile>/Godot CEF.framework`.
 
 See the `addons/godot_cef/godot_cef.gdextension` file for the complete list of required files per platform.
 
@@ -213,7 +221,7 @@ See the `addons/godot_cef/godot_cef.gdextension` file for the complete list of r
 You can validate bundled addon artifacts with:
 
 ```bash
-cargo xtask validate --addon addons/godot_cef
+mise run validate --addon addons/godot_cef
 ```
 
 ## No-Panic Policy

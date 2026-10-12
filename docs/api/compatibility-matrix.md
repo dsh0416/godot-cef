@@ -14,7 +14,7 @@ The Rust `cef` / `cef-dll-sys` crates in `Cargo.lock` define the CEF runtime ver
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"
-CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 ```
 

@@ -54,7 +54,7 @@ The commands below assume mise shell integration is active. If your shell is not
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"
-CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 export LD_LIBRARY_PATH="$CEF_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
@@ -64,10 +64,10 @@ the ARM64 Rust target:
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef_aarch64"
-CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
 rustup target add aarch64-unknown-linux-gnu
-cargo xtask bundle --release --target aarch64-unknown-linux-gnu
+mise run bundle --release --target aarch64-unknown-linux-gnu
 ```
 
 The repository config allows unresolved symbols from `libcef.so` during Linux
@@ -94,10 +94,10 @@ sudo apt-get install -y \
 ```bash
 # Native architecture
 export CEF_PATH="$HOME/.local/share/cef"
-CEF_VERSION="$(cargo run --locked --quiet -p xtask -- cef-version)" || exit 1
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 
-# For universal builds (optional)
+# Required by mise run bundle (universal macOS build)
 export CEF_PATH_X64="$HOME/.local/share/cef_x86_64"
 export-cef-dir --version "$CEF_VERSION" --target x86_64-apple-darwin --force "$CEF_PATH_X64"
 export CEF_PATH_ARM64="$HOME/.local/share/cef_arm64"
@@ -108,7 +108,7 @@ export-cef-dir --version "$CEF_VERSION" --target aarch64-apple-darwin --force "$
 
 ```powershell
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef"
-$env:CEF_VERSION = cargo run --locked --quiet -p xtask -- cef-version
+$env:CEF_VERSION = mise run --quiet cef-version
 if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 $env:PATH="$env:PATH;$env:CEF_PATH"
@@ -119,22 +119,33 @@ runtime and Rust target:
 
 ```powershell
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef_arm64"
-$env:CEF_VERSION = cargo run --locked --quiet -p xtask -- cef-version
+$env:CEF_VERSION = mise run --quiet cef-version
 if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
 rustup target add aarch64-pc-windows-msvc
-cargo xtask bundle --release --target aarch64-pc-windows-msvc
+mise run bundle --release --target aarch64-pc-windows-msvc
 ```
 
 ### Building
 
 ```bash
 # Debug build
-cargo xtask bundle
+mise run bundle
 
 # Release build
-cargo xtask bundle --release
+mise run bundle --release
 ```
+
+The tasks run TypeScript directly with Node 26. `bundle` depends on `build` and
+then runs `assemble`; use `mise run assemble` with the same options to reuse
+existing binaries. Cargo outputs use `<target-dir>/<triple>/<debug|release>/`,
+including native builds. The target directory can be set with `--target-dir` or
+`CARGO_TARGET_DIR`. Both paths deploy to `addons/godot_cef/bin/<target>/`.
+
+Version checks install their small, isolated package automatically on first use.
+To check the build scripts, run `mise run build:check`. See
+[scripts/build/README.md](scripts/build/README.md) for task boundaries and platform
+packaging behavior. The Rust integration runner remains `cargo xtask integration`.
 
 ### Project Structure
 
@@ -152,7 +163,8 @@ godot-cef/
 │   ├── gdcef_itest/        # Test-only GDExtension driven by the Godot main loop
 │   ├── cef_app/            # CEF application/browser configuration
 │   └── software_render/    # CPU popup compositing helpers
-├── xtask/                  # Build, bundle, pack, validation, and integration runner
+├── scripts/build/          # Node/TypeScript build, bundle, pack, and validation tasks
+├── xtask/                  # Rust integration test runner
 ├── benches/                # Criterion benchmarks
 ├── addons/godot_cef/       # Godot addon files and bundled bin/ outputs
 ├── tests/integration/      # Godot project and browser-page fixtures
@@ -309,10 +321,10 @@ cargo test --workspace --all-features
 cargo test test_name
 
 # Validate version/toolchain pins
-cargo xtask validate-versions
+mise run validate-versions
 
 # Validate a packaged addon layout
-cargo xtask validate --addon dist/addons/godot_cef
+mise run validate --addon dist/addons/godot_cef
 ```
 
 On Windows, add the CEF runtime directory to `PATH` before running tests:
@@ -322,7 +334,7 @@ $env:PATH="$env:CEF_PATH;$env:PATH"
 cargo test --workspace --all-features
 ```
 
-Use `cargo xtask validate-versions` after bumping Rust crate versions, the CEF
+Use `mise run validate-versions` after bumping Rust crate versions, the CEF
 exporter, the docs package version, or `mise.toml`. It checks that
 `Cargo.toml`, `Cargo.lock`, `package.json`, and `mise.toml` agree. The CEF crates
 must have the same complete version. The exporter must match their major,
@@ -335,7 +347,7 @@ Godot 4.6, managed by `mise.toml` and `mise.lock`. Build a complete production
 bundle first, then run:
 
 ```sh
-cargo xtask bundle --release --target x86_64-unknown-linux-gnu
+mise run bundle --release --target x86_64-unknown-linux-gnu
 xvfb-run -a cargo xtask integration --release --target x86_64-unknown-linux-gnu \
   --godot "$(mise which godot)"
 ```
@@ -396,7 +408,7 @@ mise exec -- rustup component add llvm-tools-preview
   coverage_env="$(mise exec -- cargo llvm-cov show-env --sh --target "$target")"
   eval "$coverage_env"
   mise exec -- cargo llvm-cov clean --workspace
-  mise exec -- cargo xtask bundle --target "$target" --target-dir "$CARGO_TARGET_DIR"
+  mise run bundle --target "$target" --target-dir "$CARGO_TARGET_DIR"
   xvfb-run -a mise exec -- cargo xtask integration --target "$target" \
     --godot "$(mise which godot)" --output target/coverage/integration
   mise exec -- cargo test --locked --workspace --all-features --target "$target"
@@ -417,7 +429,7 @@ mise exec -- cargo llvm-cov --locked --workspace --all-features --target <triple
 
 Cargo-llvm-cov manages its own instrumented target directory for these direct
 runs. The Linux bundle command deploys instrumented binaries into the local
-`addons/godot_cef/bin/` directory; run a normal `cargo xtask bundle` afterwards
+`addons/godot_cef/bin/` directory; run a normal `mise run bundle` afterwards
 to restore your regular local addon. CI retains each platform's LCOV (plus the
 Linux headless-only summary and integration evidence) as `coverage-linux-x64`,
 `coverage-macos-arm64`, and `coverage-windows-x64` for 14 days.
@@ -446,25 +458,25 @@ successful coverage.
 
 For visual/rendering changes:
 
-1. Build the extension with `cargo xtask bundle`
+1. Build the extension with `mise run bundle`
 2. Copy artifacts to a Godot project
 3. Test with different rendering backends
 4. Verify on multiple platforms if possible
 
-For release or packaging changes, also run `cargo xtask pack` with the
-platform artifacts you changed and then `cargo xtask validate --addon` against
+For release or packaging changes, also run `mise run pack` with the
+platform artifacts you changed and then `mise run validate --addon` against
 the staged addon directory.
 
 ### Distribution variants
 
-`cargo xtask pack` defaults to the full addon, preserving all five platform
+`mise run pack` defaults to the full addon, preserving all five platform
 artifacts. For release packaging, stage and validate each variant independently:
 
 ```bash
-cargo xtask pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
-cargo xtask validate --addon staging/full/dist/addons/godot_cef --variant full
-cargo xtask pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
-cargo xtask validate --addon staging/store/dist/addons/godot_cef --variant store
+mise run pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
+mise run validate --addon staging/full/dist/addons/godot_cef --variant full
+mise run pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
+mise run validate --addon staging/store/dist/addons/godot_cef --variant store
 ```
 
 Variant validation requires every selected target and rejects excluded target

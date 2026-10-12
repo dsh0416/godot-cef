@@ -70,6 +70,9 @@ runs:
       with:
         arch: ${{ inputs.msvc-arch }}
 
+    - name: Setup build scripts
+      uses: ./.github/actions/setup-build-scripts
+
     - name: Setup Cargo caches
       uses: ./.github/actions/setup-cargo-cache
       with:
