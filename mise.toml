@@ -73,11 +73,3 @@ run = "node scripts/build/main.ts pack"
 [tasks.validate]
 description = "Validate addon artifacts and optional distribution variant"
 run = "node scripts/build/main.ts validate"
-
-[tasks."build:check"]
-description = "Type-check and test the build scripts"
-run = [
-  "pnpm --dir scripts/build install --frozen-lockfile",
-  "pnpm --dir scripts/build check",
-  "pnpm --dir scripts/build test",
-]

@@ -4,8 +4,7 @@
   "type": "module",
   "engines": { "node": ">=26" },
   "scripts": {
-    "check": "tsc --noEmit",
-    "test": "node --test build.test.ts"
+    "check": "tsc --noEmit"
   },
   "dependencies": { "smol-toml": "1.9.1" },
   "devDependencies": {

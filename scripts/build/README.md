@@ -48,9 +48,6 @@ ARM64 libraries and their dependency dictionaries. Both variants keep macOS
 universal binaries. The workflow creates the same `dist/addons/godot_cef` ZIP
 layout as before.
 
-Run `mise run build:check` to install development dependencies, type-check with
-`tsc --noEmit`, and execute the Node tests. Tests cover version agreement, Full
-and Store packages, cross compilation, file copying, and the macOS assembly and
-signing sequence using fixture binaries. Actual native linking and signing are
-checked by the existing platform build jobs. The Rust process supervisor and
-HTTP integration runner remain available through `cargo xtask integration`.
+The existing platform CI jobs validate native builds, macOS signing and Full/Store
+packages. The Rust process supervisor and HTTP integration runner remain
+available through `cargo xtask integration`.

@@ -142,8 +142,7 @@ existing binaries. Cargo outputs use `<target-dir>/<triple>/<debug|release>/`,
 including native builds. The target directory can be set with `--target-dir` or
 `CARGO_TARGET_DIR`. Both paths deploy to `addons/godot_cef/bin/<target>/`.
 
-Version checks install their small, isolated package automatically on first use.
-To check the build scripts, run `mise run build:check`. See
+Version checks install their small, isolated package automatically on first use. See
 [scripts/build/README.md](scripts/build/README.md) for task boundaries and platform
 packaging behavior. The Rust integration runner remains `cargo xtask integration`.
 

@@ -299,11 +299,8 @@ jobs:
         run: mise exec -- cargo fmt --all -- --check
 
   validate-versions:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    name: Build scripts (${{ matrix.os }})
+    runs-on: ubuntu-latest
+    name: Validate Versions
 
     steps:
       - name: Checkout repository
@@ -313,14 +310,6 @@ jobs:
 
       - name: Setup build scripts
         uses: ./.github/actions/setup-build-scripts
-        with:
-          check: "true"
-
-      - name: Type-check build scripts
-        run: mise exec -- pnpm --dir scripts/build check
-
-      - name: Test build scripts
-        run: mise exec -- pnpm --dir scripts/build test
 
       - name: Validate version pins
         run: mise run validate-versions

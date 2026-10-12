@@ -11,7 +11,8 @@ export interface BuildConfig {
   profile: "debug" | "release";
 }
 
-export function configuration(options: BuildOptions, host = process.platform, arch = process.arch, env = process.env): BuildConfig {
+export function configuration(options: BuildOptions): BuildConfig {
+  const { platform: host, arch, env } = process;
   const architecture = arch === "x64" ? "x86_64" : arch === "arm64" ? "aarch64" : undefined;
   if (!architecture) throw new Error(`Unsupported host architecture: ${arch}`);
   let target = options.target;
@@ -30,7 +31,8 @@ export function configuration(options: BuildOptions, host = process.platform, ar
   };
 }
 
-export function cargoInvocation(config: BuildConfig, target: string, env = process.env): { args: string[]; env: NodeJS.ProcessEnv } {
+function cargoInvocation(config: BuildConfig, target: string): { args: string[]; env: NodeJS.ProcessEnv } {
+  const { env } = process;
   const cefPath = config.target === macTarget
     ? env[target === macTargets[0] ? "CEF_PATH_ARM64" : "CEF_PATH_X64"]
     : env.CEF_PATH;
@@ -49,15 +51,15 @@ export function build(config: BuildConfig): void {
   }
 }
 
-async function assembleNative(config: BuildConfig, context: AssemblyContext): Promise<void> {
-  const { env, addonBin, command } = context;
+async function assembleNative(config: BuildConfig): Promise<void> {
+  const { env } = process;
   const windows = config.target.endsWith("-pc-windows-msvc");
   const assets = windows ? windowsAssets : linuxAssets;
   const binaries = windows ? ["gdcef.dll", "gdcef_helper.exe"] : ["libgdcef.so", "gdcef_helper"];
   const source = join(config.targetDir, config.target, config.profile);
   if (!env.CEF_PATH) throw new Error("Set CEF_PATH to the matching CEF runtime");
   const cef = resolve(env.CEF_PATH);
-  const output = join(addonBin, config.target);
+  const output = join(root, "addons/godot_cef/bin", config.target);
   assertSeparate(output, [source, cef]);
   await requirePaths(source, binaries, []);
   await requirePaths(cef, assets, ["locales"]);
@@ -68,7 +70,7 @@ async function assembleNative(config: BuildConfig, context: AssemblyContext): Pr
   if (!windows) {
     const strip = config.target.startsWith("aarch64") ? "aarch64-linux-gnu-strip" : "strip";
     for (const name of ["libcef.so", "libvk_swiftshader.so", "libvulkan.so.1"]) {
-      command(strip, ["--strip-debug", join(output, name)]);
+      run(strip, ["--strip-debug", join(output, name)]);
     }
   }
 }
@@ -85,14 +87,14 @@ function plistBase(executable: string, framework: boolean): Record<string, unkno
   };
 }
 
-async function writePlist(path: string, value: Record<string, unknown>, command: typeof run): Promise<void> {
+async function writePlist(path: string, value: Record<string, unknown>): Promise<void> {
   await writeFile(path, JSON.stringify(value));
-  command("plutil", ["-convert", "xml1", path]);
+  run("plutil", ["-convert", "xml1", path]);
 }
 
-function sign(path: string, command: typeof run): void { command("codesign", ["--force", "--sign", "-", path]); }
+function sign(path: string): void { run("codesign", ["--force", "--sign", "-", path]); }
 
-async function createApp(parent: string, name: string, executable: string, helper: boolean, command: typeof run): Promise<string> {
+async function createApp(parent: string, name: string, executable: string, helper: boolean): Promise<string> {
   const app = join(parent, `${name}.app`);
   for (const dir of ["MacOS", "Resources", "Frameworks"]) await mkdir(join(app, "Contents", dir), { recursive: true });
   await copy(executable, join(app, "Contents/MacOS", name));
@@ -102,19 +104,19 @@ async function createApp(parent: string, name: string, executable: string, helpe
     NSBluetoothAlwaysUsageDescription: name, NSSupportsAutomaticGraphicsSwitching: true,
     NSWebBrowserPublicKeyCredentialUsageDescription: name,
     NSCameraUsageDescription: name, NSMicrophoneUsageDescription: name,
-  }, command);
+  });
   return app;
 }
 
-async function assembleMac(config: BuildConfig, context: AssemblyContext): Promise<void> {
-  const { env, addonBin, command } = context;
+async function assembleMac(config: BuildConfig): Promise<void> {
+  const { env } = process;
   const output = join(config.targetDir, config.profile);
   const framework = join(output, "Godot CEF.framework");
   const cefDirs = [env.CEF_PATH_ARM64, env.CEF_PATH_X64];
   if (cefDirs.some(path => !path)) throw new Error("Set CEF_PATH_ARM64 and CEF_PATH_X64");
   const sourceFrameworks = cefDirs.map(path => join(resolve(path!), "Chromium Embedded Framework.framework"));
   const binaryDirs = macTargets.map(target => join(config.targetDir, target, config.profile));
-  const deployment = join(addonBin, macTarget);
+  const deployment = join(root, "addons/godot_cef/bin", macTarget);
   assertSeparate(framework, [...sourceFrameworks, ...binaryDirs]);
   assertSeparate(deployment, [framework, ...sourceFrameworks, ...binaryDirs]);
   for (const dir of binaryDirs) await requirePaths(dir, ["gdcef_helper", "libgdcef.dylib"], []);
@@ -122,43 +124,35 @@ async function assembleMac(config: BuildConfig, context: AssemblyContext): Promi
   await rm(framework, { recursive: true, force: true });
   await mkdir(join(framework, "Resources"), { recursive: true });
   const universalHelper = join(framework, "gdcef_helper_universal");
-  command("lipo", ["-create", ...binaryDirs.map(dir => join(dir, "gdcef_helper")), "-output", universalHelper]);
-  const app = await createApp(join(framework, "Helpers"), "Godot CEF", universalHelper, false, command);
+  run("lipo", ["-create", ...binaryDirs.map(dir => join(dir, "gdcef_helper")), "-output", universalHelper]);
+  const app = await createApp(join(framework, "Helpers"), "Godot CEF", universalHelper, false);
   const frameworks = join(app, "Contents/Frameworks");
   for (let index = 0; index < sourceFrameworks.length; index++) {
     const destination = join(frameworks, `Chromium Embedded Framework (${index === 0 ? "ARM64" : "X86_64"}).framework`);
     await copy(sourceFrameworks[index], destination);
     for (const name of await readdir(join(destination, "Libraries"))) {
-      if (name.endsWith(".dylib")) sign(join(destination, "Libraries", name), command);
+      if (name.endsWith(".dylib")) sign(join(destination, "Libraries", name));
     }
-    sign(destination, command);
+    sign(destination);
   }
   for (const suffix of [" (GPU)", " (Renderer)", " (Plugin)", " (Alerts)", ""]) {
-    sign(await createApp(frameworks, `Godot CEF Helper${suffix}`, universalHelper, true, command), command);
+    sign(await createApp(frameworks, `Godot CEF Helper${suffix}`, universalHelper, true));
   }
-  sign(app, command);
+  sign(app);
   await rm(universalHelper);
   const library = join(framework, "libgdcef.dylib");
-  command("lipo", ["-create", ...binaryDirs.map(dir => join(dir, "libgdcef.dylib")), "-output", library]);
+  run("lipo", ["-create", ...binaryDirs.map(dir => join(dir, "libgdcef.dylib")), "-output", library]);
   await writePlist(join(framework, "Resources/Info.plist"), {
     ...plistBase("libgdcef.dylib", true), CFBundleSupportedPlatforms: ["MacOSX"],
-  }, command);
-  command("install_name_tool", ["-id", "@rpath/Godot CEF.framework/libgdcef.dylib", library]);
-  sign(framework, command);
+  });
+  run("install_name_tool", ["-id", "@rpath/Godot CEF.framework/libgdcef.dylib", library]);
+  sign(framework);
   await rm(deployment, { recursive: true, force: true });
   await copy(framework, join(deployment, "Godot CEF.framework"));
 }
 
-export interface AssemblyContext {
-  env: NodeJS.ProcessEnv;
-  addonBin: string;
-  command: typeof run;
-}
-
-export async function assemble(config: BuildConfig, context: AssemblyContext = {
-  env: process.env, addonBin: join(root, "addons/godot_cef/bin"), command: run,
-}): Promise<void> {
-  if (config.target === macTarget) await assembleMac(config, context);
-  else await assembleNative(config, context);
+export async function assemble(config: BuildConfig): Promise<void> {
+  if (config.target === macTarget) await assembleMac(config);
+  else await assembleNative(config);
   console.error(`Bundled ${config.target}`);
 }
