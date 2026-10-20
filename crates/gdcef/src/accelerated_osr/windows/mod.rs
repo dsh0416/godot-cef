@@ -1,140 +1,49 @@
 mod d3d12;
 mod vulkan;
 
-use super::RenderBackend;
-use godot::classes::RenderingServer;
-use godot::global::{godot_print, godot_warn};
-use godot::prelude::*;
-use windows::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
-use windows::Win32::System::Threading::GetCurrentProcess;
-
-pub(super) fn duplicate_win32_handle(handle: HANDLE) -> Result<HANDLE, String> {
-    let mut duplicated = HANDLE::default();
-    let current_process = unsafe { GetCurrentProcess() };
-    unsafe {
-        DuplicateHandle(
-            current_process,
-            handle,
-            current_process,
-            &mut duplicated,
-            0,
-            false,
-            DUPLICATE_SAME_ACCESS,
-        )
-        .map_err(|e| format!("DuplicateHandle failed: {:?}", e))?;
-    }
-    Ok(duplicated)
-}
-
-use d3d12::D3D12TextureImporter;
-use vulkan::VulkanTextureImporter;
+use super::{NativeCaptureTarget, RenderBackend};
+use godot::global::godot_print;
 
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
-    let backend = RenderBackend::detect();
-    match backend {
+    match RenderBackend::detect() {
         RenderBackend::D3D12 => d3d12::get_godot_gpu_device_ids(),
         RenderBackend::Vulkan => vulkan::get_godot_gpu_device_ids(),
-        _ => {
-            godot_warn!(
-                "[AcceleratedOSR/Windows] Cannot get GPU device IDs for backend {:?}",
-                backend
-            );
-            None
-        }
+        _ => None,
     }
 }
 
-pub struct GodotTextureImporter {
-    backend: TextureImporterBackend,
-    current_texture_rid: Option<Rid>,
-}
-
-enum TextureImporterBackend {
-    D3D12(D3D12TextureImporter),
-    Vulkan(VulkanTextureImporter),
+pub enum GodotTextureImporter {
+    D3D12(d3d12::D3D12TextureImporter),
+    Vulkan(Box<vulkan::VulkanTextureImporter>),
 }
 
 impl GodotTextureImporter {
-    pub fn new() -> Option<Self> {
-        let render_backend = RenderBackend::detect();
-
-        if !render_backend.supports_accelerated_osr() {
-            godot_warn!(
-                "[AcceleratedOSR/Windows] Render backend {:?} does not support accelerated OSR. \
-                 D3D12 or Vulkan backend is required on Windows.",
-                render_backend
-            );
-            return None;
-        }
-
-        let backend = match render_backend {
-            RenderBackend::D3D12 => {
-                let importer = D3D12TextureImporter::new()?;
-                godot_print!("[AcceleratedOSR/Windows] Using D3D12 backend for texture import");
-                TextureImporterBackend::D3D12(importer)
-            }
-            RenderBackend::Vulkan => {
-                let importer = VulkanTextureImporter::new()?;
-                godot_print!("[AcceleratedOSR/Windows] Using Vulkan backend for texture import");
-                TextureImporterBackend::Vulkan(importer)
-            }
-            _ => {
-                godot_warn!(
-                    "[AcceleratedOSR/Windows] Unexpected backend {:?}",
-                    render_backend
-                );
-                return None;
-            }
+    /// Called exclusively during initialization on Godot's rendering thread.
+    pub fn new() -> Result<Self, String> {
+        let importer = match RenderBackend::detect() {
+            RenderBackend::D3D12 => Self::D3D12(d3d12::D3D12TextureImporter::new()?),
+            RenderBackend::Vulkan => Self::Vulkan(Box::new(vulkan::VulkanTextureImporter::new()?)),
+            _ => return Err("Accelerated OSR requires D3D12 or Vulkan on Windows".into()),
         };
-
-        Some(Self {
-            backend,
-            current_texture_rid: None,
-        })
+        godot_print!("[AcceleratedOSR] Initialized synchronous native snapshot capture");
+        Ok(importer)
     }
 
-    pub fn queue_copy(&mut self, info: &cef::AcceleratedPaintInfo) -> Result<(), String> {
-        match &mut self.backend {
-            TextureImporterBackend::D3D12(importer) => importer.queue_copy(info),
-            TextureImporterBackend::Vulkan(importer) => importer.queue_copy(info),
+    pub fn capture(
+        &mut self,
+        info: &cef::AcceleratedPaintInfo,
+        target: NativeCaptureTarget,
+    ) -> Result<(), String> {
+        match self {
+            Self::D3D12(importer) => importer.capture(info, target),
+            Self::Vulkan(importer) => importer.capture(info, target),
         }
     }
 
-    pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
-        match &mut self.backend {
-            TextureImporterBackend::D3D12(importer) => importer.process_pending_copy(dst_rd_rid),
-            TextureImporterBackend::Vulkan(importer) => importer.process_pending_copy(dst_rd_rid),
-        }
-    }
-
-    pub fn wait_for_copy(&mut self) -> Result<(), String> {
-        match &mut self.backend {
-            TextureImporterBackend::D3D12(importer) => importer.wait_for_copy(),
-            TextureImporterBackend::Vulkan(importer) => importer.wait_for_copy(),
+    pub fn prepare_publication(&self) -> Result<(), String> {
+        match self {
+            Self::D3D12(importer) => importer.prepare_publication(),
+            Self::Vulkan(importer) => importer.prepare_publication(),
         }
     }
 }
-
-impl Drop for GodotTextureImporter {
-    fn drop(&mut self) {
-        if let Some(rid) = self.current_texture_rid.take() {
-            RenderingServer::singleton().free_rid(rid);
-        }
-    }
-}
-
-pub fn is_supported() -> bool {
-    let backend = RenderBackend::detect();
-    if !backend.supports_accelerated_osr() {
-        return false;
-    }
-
-    match backend {
-        RenderBackend::D3D12 => D3D12TextureImporter::new().is_some(),
-        RenderBackend::Vulkan => VulkanTextureImporter::new().is_some(),
-        _ => false,
-    }
-}
-
-unsafe impl Send for GodotTextureImporter {}
-unsafe impl Sync for GodotTextureImporter {}

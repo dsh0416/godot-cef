@@ -146,6 +146,19 @@ impl CefTexture {
         };
 
         // Now process events without holding the lock
+        crate::display_events::emit_events(&events.display_events, |name, args| {
+            self.base_mut().emit_signal(name, args);
+        });
+        let dialogs = self.dialog_controller();
+        crate::dialog_info::emit_events(dialogs.as_ref(), &events, |name, args| {
+            if name != "dialog_request_finished"
+                && self.base().get_signal_connection_list(name).is_empty()
+            {
+                return false;
+            }
+            self.base_mut().emit_signal(name, args);
+            true
+        });
         self.emit_message_signals(&events.messages);
         self.emit_binary_message_signals(&events.binary_messages);
         self.emit_data_message_signals(&events.data_messages);
@@ -156,6 +169,14 @@ impl CefTexture {
         self.emit_console_message_signals(&events.console_messages);
         self.emit_drag_event_signals(&events.drag_events);
         self.emit_popup_request_signals(&events.popup_requests);
+        for (request_id, result) in &events.permission_request_finished {
+            emit_signal_variants!(
+                self,
+                "permission_request_finished",
+                *request_id,
+                GString::from(result)
+            );
+        }
         self.emit_permission_request_signals(&events.permission_requests);
         self.emit_find_result_signals(&events.find_results);
         self.emit_cookie_event_signals(&events.cookie_events);
@@ -226,6 +247,13 @@ impl CefTexture {
 
     fn emit_loading_state_signals(&mut self, events: &VecDeque<LoadingStateEvent>) {
         for event in events {
+            // Main-frame navigation can replace Chromium's focused render
+            // widget without changing Godot's focus owner. A cached `true`
+            // would then suppress SetFocus and native select popups never open.
+            // Reapply the current owner at commit and completion, including
+            // redirects; an unfocused/hidden control still sends `false`.
+            self.focus_state.invalidate_host_focus();
+            self.reconcile_browser_focus();
             match event {
                 LoadingStateEvent::Started { url } => {
                     emit_signal_variants!(self, "load_started", GString::from(url));
@@ -278,18 +306,18 @@ impl CefTexture {
         for event in events {
             match event {
                 DragEvent::Started {
+                    session_id,
                     drag_data,
                     x,
                     y,
                     allowed_ops,
                 } => {
-                    let drag_info = DragDataInfo::from_internal(drag_data);
+                    if self.source_drag_session_id() != Some(*session_id) {
+                        continue;
+                    }
+                    let mut drag_info = DragDataInfo::from_internal(drag_data);
+                    drag_info.bind_mut().session_id = *session_id;
                     let position = Vector2::new(*x as f32, *y as f32);
-                    self.with_app_mut(|app| {
-                        app.drag_state.is_dragging_from_browser = true;
-                        app.drag_state.allowed_ops = *allowed_ops;
-                        app.drag_state.source_position = Some((*x, *y));
-                    });
                     emit_signal_variants!(
                         self,
                         "drag_started",
@@ -329,6 +357,21 @@ impl CefTexture {
         events: &VecDeque<crate::browser::PermissionRequestEvent>,
     ) {
         for event in events {
+            if !self.is_permission_pending(event.request_id) {
+                continue;
+            }
+            if self
+                .base()
+                .get_signal_connection_list("permission_requested")
+                .is_empty()
+            {
+                if let Some(permissions) =
+                    self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
+                {
+                    permissions.dismiss_request(event.request_id);
+                }
+                continue;
+            }
             emit_signal_variants!(
                 self,
                 "permission_requested",
@@ -409,11 +452,8 @@ impl CefTexture {
     fn process_ime_enable_events(&mut self, events: &VecDeque<bool>) {
         // Take the last event (latest wins)
         if let Some(&enable) = events.back() {
-            if enable && !self.ime_active {
-                self.activate_ime();
-            } else if !enable && self.ime_active {
-                self.deactivate_ime();
-            }
+            self.focus_state.editable = enable;
+            self.reconcile_browser_focus();
         }
     }
 

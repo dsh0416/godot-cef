@@ -1,0 +1,22 @@
+config_version=5
+
+[application]
+config/name="Godot CEF graphical regression"
+run/main_scene="res://main.tscn"
+
+[display]
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/size/window_width_override=640
+window/size/window_height_override=360
+window/vsync/vsync_mode=0
+
+[rendering]
+renderer/rendering_method="mobile"
+environment/defaults/default_clear_color=Color(0.12, 0.12, 0.12, 1)
+threads/thread_model=0
+
+[godot_cef]
+security/default_permission_policy=0
+performance/max_frame_rate=60
+advanced/custom_command_line_switches="disable-background-networking\ndisable-component-update\nno-first-run"

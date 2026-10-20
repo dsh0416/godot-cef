@@ -31,6 +31,9 @@ impl CefTexture {
 
         self.ime_active = false;
         self.ime_proxy = None;
+        self.focus_state = Default::default();
+        self.focus_reconcile_pending = false;
+        self.pointer_state = Default::default();
 
         if let Some(mut overlay) = self.popup_overlay.take() {
             overlay.queue_free();
@@ -52,6 +55,7 @@ impl CefTexture {
     }
 
     pub(super) fn try_create_browser(&mut self) -> Result<(), CefError> {
+        self.reconcile_browser_visibility();
         if self.with_app(|app| app.state.is_some()) {
             return Ok(());
         }
@@ -70,6 +74,8 @@ impl CefTexture {
             enable_accelerated_osr: self.enable_accelerated_osr,
             background_color: self.background_color,
             popup_policy: self.popup_policy,
+            permission_policy: self.permission_policy,
+            dialog_policy: self.dialog_policy,
             preload_script: self.preload_script.to_string(),
             preload_script_path: self.preload_script_path.to_string(),
             software_target_texture: None,
@@ -80,6 +86,7 @@ impl CefTexture {
             return Err(err);
         }
         self.with_app_mut(|app| app.mark_browser_running());
+        self.focus_state.invalidate_host_focus();
         if let Some(texture) =
             self.with_app(|app| app.state.as_ref().map(|s| s.render_mode.texture_2d()))
         {

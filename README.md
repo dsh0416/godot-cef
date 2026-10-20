@@ -2,10 +2,11 @@
 
 # Godot CEF
 
-A high-performance Chromium Embedded Framework (CEF) integration for Godot Engine 4.5+, written in Rust. Render web content directly inside your Godot games and applications with full support for modern web standards, JavaScript, HTML5, and CSS3.
+A high-performance Chromium Embedded Framework (CEF) integration for Godot Engine 4.6+, written in Rust. Render web content directly inside your Godot games and applications with full support for modern web standards, JavaScript, HTML5, and CSS3.
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/build.yml?label=Build)](https://github.com/dsh0416/godot-cef/actions/workflows/build.yml)
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/dsh0416/godot-cef/test.yml?label=Test)](https://github.com/dsh0416/godot-cef/actions/workflows/test.yml)
+[![Codecov](https://codecov.io/gh/dsh0416/godot-cef/branch/main/graph/badge.svg)](https://app.codecov.io/gh/dsh0416/godot-cef)
 [![GitHub Release](https://img.shields.io/github/v/release/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/releases)
 [![Godot Asset Library](https://img.shields.io/badge/Godot-Asset%20Library-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/asset-library/asset/4694)
 [![GitHub Issues](https://img.shields.io/github/issues/dsh0416/godot-cef)](https://github.com/dsh0416/godot-cef/issues)
@@ -92,6 +93,14 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 
 ## Platform Support
 
+The default/full GitHub Release addon includes Windows x86_64/ARM64, Linux
+x86_64/ARM64, and macOS universal (x86_64/ARM64). A separate **Asset Store** addon
+includes Windows x86_64, Linux x86_64, and the same macOS universal framework to
+reduce download size. Both packages install as `addons/godot_cef`; choose one.
+ARM64 Windows/Linux users should use the full package. See
+[Distribution variants](https://godotcef.org/api/distribution-variants.html) for
+package names, local packaging commands and source-build instructions.
+
 | Platform | DirectX 12 | Metal | Vulkan | Software Rendering |
 |----------|------------|-------|--------|-------------------|
 | **Windows** | ✅ (Note 1) | n.a. | ✅ (Note 2) | ✅ |
@@ -101,7 +110,7 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 <details>
 <summary><strong>Platform Notes</strong></summary>
 
-1. **Windows DirectX 12**: Requires at least Godot 4.6 beta 2. Godot 4.5.1 contains a bug where `RenderingDevice.get_driver_resource` on DirectX 12 textures always returns 0.
+1. **Windows DirectX 12**: Uses the native texture and command queue exposed by Godot 4.6+. See [Accelerated frame handoff](https://godotcef.org/api/accelerated-handoff.html).
 
 2. **Vulkan Backends**: See [#4](https://github.com/dsh0416/godot-cef/issues/4) for details. On Windows and Linux, we use hooking to inject extensions for GPU-accelerated rendering (x86_64 only). This is a workaround until [godotengine/godot-proposals#13969](https://github.com/godotengine/godot-proposals/issues/13969) is resolved. On Linux with NVIDIA proprietary drivers, DMA-BUF acceleration requires the `nvidia-drm.modeset=1` kernel parameter; see the [Vulkan support guide](https://godotcef.org/api/vulkan-support.html#linux-nvidia-driver-requirement) for GRUB setup steps.
 
@@ -171,7 +180,7 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 
 ### Quick Build Steps
 
-1. **Install prerequisites**: [mise](https://mise.jdx.dev/) and Godot 4.5+
+1. **Install prerequisites**: [mise](https://mise.jdx.dev/) and Godot 4.6+
 
 2. **Install the project toolchain**:
    ```bash
@@ -184,17 +193,26 @@ For detailed build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md#developme
 3. **Install CEF binaries**:
    ```bash
    export CEF_PATH="$HOME/.local/share/cef"
+   CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
    export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
    ```
 
-   `CEF_VERSION` is pinned in `mise.toml` to the CEF runtime build version from the resolved `cef` / `cef-dll-sys` crate in `Cargo.lock`. For example, crate version `148.2.0+148.0.8` uses CEF runtime `148.0.8`.
+   `mise run cef-version` reads the matching CEF runtime version from the `cef` / `cef-dll-sys` build metadata in `Cargo.lock`. The command above uses quiet output and preserves the lockfile while capturing that version.
 
 4. **Build**:
    ```bash
-   cargo xtask bundle --release
+   mise run bundle --release
    ```
 
-5. **Copy to Godot project**: Copy built artifacts from `target/release/` to your project's `addons/godot_cef/bin/<platform>/` folder.
+5. **Copy to Godot project**: Copy the assembled `addons/godot_cef/` directory into your project's `addons/` folder.
+
+Build tasks run TypeScript directly with the pinned Node 26. `mise run cef-version`
+installs only the small `scripts/build` package on first use; it does not compile
+Rust or install the documentation site's dependencies. `mise run bundle` runs
+`build` before `assemble`. Use `mise run assemble` with the same flags to assemble
+existing binaries without invoking Cargo. Rust outputs use `target/<triple>/<profile>/`
+(or `--target-dir` / `CARGO_TARGET_DIR`); the macOS universal framework also lives
+in `target/<profile>/Godot CEF.framework`.
 
 See the `addons/godot_cef/godot_cef.gdextension` file for the complete list of required files per platform.
 
@@ -203,7 +221,7 @@ See the `addons/godot_cef/godot_cef.gdextension` file for the complete list of r
 You can validate bundled addon artifacts with:
 
 ```bash
-cargo xtask validate --addon addons/godot_cef
+mise run validate --addon addons/godot_cef
 ```
 
 ## No-Panic Policy

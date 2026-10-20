@@ -41,19 +41,20 @@ Please be respectful and considerate in all interactions. We aim to maintain a w
   mise trust
   mise install
   ```
-- **Godot Engine 4.5+** — Download from [godotengine.org](https://godotengine.org/)
+- **Godot Engine 4.6+** — Installed at the integration-test version by `mise install`
 - **Platform-specific dependencies** (see below)
 
 The commands below assume mise shell integration is active. If your shell is not configured for mise activation yet, prefix commands with `mise exec --`.
 
 ### Installing CEF Binaries
 
-`mise install` installs the `export-cef-dir` tool and exposes the pinned `CEF_VERSION` from `mise.toml`. Download CEF binaries for your platform:
+`mise install` installs the `export-cef-dir` tool. After activating the toolchain, derive the matching runtime version from the `cef` / `cef-dll-sys` build metadata in `Cargo.lock` and pass it explicitly to the exporter. Download CEF binaries for your platform:
 
 #### Linux
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef"
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 export LD_LIBRARY_PATH="$CEF_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
@@ -63,9 +64,10 @@ the ARM64 Rust target:
 
 ```bash
 export CEF_PATH="$HOME/.local/share/cef_aarch64"
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --target aarch64-unknown-linux-gnu --force "$CEF_PATH"
 rustup target add aarch64-unknown-linux-gnu
-cargo xtask bundle --release --target aarch64-unknown-linux-gnu
+mise run bundle --release --target aarch64-unknown-linux-gnu
 ```
 
 The repository config allows unresolved symbols from `libcef.so` during Linux
@@ -92,9 +94,10 @@ sudo apt-get install -y \
 ```bash
 # Native architecture
 export CEF_PATH="$HOME/.local/share/cef"
+CEF_VERSION="$(mise run --quiet cef-version)" || exit 1
 export-cef-dir --version "$CEF_VERSION" --force "$CEF_PATH"
 
-# For universal builds (optional)
+# Required by mise run bundle (universal macOS build)
 export CEF_PATH_X64="$HOME/.local/share/cef_x86_64"
 export-cef-dir --version "$CEF_VERSION" --target x86_64-apple-darwin --force "$CEF_PATH_X64"
 export CEF_PATH_ARM64="$HOME/.local/share/cef_arm64"
@@ -105,6 +108,8 @@ export-cef-dir --version "$CEF_VERSION" --target aarch64-apple-darwin --force "$
 
 ```powershell
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef"
+$env:CEF_VERSION = mise run --quiet cef-version
+if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --force $env:CEF_PATH
 $env:PATH="$env:PATH;$env:CEF_PATH"
 ```
@@ -114,20 +119,32 @@ runtime and Rust target:
 
 ```powershell
 $env:CEF_PATH="$env:USERPROFILE/.local/share/cef_arm64"
+$env:CEF_VERSION = mise run --quiet cef-version
+if ($LASTEXITCODE -ne 0) { throw "Could not resolve CEF runtime version" }
 export-cef-dir --version $env:CEF_VERSION --target aarch64-pc-windows-msvc --force $env:CEF_PATH
 rustup target add aarch64-pc-windows-msvc
-cargo xtask bundle --release --target aarch64-pc-windows-msvc
+mise run bundle --release --target aarch64-pc-windows-msvc
 ```
 
 ### Building
 
 ```bash
 # Debug build
-cargo xtask bundle
+mise run bundle
 
 # Release build
-cargo xtask bundle --release
+mise run bundle --release
 ```
+
+The tasks run TypeScript directly with Node 26. `bundle` depends on `build` and
+then runs `assemble`; use `mise run assemble` with the same options to reuse
+existing binaries. Cargo outputs use `<target-dir>/<triple>/<debug|release>/`,
+including native builds. The target directory can be set with `--target-dir` or
+`CARGO_TARGET_DIR`. Both paths deploy to `addons/godot_cef/bin/<target>/`.
+
+Version checks install their small, isolated package automatically on first use. See
+[scripts/build/README.md](scripts/build/README.md) for task boundaries and platform
+packaging behavior. The Rust integration runner remains `cargo xtask integration`.
 
 ### Project Structure
 
@@ -142,11 +159,14 @@ godot-cef/
 │   │       ├── godot_protocol/     # res:// and user:// scheme handlers
 │   │       └── vulkan_hook/        # Vulkan extension injection
 │   ├── gdcef_helper/       # CEF subprocess helper
+│   ├── gdcef_itest/        # Test-only GDExtension driven by the Godot main loop
 │   ├── cef_app/            # CEF application/browser configuration
 │   └── software_render/    # CPU popup compositing helpers
-├── xtask/                  # Build, bundle, pack, and validation tasks
+├── scripts/build/          # Node/TypeScript build, bundle, pack, and validation tasks
+├── xtask/                  # Rust integration test runner
 ├── benches/                # Criterion benchmarks
 ├── addons/godot_cef/       # Godot addon files and bundled bin/ outputs
+├── tests/integration/      # Godot project and browser-page fixtures
 └── docs/                   # Documentation site (VitePress)
 ```
 
@@ -247,6 +267,47 @@ cargo clippy --workspace --all-features -- -D warnings
 
 ## Testing
 
+### CI gates and caches
+
+`CI` is the only automatic entry workflow. It calls reusable Test, Build,
+and Documentation workflows and finishes with one stable **Gate** check that
+maintainers can require in branch protection. There are no workflow path
+filters, so every PR produces Gate. Gate runs with `always()` and checks both
+the reusable workflow results and their explicitly exported required job
+results. Failed, cancelled, or unexpectedly skipped required work cannot pass.
+
+On PRs, main pushes, and manual runs, Gate requires both five-target Test/Clippy
+matrices, formatting, version validation, macOS universal plus Windows/Linux x64
+and ARM64 packaging, Linux x64 Godot headless integration tests, packing/validating
+Full and Store addons, the docs build, and instrumented unit coverage from the
+macOS ARM64, Windows x64, and Linux x64 Test jobs (Linux also covers the Godot
+headless suite) uploaded to Codecov.
+On `v*` tag pushes, Test and Documentation are intentionally skipped;
+Gate still requires all platform builds and both packages. Tag pushes and manual
+tag runs create draft releases with both archives after Gate. Main pushes and
+manual runs deploy Pages after Gate. Publication/deployment are downstream and
+are not PR requirements. This workflow change does not configure branch
+protection.
+
+Tool setup explicitly installs only the locked tools needed by each job and
+disables implicit tool installation in later commands. Its cache key includes
+the mise version, runner OS/architecture, selected tools, and both
+`mise.toml` and `mise.lock`. CEF caches use exact keys with the runner
+OS/architecture, target triple, derived runtime version, and both mise files;
+no fallback can restore a different CEF runtime. The macOS ARM64 runtime path is
+shared between checking and universal packaging. The pnpm store is cached separately from `node_modules`,
+with the toolchain and dependency lock/configuration in the key; installs still
+use `--frozen-lockfile` and documentation is rebuilt.
+
+Cargo caches compiled dependencies for Test/Clippy only, separated by target,
+compiler, toolchain, Cargo configuration, and CEF environment. Packaging caches
+Cargo downloads instead of large release targets. CI disables incremental
+compilation so sccache can cache compiler work, and pins sccache itself to avoid
+unplanned cache invalidation. Only main and `v*` tag pushes write shared caches;
+PRs and manual runs restore them and use sccache in read-only mode. Cold-cache
+runs still download and compile normally. Cache hits and performance depend on
+available entries and repository cache quota.
+
 ### Running Tests
 
 ```bash
@@ -259,10 +320,10 @@ cargo test --workspace --all-features
 cargo test test_name
 
 # Validate version/toolchain pins
-cargo xtask validate-versions
+mise run validate-versions
 
 # Validate a packaged addon layout
-cargo xtask validate --addon dist/addons/godot_cef
+mise run validate --addon dist/addons/godot_cef
 ```
 
 On Windows, add the CEF runtime directory to `PATH` before running tests:
@@ -272,9 +333,119 @@ $env:PATH="$env:CEF_PATH;$env:PATH"
 cargo test --workspace --all-features
 ```
 
-Use `cargo xtask validate-versions` after bumping Rust crate versions, CEF
-runtime pins, the docs package version, or `mise.toml`. It checks that
-`Cargo.toml`, `Cargo.lock`, `package.json`, and `mise.toml` agree.
+Use `mise run validate-versions` after bumping Rust crate versions, the CEF
+exporter, the docs package version, or `mise.toml`. It checks that
+`Cargo.toml`, `Cargo.lock`, `package.json`, and `mise.toml` agree. The CEF crates
+must have the same complete version. The exporter must match their major,
+minor, and patch versions, plus the runtime metadata when present in its pin.
+
+### Godot headless integration tests
+
+The separate Rust `gdcef_itest` addon exercises the production extension inside
+Godot 4.6, managed by `mise.toml` and `mise.lock`. Build a complete production
+bundle first, then run:
+
+```sh
+mise run bundle --release --target x86_64-unknown-linux-gnu
+xvfb-run -a cargo xtask integration --release --target x86_64-unknown-linux-gnu \
+  --godot "$(mise which godot)"
+```
+
+On Windows, omit `xvfb-run -a` and use the `*_console.exe` inside
+`mise where godot`; the integration guide includes the PowerShell commands.
+`--addon` selects a complete existing addon, `--output` selects an evidence
+directory, and `--case CefTexture2D:permission_navigation` runs a single case.
+The command builds only the test addon and reuses the production bundle.
+Use `--test-addon <path>` to reuse an already built test library and skip that
+build as well. The Rust `xtask` runner handles project staging, the loopback HTTP
+server, process supervision, and reports; integration testing requires no Node.
+
+Run the Rust harness guards without Godot or CEF:
+
+```sh
+cargo test --locked -p xtask integration::
+```
+
+CI runs all 14 cases after the native Linux x64 release build, and their result
+is part of the required Build/Gate checks. Each case has a separate process and
+CEF profile, independent inner/outer deadlines, a structured result, and a clean
+exit requirement. JSON, JUnit and Godot logs are uploaded even on failures.
+
+The engine uses `--headless`; Xvfb supplies CEF's X11 backend. This verifies
+permissions, JavaScript/IPC and lifecycle behavior, but the dummy renderer does
+not verify texture upload/readback, viewport pixels or GPU shared textures.
+See [the integration guide](tests/integration/README.md) for coverage, local
+prerequisites, failure semantics, and the migrated permission scenarios.
+
+### Code coverage
+
+The macOS ARM64, Windows x64, and Linux x64 Test jobs instrument a separate
+debug build with `cargo-llvm-cov`, pinned through mise, and the locked Rust
+toolchain's `llvm-tools-preview` component. Coverage collection replaces each
+target's plain unit run instead of duplicating it. Linux x64 additionally runs
+the complete Godot headless suite before the workspace unit tests, so its LCOV
+report combines both.
+The Linux headless-only report must contain executed lines from both `CefTexture`
+and `CefTexture2D`; this checks that Godot's dynamically loaded production
+library actually writes coverage data. The test addon and benchmarks are
+excluded from reports; production crates and the Rust xtask remain included.
+Coverage binaries never enter release packages. macOS collects unit-test coverage
+only because the headless integration runner does not support macOS.
+
+To reproduce on Linux x64, first install the CEF build/runtime dependencies and
+set `CEF_PATH` as for a normal bundle. Run the following in a subshell to keep the
+instrumentation environment separate from subsequent normal builds:
+
+```bash
+mise install --locked rust aqua:taiki-e/cargo-llvm-cov godot
+mise exec -- rustup component add llvm-tools-preview
+(
+  set -euo pipefail
+  target=x86_64-unknown-linux-gnu
+  export CARGO_TARGET_DIR="$PWD/target/coverage-build"
+  export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  coverage_env="$(mise exec -- cargo llvm-cov show-env --sh --target "$target")"
+  eval "$coverage_env"
+  mise exec -- cargo llvm-cov clean --workspace
+  mise run bundle --target "$target" --target-dir "$CARGO_TARGET_DIR"
+  xvfb-run -a mise exec -- cargo xtask integration --target "$target" \
+    --godot "$(mise which godot)" --output target/coverage/integration
+  mise exec -- cargo test --locked --workspace --all-features --target "$target"
+  mise exec -- cargo llvm-cov report --target "$target" \
+    --ignore-filename-regex '(gdcef_itest|benches)' \
+    --lcov --output-path target/coverage/lcov.info
+)
+```
+
+To reproduce the macOS ARM64 or Windows x64 unit coverage, set
+`DYLD_LIBRARY_PATH` (macOS) or `PATH` (Windows) to include `CEF_PATH` and run:
+
+```sh
+mise exec -- cargo llvm-cov --locked --workspace --all-features --target <triple> \
+  --ignore-filename-regex '(gdcef_itest|benches)' \
+  --lcov --output-path target/coverage/lcov.info
+```
+
+Cargo-llvm-cov manages its own instrumented target directory for these direct
+runs. The Linux bundle command deploys instrumented binaries into the local
+`addons/godot_cef/bin/` directory; run a normal `mise run bundle` afterwards
+to restore your regular local addon. CI retains each platform's LCOV (plus the
+Linux headless-only summary and integration evidence) as `coverage-linux-x64`,
+`coverage-macos-arm64`, and `coverage-windows-x64` for 14 days.
+
+Codecov project/patch statuses are informational while establishing the baseline;
+instrumented test, profile validation, report generation, and upload failures
+still fail the Test job and therefore Gate.
+The upload uses GitHub OIDC, with the action's tokenless fallback for public fork
+PRs, so no `CODECOV_TOKEN` secret is needed. Repository maintainers must enable
+the repository in [Codecov](https://app.codecov.io/gh/dsh0416/godot-cef) and grant
+the [Codecov GitHub App](https://github.com/apps/codecov) access for PR reporting.
+
+The combined report measures Rust paths executed on macOS ARM64, Windows x64, and
+Linux x64. It does not measure CEF, Godot internals, other platforms or
+architectures, or GPU behavior. Processes forcibly terminated
+on a failure may not flush their profiles; failed runs are never uploaded as
+successful coverage.
 
 ### Writing Tests
 
@@ -286,14 +457,34 @@ runtime pins, the docs package version, or `mise.toml`. It checks that
 
 For visual/rendering changes:
 
-1. Build the extension with `cargo xtask bundle`
+1. Build the extension with `mise run bundle`
 2. Copy artifacts to a Godot project
 3. Test with different rendering backends
 4. Verify on multiple platforms if possible
 
-For release or packaging changes, also run `cargo xtask pack` with the
-platform artifacts you changed and then `cargo xtask validate --addon` against
+For release or packaging changes, also run `mise run pack` with the
+platform artifacts you changed and then `mise run validate --addon` against
 the staged addon directory.
+
+### Distribution variants
+
+`mise run pack` defaults to the full addon, preserving all five platform
+artifacts. For release packaging, stage and validate each variant independently:
+
+```bash
+mise run pack --artifacts artifacts --output staging/full/dist/addons/godot_cef --variant full
+mise run validate --addon staging/full/dist/addons/godot_cef --variant full
+mise run pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
+mise run validate --addon staging/store/dist/addons/godot_cef --variant store
+```
+
+Variant validation requires every selected target and rejects excluded target
+directories. Omit `--variant` for the existing partial-addon validation behavior.
+The Store packer derives its descriptor from the full source manifest by removing
+Windows/Linux ARM64 entries; do not install both descriptors in one Godot project.
+See [Distribution variants](docs/api/distribution-variants.md) for archive layout,
+architecture coverage, and manual ARM64 builds. CI builds all architectures and
+publishes both package artifacts; this PR does not itself publish a release.
 
 ### Lifecycle Cleanup Checklist
 

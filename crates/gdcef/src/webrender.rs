@@ -3,16 +3,14 @@ use cef::{self, rc::Rc, sys::cef_cursor_type_t, *};
 use cef_app::{CursorType, PhysicalSize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use wide::{i8x16, u8x16};
+use wide::u8x16;
 
 use crate::accelerated_osr::PlatformAcceleratedRenderHandler;
 use crate::browser::{
     AudioPacket, AudioPacketQueue, AudioParamsState, AudioSampleRateState, AudioShutdownFlag,
-    AudioState, ConsoleMessageEvent, DownloadRequestEvent, DownloadUpdateEvent, DragDataInfo,
-    DragEvent, EventQueues, EventQueuesHandle, FindResultEvent, ImeCompositionRange,
-    LoadingStateEvent, PendingPermissionAggregates, PendingPermissionDecision,
-    PendingPermissionRequests, PermissionPolicyFlag, PermissionRequestEvent,
-    PermissionRequestIdCounter,
+    AudioState, ConsoleMessageEvent, DisplayEvent, DownloadRequestEvent, DownloadUpdateEvent,
+    DragDataInfo, DragEvent, EventQueues, EventQueuesHandle, FindResultEvent, ImeCompositionRange,
+    LoadingStateEvent,
 };
 use crate::utils::get_display_scale_factor;
 
@@ -43,6 +41,7 @@ where
 pub(crate) struct ClientQueues {
     /// Consolidated event queues (UI-thread callbacks).
     pub event_queues: EventQueuesHandle,
+    pub source_drag: crate::drag::SourceDragHandle,
     /// Audio packet queue (may be called from audio thread).
     pub audio_packet_queue: AudioPacketQueue,
     /// Audio parameters state.
@@ -53,37 +52,39 @@ pub(crate) struct ClientQueues {
     pub audio_shutdown_flag: AudioShutdownFlag,
     /// Whether audio capture is enabled.
     pub enable_audio_capture: bool,
-    /// Default permission policy shared with the permission handler.
-    pub permission_policy: PermissionPolicyFlag,
-    /// Monotonic request-id counter for permission events.
-    pub permission_request_counter: PermissionRequestIdCounter,
-    /// Pending permission callback map keyed by request id.
-    pub pending_permission_requests: PendingPermissionRequests,
-    /// Aggregated permission decision state keyed by callback token.
-    pub pending_permission_aggregates: PendingPermissionAggregates,
+    pub permissions: crate::permissions::PermissionController,
+    pub dialogs: crate::dialogs::DialogController,
 }
 
 impl ClientQueues {
     pub fn new(
         sample_rate: f32,
         enable_audio_capture: bool,
-        permission_policy: PermissionPolicyFlag,
-        permission_request_counter: PermissionRequestIdCounter,
-        pending_permission_requests: PendingPermissionRequests,
-        pending_permission_aggregates: PendingPermissionAggregates,
+        permission_policy: i32,
+        dialog_policy: i32,
     ) -> Self {
         use std::sync::atomic::AtomicBool;
+        let event_queues = Arc::new(Mutex::new(EventQueues::new()));
+        let permissions = crate::permissions::PermissionController::new(
+            event_queues.clone(),
+            permission_policy,
+            crate::settings::get_permission_request_timeout(),
+        );
+        let dialogs = crate::dialogs::DialogController::new(
+            event_queues.clone(),
+            dialog_policy,
+            crate::settings::get_dialog_request_timeout(),
+        );
         Self {
-            event_queues: Arc::new(Mutex::new(EventQueues::new())),
+            event_queues,
+            source_drag: Arc::new(Mutex::new(crate::drag::SourceDragState::default())),
             audio_packet_queue: Arc::new(Mutex::new(VecDeque::new())),
             audio_params: Arc::new(Mutex::new(None)),
             audio_sample_rate: Arc::new(Mutex::new(sample_rate)),
             audio_shutdown_flag: Arc::new(AtomicBool::new(false)),
             enable_audio_capture,
-            permission_policy,
-            permission_request_counter,
-            pending_permission_requests,
-            pending_permission_aggregates,
+            permissions,
+            dialogs,
         }
     }
 
@@ -102,10 +103,10 @@ impl ClientQueues {
     }
 }
 
-/// Swizzle indices for BGRA -> RGBA conversion.
+/// Shuffle indices for BGRA -> RGBA conversion.
 /// [B,G,R,A] at indices [0,1,2,3] -> [R,G,B,A] means pick [2,1,0,3] for each pixel.
-const BGRA_TO_RGBA_INDICES: i8x16 =
-    i8x16::new([2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15]);
+const BGRA_TO_RGBA_INDICES: u8x16 =
+    u8x16::new([2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15]);
 
 /// Converts BGRA pixel data to RGBA using SIMD operations.
 /// Processes 16 bytes (4 pixels) at a time for optimal performance.
@@ -119,18 +120,17 @@ fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
         let mut src = [0u8; 16];
         src.copy_from_slice(&bgra[offset..offset + 16]);
         let v = u8x16::new(src);
-        // Swizzle BGRA -> RGBA using precomputed indices
-        let shuffled = v.swizzle(BGRA_TO_RGBA_INDICES);
-        let result: [i8; 16] = shuffled.into();
-        let result_u8: [u8; 16] = result.map(|b| b as u8);
-        rgba[offset..offset + 16].copy_from_slice(&result_u8);
+        let shuffled = v.shuffle_zeroing(BGRA_TO_RGBA_INDICES);
+        rgba[offset..offset + 16].copy_from_slice(&shuffled.to_array());
     }
 
     // Handle remaining pixels that don't fit in a 16-byte chunk
     let remainder_start = simd_chunks * 16;
     for (src, dst) in bgra[remainder_start..]
-        .chunks_exact(4)
-        .zip(rgba[remainder_start..].chunks_exact_mut(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(rgba[remainder_start..].as_chunks_mut::<4>().0)
     {
         dst[0] = src[2]; // R
         dst[1] = src[1]; // G
@@ -197,16 +197,6 @@ fn drag_ops_to_u32(ops: DragOperationsMask) -> u32 {
     crate::cef_raw_to_u32!(ops.as_ref().0)
 }
 
-/// Helper to convert MediaAccessPermissionTypes bitmask to u32 in a cross-platform way.
-fn media_permission_to_u32(permission: cef::MediaAccessPermissionTypes) -> u32 {
-    crate::cef_raw_to_u32!(permission.get_raw())
-}
-
-/// Helper to convert PermissionRequestTypes bitmask to u32 in a cross-platform way.
-fn prompt_permission_to_u32(permission: cef::PermissionRequestTypes) -> u32 {
-    crate::cef_raw_to_u32!(permission.get_raw())
-}
-
 fn cef_resource_type_to_adblock_request_type(resource_type: ResourceType) -> &'static str {
     match resource_type {
         ResourceType::MAIN_FRAME => "main_frame",
@@ -241,6 +231,7 @@ fn cef_request_to_adblock_request(
         &CefStringUtf16::from(&request.url()).to_string(),
         &CefStringUtf16::from(&request.referrer_url()).to_string(),
         cef_resource_type_to_adblock_request_type(request.resource_type()),
+        &CefStringUtf16::from(&request.method()).to_string(),
     )
 }
 
@@ -251,17 +242,30 @@ fn handle_start_dragging(
     x: ::std::os::raw::c_int,
     y: ::std::os::raw::c_int,
     event_queues: &EventQueuesHandle,
+    source_drag: &crate::drag::SourceDragHandle,
 ) -> ::std::os::raw::c_int {
-    if let Some(drag_data) = drag_data {
-        let drag_info = extract_drag_data_info(drag_data);
-        with_event_queues(event_queues, |queues| {
-            queues.drag_events.push_back(DragEvent::Started {
-                drag_data: drag_info,
-                x,
-                y,
-                allowed_ops: drag_ops_to_u32(allowed_ops),
-            });
+    let Some(drag_data) = drag_data else {
+        return 0;
+    };
+    let Ok(mut state) = source_drag.lock() else {
+        return 0;
+    };
+    let allowed_ops = drag_ops_to_u32(allowed_ops);
+    let Some(session_id) = state.start((x, y), allowed_ops) else {
+        return 0;
+    };
+    let drag_info = extract_drag_data_info(drag_data);
+    if !with_event_queues(event_queues, |queues| {
+        queues.drag_events.push_back(DragEvent::Started {
+            session_id,
+            drag_data: drag_info,
+            x,
+            y,
+            allowed_ops,
         });
+    }) {
+        state.finish(Some(session_id));
+        return 0;
     }
     1
 }
@@ -281,6 +285,7 @@ macro_rules! impl_common_render_handler {
             pub struct $struct_name {
                 handler: $handler_type,
                 event_queues: EventQueuesHandle,
+                source_drag: crate::drag::SourceDragHandle,
             }
 
             impl RenderHandler {
@@ -347,7 +352,7 @@ macro_rules! impl_common_render_handler {
                     x: ::std::os::raw::c_int,
                     y: ::std::os::raw::c_int,
                 ) -> ::std::os::raw::c_int {
-                    handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues)
+                    handle_start_dragging(drag_data, allowed_ops, x, y, &self.event_queues, &self.source_drag)
                 }
 
                 fn update_drag_cursor(
@@ -398,7 +403,8 @@ impl_common_render_handler!(SoftwareOsrHandler, handler: cef_app::OsrRenderHandl
 impl_build_new!(
     pub SoftwareOsrHandler => cef::RenderHandler;
     handler: cef_app::OsrRenderHandler,
-    event_queues: EventQueuesHandle
+    event_queues: EventQueuesHandle,
+    source_drag: crate::drag::SourceDragHandle
 );
 
 impl_common_render_handler!(AcceleratedOsrHandler, handler: PlatformAcceleratedRenderHandler,
@@ -442,7 +448,8 @@ impl_common_render_handler!(AcceleratedOsrHandler, handler: PlatformAcceleratedR
 impl_build_new!(
     pub AcceleratedOsrHandler => cef::RenderHandler;
     handler: PlatformAcceleratedRenderHandler,
-    event_queues: EventQueuesHandle
+    event_queues: EventQueuesHandle,
+    source_drag: crate::drag::SourceDragHandle
 );
 
 fn cef_cursor_to_cursor_type(cef_type: cef::sys::cef_cursor_type_t) -> CursorType {
@@ -660,6 +667,61 @@ wrap_display_handler! {
             // Return false to allow default console output
             false as _
         }
+
+        fn on_tooltip(
+            &self,
+            _browser: Option<&mut Browser>,
+            text: Option<&mut CefString>,
+        ) -> i32 {
+            let text = text.map(|text| text.to_string()).unwrap_or_default();
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::Tooltip(text));
+            });
+            // Godot decides how to display tooltips for an off-screen browser.
+            true as _
+        }
+
+        fn on_fullscreen_mode_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            fullscreen: i32,
+        ) {
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::Fullscreen(fullscreen != 0));
+            });
+        }
+
+        fn on_loading_progress_change(
+            &self,
+            _browser: Option<&mut Browser>,
+            progress: f64,
+        ) {
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::LoadingProgress(progress));
+            });
+        }
+
+        fn on_status_message(
+            &self,
+            _browser: Option<&mut Browser>,
+            value: Option<&CefString>,
+        ) {
+            let message = value.map(|value| value.to_string()).unwrap_or_default();
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::StatusMessage(message));
+            });
+        }
+
+        fn on_favicon_urlchange(
+            &self,
+            _browser: Option<&mut Browser>,
+            icon_urls: Option<&mut CefStringList>,
+        ) {
+            let urls = copy_dialog_strings(icon_urls);
+            with_event_queues(&self.event_queues, |queues| {
+                queues.display_events.push_back(DisplayEvent::FaviconUrls(urls));
+            });
+        }
     }
 }
 
@@ -689,13 +751,138 @@ wrap_context_menu_handler! {
 
 impl_build_new!(pub ContextMenuHandlerImpl => cef::ContextMenuHandler;);
 
+fn copy_dialog_strings(list: Option<&mut CefStringList>) -> Vec<String> {
+    list.map(|list| {
+        // cef-rs iterates through a mutable raw view; a const wrapper cannot
+        // produce that view and would silently yield an empty iterator.
+        let raw: *mut cef::sys::_cef_string_list_t = list.into();
+        CefStringList::from(raw).into_iter().collect()
+    })
+    .unwrap_or_default()
+}
+
+wrap_dialog_handler! {
+    pub(crate) struct DialogHandlerImpl {
+        dialogs: crate::dialogs::DialogController,
+    }
+
+    impl DialogHandler {
+        fn on_file_dialog(
+            &self,
+            _browser: Option<&mut Browser>,
+            mode: FileDialogMode,
+            title: Option<&CefString>,
+            default_file_path: Option<&CefString>,
+            accept_filters: Option<&mut CefStringList>,
+            accept_extensions: Option<&mut CefStringList>,
+            accept_descriptions: Option<&mut CefStringList>,
+            callback: Option<&mut FileDialogCallback>,
+        ) -> i32 {
+            let Some(callback) = callback else { return 0; };
+            let event = crate::browser::FileDialogRequestEvent {
+                request_id: 0,
+                mode: crate::cef_raw_to_i32!(mode.get_raw()),
+                title: title.map(|value| value.to_string()).unwrap_or_default(),
+                default_file_path: default_file_path.map(|value| value.to_string()).unwrap_or_default(),
+                accept_filters: copy_dialog_strings(accept_filters),
+                accept_extensions: copy_dialog_strings(accept_extensions),
+                accept_descriptions: copy_dialog_strings(accept_descriptions),
+            };
+            (self.dialogs.request_file(callback.clone(), event) != crate::dialogs::DialogDisposition::Native) as i32
+        }
+    }
+}
+
+impl_build_new!(pub DialogHandlerImpl => cef::DialogHandler; dialogs: crate::dialogs::DialogController);
+
+wrap_jsdialog_handler! {
+    pub(crate) struct JsDialogHandlerImpl {
+        dialogs: crate::dialogs::DialogController,
+    }
+
+    impl JsdialogHandler {
+        fn on_jsdialog(
+            &self,
+            _browser: Option<&mut Browser>,
+            origin_url: Option<&CefString>,
+            dialog_type: JsdialogType,
+            message_text: Option<&CefString>,
+            default_prompt_text: Option<&CefString>,
+            callback: Option<&mut JsdialogCallback>,
+            suppress_message: Option<&mut i32>,
+        ) -> i32 {
+            let Some(callback) = callback else { return 0; };
+            let kind = match dialog_type {
+                JsdialogType::ALERT => "alert",
+                JsdialogType::CONFIRM => "confirm",
+                JsdialogType::PROMPT => "prompt",
+                _ => {
+                    if let Some(suppress) = suppress_message { *suppress = 1; }
+                    return 0;
+                }
+            };
+            let event = crate::browser::JsDialogRequestEvent {
+                request_id: 0,
+                kind: kind.into(),
+                origin_url: origin_url.map(|value| value.to_string()).unwrap_or_default(),
+                message_text: message_text.map(|value| value.to_string()).unwrap_or_default(),
+                default_prompt_text: default_prompt_text.map(|value| value.to_string()).unwrap_or_default(),
+                is_reload: false,
+            };
+            let disposition = self.dialogs.request_js(callback.clone(), event);
+            if let Some(suppress) = suppress_message {
+                *suppress = (disposition == crate::dialogs::DialogDisposition::Suppress) as i32;
+            }
+            (disposition == crate::dialogs::DialogDisposition::Handled) as i32
+        }
+
+        fn on_before_unload_dialog(
+            &self,
+            browser: Option<&mut Browser>,
+            message_text: Option<&CefString>,
+            is_reload: i32,
+            callback: Option<&mut JsdialogCallback>,
+        ) -> i32 {
+            let Some(callback) = callback else { return 0; };
+            let origin_url = browser.and_then(|browser| browser.main_frame())
+                .map(|frame| CefStringUtf16::from(&frame.url()).to_string()).unwrap_or_default();
+            let event = crate::browser::JsDialogRequestEvent {
+                request_id: 0,
+                kind: "before_unload".into(),
+                origin_url,
+                message_text: message_text.map(|value| value.to_string()).unwrap_or_default(),
+                default_prompt_text: String::new(),
+                is_reload: is_reload != 0,
+            };
+            (self.dialogs.request_js(callback.clone(), event) == crate::dialogs::DialogDisposition::Handled) as i32
+        }
+
+        fn on_reset_dialog_state(&self, _browser: Option<&mut Browser>) {
+            self.dialogs.reset_js("reset");
+        }
+
+        fn on_dialog_closed(&self, _browser: Option<&mut Browser>) {
+            self.dialogs.reset_js("dialog_closed");
+        }
+    }
+}
+
+impl_build_new!(pub JsDialogHandlerImpl => cef::JsdialogHandler; dialogs: crate::dialogs::DialogController);
+
 wrap_life_span_handler! {
     pub(crate) struct LifeSpanHandlerImpl {
         event_queues: EventQueuesHandle,
         popup_policy: crate::browser::PopupPolicyFlag,
+        permissions: crate::permissions::PermissionController,
+        dialogs: crate::dialogs::DialogController,
     }
 
     impl LifeSpanHandler {
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            self.permissions.invalidate("browser_closed");
+            self.dialogs.close("browser_closed");
+        }
+
         fn on_before_popup(
             &self,
             browser: Option<&mut Browser>,
@@ -757,12 +944,15 @@ wrap_life_span_handler! {
 impl_build_new!(
     pub LifeSpanHandlerImpl => cef::LifeSpanHandler;
     event_queues: EventQueuesHandle,
-    popup_policy: crate::browser::PopupPolicyFlag
+    popup_policy: crate::browser::PopupPolicyFlag,
+    permissions: crate::permissions::PermissionController,
+    dialogs: crate::dialogs::DialogController
 );
 
 wrap_load_handler! {
     pub(crate) struct LoadHandlerImpl {
         event_queues: EventQueuesHandle,
+        permissions: crate::permissions::PermissionController,
     }
 
     impl LoadHandler {
@@ -772,6 +962,13 @@ wrap_load_handler! {
             frame: Option<&mut Frame>,
             _transition_type: TransitionType,
         ) {
+            if let Some(frame) = frame.as_ref() {
+                if frame.is_main() != 0 {
+                    self.permissions.cancel_all("navigation");
+                } else {
+                    self.permissions.cancel_frame(&CefStringUtf16::from(&frame.identifier()).to_string());
+                }
+            }
             if let Some(frame) = frame
                 && frame.is_main() != 0
             {
@@ -832,7 +1029,10 @@ wrap_load_handler! {
     }
 }
 
-impl_build_new!(pub LoadHandlerImpl => cef::LoadHandler; event_queues: EventQueuesHandle);
+impl_build_new!(pub LoadHandlerImpl => cef::LoadHandler;
+    event_queues: EventQueuesHandle,
+    permissions: crate::permissions::PermissionController
+);
 
 wrap_find_handler! {
     pub(crate) struct FindHandlerImpl {
@@ -1085,9 +1285,30 @@ impl_build_new!(pub DownloadHandlerImpl => cef::DownloadHandler; event_queues: E
 wrap_request_handler! {
     pub(crate) struct RequestHandlerImpl {
         event_queues: EventQueuesHandle,
+        permissions: crate::permissions::PermissionController,
+        dialogs: crate::dialogs::DialogController,
     }
 
     impl RequestHandler {
+        fn on_before_browse(
+            &self,
+            _browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            _request: Option<&mut Request>,
+            _user_gesture: ::std::os::raw::c_int,
+            _is_redirect: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            if let Some(frame) = frame {
+                if frame.is_main() != 0 {
+                    self.permissions.cancel_all("navigation");
+                    self.dialogs.cancel_all("navigation");
+                } else {
+                    self.permissions.cancel_frame(&CefStringUtf16::from(&frame.identifier()).to_string());
+                }
+            }
+            false as _
+        }
+
         fn on_render_process_terminated(
             &self,
             _browser: Option<&mut Browser>,
@@ -1095,6 +1316,8 @@ wrap_request_handler! {
             _error_code: i32,
             _error_string: Option<&cef::CefStringUtf16>,
         ) {
+            self.permissions.invalidate("renderer_terminated");
+            self.dialogs.cancel_all("renderer_terminated");
             let reason = match status {
                 cef::TerminationStatus::ABNORMAL_TERMINATION => "Abnormal Termination",
                 cef::TerminationStatus::PROCESS_WAS_KILLED => "Process Was Killed",
@@ -1110,222 +1333,35 @@ wrap_request_handler! {
     }
 }
 
-impl_build_new!(pub RequestHandlerImpl => cef::RequestHandler; event_queues: EventQueuesHandle);
+impl_build_new!(pub RequestHandlerImpl => cef::RequestHandler;
+    event_queues: EventQueuesHandle,
+    permissions: crate::permissions::PermissionController,
+    dialogs: crate::dialogs::DialogController
+);
 
-fn push_permission_request(
-    event_queues: &EventQueuesHandle,
-    pending_permission_requests: &PendingPermissionRequests,
-    permission_request_counter: &PermissionRequestIdCounter,
-    pending_decision: PendingPermissionDecision,
-    permission_type: String,
-    url: String,
-) {
-    use std::sync::atomic::Ordering;
-
-    let request_id = permission_request_counter.fetch_add(1, Ordering::Relaxed) + 1;
-
-    if let Ok(mut pending) = pending_permission_requests.lock() {
-        pending.insert(request_id, pending_decision);
-    } else {
-        return;
-    }
-
-    let queued = with_event_queues(event_queues, |queues| {
-        queues
-            .permission_requests
-            .push_back(PermissionRequestEvent {
-                permission_type,
-                url,
-                request_id,
-            });
-    });
-    if !queued && let Ok(mut pending) = pending_permission_requests.lock() {
-        pending.remove(&request_id);
-    }
-}
-
-fn map_permission_bits(
-    requested: u32,
-    mappings: &[(u32, &'static str)],
-    unknown_label: &'static str,
-) -> Vec<(u32, &'static str)> {
-    let mut out = Vec::new();
-    let mut known_mask = 0u32;
-    for &(bit, label) in mappings {
-        known_mask |= bit;
-        if requested & bit != 0 {
-            out.push((bit, label));
-        }
-    }
-    let unknown = requested & !known_mask;
-    if unknown != 0 {
-        out.push((unknown, unknown_label));
-    }
-    if out.is_empty() {
-        out.push((requested, unknown_label));
-    }
-    out
-}
-
-fn map_media_permission_types(requested_permissions: u32) -> Vec<(u32, &'static str)> {
-    map_permission_bits(
-        requested_permissions,
-        &[
-            (
-                media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_AUDIO_CAPTURE),
-                "microphone",
-            ),
-            (
-                media_permission_to_u32(cef::MediaAccessPermissionTypes::DEVICE_VIDEO_CAPTURE),
-                "camera",
-            ),
-            (
-                media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_AUDIO_CAPTURE),
-                "desktop_audio_capture",
-            ),
-            (
-                media_permission_to_u32(cef::MediaAccessPermissionTypes::DESKTOP_VIDEO_CAPTURE),
-                "desktop_video_capture",
-            ),
-        ],
-        "unknown_media_permission",
-    )
-}
-
-fn map_prompt_permission_types(requested_permissions: u32) -> Vec<&'static str> {
-    map_permission_bits(
-        requested_permissions,
-        &[
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::CAMERA_STREAM),
-                "camera",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::MIC_STREAM),
-                "microphone",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::GEOLOCATION),
-                "geolocation",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::CLIPBOARD),
-                "clipboard",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::NOTIFICATIONS),
-                "notifications",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::MIDI_SYSEX),
-                "midi_sysex",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::POINTER_LOCK),
-                "pointer_lock",
-            ),
-            (
-                prompt_permission_to_u32(cef::PermissionRequestTypes::KEYBOARD_LOCK),
-                "keyboard_lock",
-            ),
-        ],
-        "unknown_permission",
-    )
-    .into_iter()
-    .map(|(_, label)| label)
-    .collect()
-}
-
-#[cfg(test)]
-mod permission_mapping_tests {
-    use super::*;
-
-    #[test]
-    fn prompt_permissions_empty_defaults_to_unknown() {
-        let res = map_prompt_permission_types(0);
-        assert_eq!(res, vec!["unknown_permission"]);
-    }
-
-    #[test]
-    fn prompt_permissions_unknown_bit_includes_unknown() {
-        // Use a high bit that is very unlikely to collide with known permission bits.
-        let res = map_prompt_permission_types(1u32 << 31);
-        assert!(res.contains(&"unknown_permission"));
-    }
-
-    #[test]
-    fn media_permissions_empty_defaults_to_unknown() {
-        let res = map_media_permission_types(0);
-        assert_eq!(res, vec![(0, "unknown_media_permission")]);
-    }
-
-    #[test]
-    fn media_permissions_unknown_bit_includes_unknown() {
-        // Use a high bit that is very unlikely to collide with known permission bits.
-        let res = map_media_permission_types(1u32 << 31);
-        assert!(
-            res.iter()
-                .any(|(_, label)| *label == "unknown_media_permission")
-        );
-    }
-}
 wrap_permission_handler! {
     pub(crate) struct PermissionHandlerImpl {
-        event_queues: EventQueuesHandle,
-        pending_permission_requests: PendingPermissionRequests,
-        pending_permission_aggregates: PendingPermissionAggregates,
-        permission_request_counter: PermissionRequestIdCounter,
-        permission_policy: PermissionPolicyFlag,
+        permissions: crate::permissions::PermissionController,
     }
 
     impl PermissionHandler {
         fn on_request_media_access_permission(
             &self,
             _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             requesting_origin: Option<&CefString>,
             requested_permissions: u32,
             callback: Option<&mut MediaAccessCallback>,
         ) -> ::std::os::raw::c_int {
-            use crate::browser::permission_policy;
-            use std::sync::atomic::Ordering;
-
             let Some(callback) = callback else {
                 return false as _;
             };
-            let callback = callback.clone();
-            let policy = self.permission_policy.load(Ordering::Relaxed);
-
-            if policy == permission_policy::ALLOW_ALL {
-                callback.cont(requested_permissions);
-                return true as _;
-            }
-
-            if policy == permission_policy::DENY_ALL {
-                callback.cont(media_permission_to_u32(cef::MediaAccessPermissionTypes::NONE));
-                return true as _;
-            }
-
-            let url = requesting_origin
-                .map(|origin| origin.to_string())
-                .unwrap_or_default();
-            let callback_token = callback.get_raw() as usize;
-
-            for (permission_bit, permission_type) in map_media_permission_types(requested_permissions) {
-                push_permission_request(
-                    &self.event_queues,
-                    &self.pending_permission_requests,
-                    &self.permission_request_counter,
-                    PendingPermissionDecision::Media {
-                        callback: callback.clone(),
-                        permission_bit,
-                        callback_token,
-                    },
-                    permission_type.to_string(),
-                    url.clone(),
-                );
-            }
-
+            self.permissions.request_media(
+                callback.clone(),
+                requested_permissions,
+                requesting_origin.map(|origin| origin.to_string()).unwrap_or_default(),
+                frame.map(|frame| CefStringUtf16::from(&frame.identifier()).to_string()).unwrap_or_default(),
+            );
             true as _
         }
 
@@ -1337,44 +1373,13 @@ wrap_permission_handler! {
             requested_permissions: u32,
             callback: Option<&mut PermissionPromptCallback>,
         ) -> ::std::os::raw::c_int {
-            use crate::browser::permission_policy;
-            use std::sync::atomic::Ordering;
-
             let Some(callback) = callback else {
                 return false as _;
             };
-            let callback = callback.clone();
-            let policy = self.permission_policy.load(Ordering::Relaxed);
-
-            if policy == permission_policy::ALLOW_ALL {
-                callback.cont(cef::PermissionRequestResult::ACCEPT);
-                return true as _;
-            }
-
-            if policy == permission_policy::DENY_ALL {
-                callback.cont(cef::PermissionRequestResult::DENY);
-                return true as _;
-            }
-
-            let url = requesting_origin
-                .map(|origin| origin.to_string())
-                .unwrap_or_default();
-            let callback_token = callback.get_raw() as usize;
-            for permission_type in map_prompt_permission_types(requested_permissions) {
-                push_permission_request(
-                    &self.event_queues,
-                    &self.pending_permission_requests,
-                    &self.permission_request_counter,
-                    PendingPermissionDecision::Prompt {
-                        callback: callback.clone(),
-                        prompt_id,
-                        callback_token,
-                    },
-                    permission_type.to_string(),
-                    url.clone(),
-                );
-            }
-
+            self.permissions.request_prompt(
+                callback.clone(), prompt_id, requested_permissions,
+                requesting_origin.map(|origin| origin.to_string()).unwrap_or_default(),
+            );
             true as _
         }
 
@@ -1382,43 +1387,16 @@ wrap_permission_handler! {
             &self,
             _browser: Option<&mut Browser>,
             prompt_id: u64,
-            _result: PermissionRequestResult,
+            result: PermissionRequestResult,
         ) {
-            if let Ok(mut pending) = self.pending_permission_requests.lock() {
-                let mut callback_tokens = Vec::new();
-                pending.retain(
-                    |_, entry| match entry {
-                        PendingPermissionDecision::Prompt {
-                            prompt_id: id,
-                            callback_token,
-                            ..
-                        } if *id == prompt_id => {
-                            callback_tokens.push(*callback_token);
-                            false
-                        }
-                        _ => true,
-                    },
-                );
-
-                if !callback_tokens.is_empty()
-                    && let Ok(mut aggregates) = self.pending_permission_aggregates.lock()
-                {
-                    for token in callback_tokens {
-                        aggregates.remove(&token);
-                    }
-                }
-            }
+            self.permissions.dismiss(prompt_id, result);
         }
     }
 }
 
 impl_build_new!(
     pub PermissionHandlerImpl => cef::PermissionHandler;
-    event_queues: EventQueuesHandle,
-    pending_permission_requests: PendingPermissionRequests,
-    pending_permission_aggregates: PendingPermissionAggregates,
-    permission_request_counter: PermissionRequestIdCounter,
-    permission_policy: PermissionPolicyFlag
+    permissions: crate::permissions::PermissionController
 );
 
 #[derive(Clone)]
@@ -1426,6 +1404,8 @@ pub(crate) struct ClientHandlers {
     pub render_handler: cef::RenderHandler,
     pub display_handler: cef::DisplayHandler,
     pub context_menu_handler: cef::ContextMenuHandler,
+    pub dialog_handler: cef::DialogHandler,
+    pub jsdialog_handler: cef::JsdialogHandler,
     pub life_span_handler: cef::LifeSpanHandler,
     pub load_handler: cef::LoadHandler,
     pub find_handler: cef::FindHandler,
@@ -1464,6 +1444,14 @@ wrap_client! {
 
         fn context_menu_handler(&self) -> Option<cef::ContextMenuHandler> {
             Some(self.handlers.context_menu_handler.clone())
+        }
+
+        fn dialog_handler(&self) -> Option<cef::DialogHandler> {
+            Some(self.handlers.dialog_handler.clone())
+        }
+
+        fn jsdialog_handler(&self) -> Option<cef::JsdialogHandler> {
+            Some(self.handlers.jsdialog_handler.clone())
         }
 
         fn life_span_handler(&self) -> Option<cef::LifeSpanHandler> {
@@ -1531,20 +1519,28 @@ fn build_client_handlers(
         render_handler,
         display_handler: DisplayHandlerImpl::build(cursor_type, queues.event_queues.clone()),
         context_menu_handler: ContextMenuHandlerImpl::build(),
-        life_span_handler: LifeSpanHandlerImpl::build(queues.event_queues.clone(), popup_policy),
-        load_handler: LoadHandlerImpl::build(queues.event_queues.clone()),
+        dialog_handler: DialogHandlerImpl::build(queues.dialogs.clone()),
+        jsdialog_handler: JsDialogHandlerImpl::build(queues.dialogs.clone()),
+        life_span_handler: LifeSpanHandlerImpl::build(
+            queues.event_queues.clone(),
+            popup_policy,
+            queues.permissions.clone(),
+            queues.dialogs.clone(),
+        ),
+        load_handler: LoadHandlerImpl::build(
+            queues.event_queues.clone(),
+            queues.permissions.clone(),
+        ),
         find_handler: FindHandlerImpl::build(queues.event_queues.clone()),
         drag_handler: DragHandlerImpl::build(queues.event_queues.clone()),
         audio_handler,
         download_handler: DownloadHandlerImpl::build(queues.event_queues.clone()),
-        request_handler: RequestHandlerImpl::build(queues.event_queues.clone()),
-        permission_handler: PermissionHandlerImpl::build(
+        request_handler: RequestHandlerImpl::build(
             queues.event_queues.clone(),
-            queues.pending_permission_requests.clone(),
-            queues.pending_permission_aggregates.clone(),
-            queues.permission_request_counter.clone(),
-            queues.permission_policy.clone(),
+            queues.permissions.clone(),
+            queues.dialogs.clone(),
         ),
+        permission_handler: PermissionHandlerImpl::build(queues.permissions.clone()),
     }
 }
 
@@ -1601,7 +1597,10 @@ wrap_resource_request_handler! {
             {
                 match cef_request_to_adblock_request(request) {
                     Ok(adblock_request) => {
-                        if adblock_engine.check_network_request(&adblock_request).matched {
+                        if adblock_engine
+                            .check_network_request(&adblock_request)
+                            .should_block()
+                        {
                             return ReturnValue::CANCEL;
                         }
                     }
@@ -1659,6 +1658,77 @@ impl_build_new!(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_callbacks_preserve_metadata_order_and_clear_values() -> Result<(), String> {
+        crate::dialogs::ensure_cef_exports_for_tests();
+        let queues = Arc::new(Mutex::new(EventQueues::new()));
+        let handler =
+            DisplayHandlerImpl::build(Arc::new(Mutex::new(CursorType::Arrow)), queues.clone());
+        let mut tooltip = CefString::from("提示😀");
+        let link = CefString::from("https://example.test/链接");
+        let mut icons = CefStringList::new();
+        for icon in [
+            "https://example.test/图标.png",
+            "https://example.test/icon.svg",
+        ] {
+            assert!(icons.append(icon));
+        }
+
+        assert_eq!(handler.on_tooltip(None, Some(&mut tooltip)), 1);
+        handler.on_fullscreen_mode_change(None, 1);
+        handler.on_loading_progress_change(None, 0.375);
+        handler.on_status_message(None, Some(&link));
+        handler.on_favicon_urlchange(None, Some(&mut icons));
+        // Reading the URLs must leave the CEF-owned list usable.
+        assert!(icons.append("https://example.test/extra.ico"));
+        assert_eq!(handler.on_tooltip(None, None), 1);
+        handler.on_fullscreen_mode_change(None, 0);
+        handler.on_loading_progress_change(None, 1.0);
+        handler.on_status_message(None, Some(&CefString::from("")));
+        handler.on_favicon_urlchange(None, Some(&mut CefStringList::new()));
+
+        let queues = queues.lock().map_err(|error| error.to_string())?;
+        assert_eq!(
+            queues.display_events,
+            VecDeque::from([
+                DisplayEvent::Tooltip("提示😀".into()),
+                DisplayEvent::Fullscreen(true),
+                DisplayEvent::LoadingProgress(0.375),
+                DisplayEvent::StatusMessage("https://example.test/链接".into()),
+                DisplayEvent::FaviconUrls(vec![
+                    "https://example.test/图标.png".into(),
+                    "https://example.test/icon.svg".into(),
+                ]),
+                DisplayEvent::Tooltip(String::new()),
+                DisplayEvent::Fullscreen(false),
+                DisplayEvent::LoadingProgress(1.0),
+                DisplayEvent::StatusMessage(String::new()),
+                DisplayEvent::FaviconUrls(Vec::new()),
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn file_dialog_lists_preserve_values_without_taking_the_cef_list() {
+        crate::dialogs::ensure_cef_exports_for_tests();
+        let mut list = CefStringList::new();
+        for value in ["image/*", "", "图片😀"] {
+            assert!(list.append(value));
+        }
+        assert_eq!(
+            copy_dialog_strings(Some(&mut list)),
+            ["image/*", "", "图片😀"]
+        );
+        // CEF owns the passed list. Reading it must neither free nor consume it.
+        assert!(list.append(".png;.jpg"));
+        assert_eq!(
+            copy_dialog_strings(Some(&mut list)),
+            ["image/*", "", "图片😀", ".png;.jpg"]
+        );
+        assert!(copy_dialog_strings(None).is_empty());
+    }
 
     #[test]
     fn test_bgra_to_rgba_single_pixel() {

@@ -1,23 +1,19 @@
 name: Build
+on:
+  workflow_call:
+    outputs:
+      required-results:
+        description: Results of required jobs (build-macos, build-windows, build-linux, pack).
+        value: ${{ toJSON(jobs) }}
+
 permissions:
   contents: read
-
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   CEF_PATH: ${{ github.workspace }}/cef
-  SCCACHE_GHA_ENABLED: "true"
+  # Incremental rustc invocations cannot be cached by sccache.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   build-macos:
@@ -25,75 +21,65 @@ jobs:
     name: macOS
 
     env:
-      CEF_PATH_ARM64: ${{ github.workspace }}/cef-arm64
+      CEF_PATH_ARM64: ${{ github.workspace }}/cef
       CEF_PATH_X64: ${{ github.workspace }}/cef-x64
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup mise toolchain
-        uses: jdx/mise-action@v2
+        uses: ./.github/actions/setup-toolchain
         with:
-          cache: true
+          tools: rust cargo:export-cef-dir
 
       - name: Install Rust targets
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+        run: mise exec -- rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Setup Cargo caches
+        uses: ./.github/actions/setup-cargo-cache
 
-      - name: Cache Cargo registry and build
-        uses: actions/cache@v4
+      - name: Setup build scripts
+        uses: ./.github/actions/setup-build-scripts
+
+      - name: Setup CEF runtime (ARM64)
+        uses: ./.github/actions/setup-cef
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: macos-universal-cargo-${{ hashFiles('**/Cargo.lock', 'mise.toml') }}
-          restore-keys: |
-            macos-universal-cargo-
-
-      - name: Cache CEF binaries (ARM64)
-        uses: actions/cache@v4
-        id: cef-cache-arm64
-        with:
+          target: aarch64-apple-darwin
           path: ${{ env.CEF_PATH_ARM64 }}
-          key: cef-${{ hashFiles('mise.toml') }}-macos-arm64
 
-      - name: Download CEF binaries (ARM64)
-        if: steps.cef-cache-arm64.outputs.cache-hit != 'true'
-        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target aarch64-apple-darwin "$CEF_PATH_ARM64"'
-      
-      - name: Copy CEF binaries (ARM64)
-        run: |
-          mkdir -p ${{ env.CEF_PATH }}
-          cp -R ${{ env.CEF_PATH_ARM64 }}/* ${{ env.CEF_PATH }}/
-
-      - name: Cache CEF binaries (X64)
-        uses: actions/cache@v4
-        id: cef-cache-x64
+      - name: Setup CEF runtime (X64)
+        uses: ./.github/actions/setup-cef
         with:
+          target: x86_64-apple-darwin
           path: ${{ env.CEF_PATH_X64 }}
-          key: cef-${{ hashFiles('mise.toml') }}-macos-x64
-
-      - name: Download CEF binaries (X64)
-        if: steps.cef-cache-x64.outputs.cache-hit != 'true'
-        run: mise exec -- sh -c 'export-cef-dir --version "$CEF_VERSION" --force --target x86_64-apple-darwin "$CEF_PATH_X64"'
 
       - name: Build and bundle for macOS (Universal)
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo xtask bundle --release
+        run: mise run bundle --release
+
+      - name: Validate macOS bundle
+        run: |
+          framework_path="addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework"
+          plist_path="$framework_path/Resources/Info.plist"
+          test "$(plutil -extract CFBundleExecutable raw "$plist_path")" = "libgdcef.dylib"
+          test "$(plutil -extract CFBundleSupportedPlatforms.0 raw "$plist_path")" = "MacOSX"
+          test -d "$framework_path/Helpers/Godot CEF.app"
+          otool -arch arm64 -D "$framework_path/libgdcef.dylib" | grep -Fxq '@rpath/Godot CEF.framework/libgdcef.dylib'
+          otool -arch x86_64 -D "$framework_path/libgdcef.dylib" | grep -Fxq '@rpath/Godot CEF.framework/libgdcef.dylib'
+          find "$framework_path/Helpers" -path '*/Libraries/*.dylib' -exec codesign --verify --strict {} \;
+          codesign --verify --deep --strict "$framework_path"
 
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts/universal-apple-darwin
-          cp -R "target/release/Godot CEF.app" "artifacts/universal-apple-darwin/"
           cp -R "target/release/Godot CEF.framework" "artifacts/universal-apple-darwin/"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gdcef-universal-apple-darwin
           path: artifacts/universal-apple-darwin
@@ -107,28 +93,26 @@ jobs:
       matrix:
         include:
           - target: x86_64-pc-windows-msvc
-            cache_key: windows-x64
             msvc_arch: x64
           - target: aarch64-pc-windows-msvc
-            cache_key: windows-arm64
             msvc_arch: amd64_arm64
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust and CEF
         uses: ./.github/actions/setup-rust-cef
         with:
           target: ${{ matrix.target }}
-          cef-cache-key: ${{ matrix.cache_key }}
-          cargo-cache-prefix: windows
           msvc-arch: ${{ matrix.msvc_arch }}
 
       - name: Build and bundle for Windows
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo xtask bundle --release --target ${{ matrix.target }}
+        run: mise run bundle --release --target ${{ matrix.target }}
 
       - name: Prepare artifacts
         shell: pwsh
@@ -137,7 +121,7 @@ jobs:
           Copy-Item -Recurse addons/godot_cef/bin/${{ matrix.target }}/* artifacts/${{ matrix.target }}/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gdcef-${{ matrix.target }}
           path: artifacts/${{ matrix.target }}
@@ -151,26 +135,65 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            cache_key: linux-x64
           - target: aarch64-unknown-linux-gnu
-            cache_key: linux-arm64
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Rust and CEF
         uses: ./.github/actions/setup-rust-cef
         with:
           target: ${{ matrix.target }}
-          cef-cache-key: ${{ matrix.cache_key }}
-          cargo-cache-prefix: linux
           install-linux-deps: "true"
+
+      - name: Validate integration runner failure handling
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: 'mise exec -- cargo test --locked -p xtask integration::'
 
       - name: Build and bundle for Linux
         env:
           RUSTC_WRAPPER: sccache
-        run: mise exec -- cargo xtask bundle --release --target ${{ matrix.target }}
+        run: mise run bundle --release --target ${{ matrix.target }}
+
+      - name: Setup integration test toolchain
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: ./.github/actions/setup-toolchain
+        with:
+          tools: godot
+
+      - name: Install headless display dependencies
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth
+
+      - name: Run Godot headless integration tests
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        timeout-minutes: 20
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          # Xvfb supplies CEF's X11 backend; Godot itself uses its dummy renderer.
+          # Reuse the complete native bundle above and build only the test addon.
+          xvfb-run -a -s '-screen 0 1024x768x24' mise exec -- cargo xtask integration \
+            --release --target x86_64-unknown-linux-gnu \
+            --godot "$(mise which godot)"
+
+      - name: Upload integration evidence
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-linux-x64
+          path: |
+            target/integration/**/summary.json
+            target/integration/**/junit.xml
+            target/integration/**/result.json
+            target/integration/**/godot.log
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Prepare artifacts
         run: |
@@ -178,7 +201,7 @@ jobs:
           cp -r addons/godot_cef/bin/${{ matrix.target }}/* artifacts/${{ matrix.target }}/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gdcef-${{ matrix.target }}
           path: artifacts/${{ matrix.target }}
@@ -191,65 +214,44 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup mise toolchain
-        uses: jdx/mise-action@v2
+        uses: actions/checkout@v7
         with:
-          cache: true
+          persist-credentials: false
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Setup build scripts
+        uses: ./.github/actions/setup-build-scripts
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
+          pattern: gdcef-*
           path: artifacts
 
-      - name: Pack Godot addon
-        env:
-          RUSTC_WRAPPER: sccache
+      - name: Pack full and Asset Store addons
         run: |
-          # Use staging directory to avoid deleting source addon files
-          mise exec -- cargo xtask pack \
-            --artifacts artifacts \
-            --output dist/addons/godot_cef \
-            --addon-src addons/godot_cef
-          mise exec -- cargo xtask validate --addon dist/addons/godot_cef
-          # Use dist as ZIP root so Asset Library installs into res://addons/godot_cef.
-          zip -r godot_cef.zip dist
+          # Stage each variant independently; both ZIPs retain the existing dist/addons layout.
+          for variant in full store; do
+            mise run pack \
+              --artifacts artifacts \
+              --output staging/$variant/dist/addons/godot_cef \
+              --addon-src addons/godot_cef \
+              --variant "$variant"
+            mise run validate \
+              --addon staging/$variant/dist/addons/godot_cef --variant "$variant"
+          done
+          (cd staging/full && zip -r ../../godot_cef.zip dist)
+          (cd staging/store && zip -r ../../godot_cef-store.zip dist)
 
-      - name: Upload packed addon
-        uses: actions/upload-artifact@v4
+      - name: Upload full addon
+        uses: actions/upload-artifact@v7
         with:
           name: godot_cef-addon
           path: godot_cef.zip
           retention-days: 30
 
-  release:
-    needs: [pack]
-    runs-on: ubuntu-latest
-    name: Publish Release
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download packed addon
-        uses: actions/download-artifact@v4
+      - name: Upload Asset Store addon
+        uses: actions/upload-artifact@v7
         with:
-          name: godot_cef-addon
-          path: .
-
-      - name: Rename addon with version
-        run: mv godot_cef.zip godot_cef-${{ github.ref_name }}.zip
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Godot CEF ${{ github.ref_name }}
-          draft: true # release is draft until it is manually published
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-          files: godot_cef-${{ github.ref_name }}.zip
+          name: godot_cef-store-addon
+          path: godot_cef-store.zip
+          retention-days: 30

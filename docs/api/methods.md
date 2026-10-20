@@ -43,6 +43,11 @@ uses internally and advanced users can call directly:
 - `set_audio_muted(...)`, `is_audio_muted()`
 - `send_ipc_message(...)`, `send_ipc_binary_message(...)`, `send_ipc_data(...)`
 - `find_text(...)`, `find_next()`, `find_previous()`, `stop_finding()`
+- `grant_permission(...)`, `deny_permission(...)`, `is_permission_pending(...)`
+- `get_permission_setting(...)`
+- `continue_file_dialog(...)`, `cancel_file_dialog(...)`
+- `continue_js_dialog(...)`, `cancel_js_dialog(...)`, `is_dialog_pending(...)`
+- `set_browser_hidden(...)`, `get_browser_hidden()`, `is_browser_hidden()`
 
 For API consistency, these core controls intentionally keep the same names as
 their `CefTexture` counterparts (including shared properties such as `url`,
@@ -51,6 +56,21 @@ their `CefTexture` counterparts (including shared properties such as `url`,
 When using `CefTexture2D` directly, you are responsible for integrating these
 helpers with your scene/input flow (for example, mapping coordinates and focus
 state).
+
+## Rendering Visibility
+
+These methods are available on `CefTexture` and `CefTexture2D`:
+
+| Method | Description |
+|--------|-------------|
+| `set_browser_hidden(hidden: bool)` | Set the manual `browser_hidden` property. Can be called before browser creation or at runtime. |
+| `get_browser_hidden() -> bool` | Return the manual `browser_hidden` property. |
+| `is_browser_hidden() -> bool` | Return the effective rendering visibility state, including the node's automatic visibility policy. `true` means browser rendering is hidden. |
+
+`CefTexture` additionally exposes `set_pause_rendering_when_hidden(enabled: bool)`
+and `get_pause_rendering_when_hidden() -> bool` for its opt-in automatic policy.
+See [Display Events and Visibility](./display-events.md) for hide/resume examples
+and the distinction between rendering visibility and browser execution.
 
 ## Navigation
 
@@ -476,17 +496,23 @@ if cef_texture.is_drag_over():
 
 ## Permission Handling
 
-These methods let you respond to `permission_requested` signals when `godot_cef/security/default_permission_policy` is set to `SIGNAL`.
+These methods are available on `CefTexture` and `CefTexture2D`. Answer methods
+handle `permission_requested` when the browser's effective `permission_policy`
+is `SIGNAL`; the profile query is available under any policy.
+See [Permissions](./permissions.md) for policies, timeouts, and UI cleanup.
 
 ### `grant_permission(request_id: int) -> bool`
 
-Grants a pending permission request by `request_id`.
+Records an allow answer for this ID. If CEF grouped several permissions together,
+all IDs must be granted before CEF receives an allow decision.
 
-Returns `true` if the request was resolved, `false` if the ID is stale/unknown or no browser is active.
+Returns `true` if the answer was accepted, not necessarily if the whole group was
+granted. Returns `false` for expired, unknown, invalidated, or already answered IDs.
+Unknown permission types cannot be granted and end the group as `denied`.
 
 ```gdscript
 func _on_permission_requested(permission_type: String, url: String, request_id: int):
-    if permission_type == "geolocation" and url.begins_with("https://maps.example"):
+    if permission_type == "geolocation" and url == "https://maps.example/":
         cef_texture.grant_permission(request_id)
     else:
         cef_texture.deny_permission(request_id)
@@ -494,9 +520,53 @@ func _on_permission_requested(permission_type: String, url: String, request_id: 
 
 ### `deny_permission(request_id: int) -> bool`
 
-Denies a pending permission request by `request_id`.
+Denies this request and all permissions in its CEF group immediately.
 
-Returns `true` if the request was resolved, `false` if the ID is stale/unknown or no browser is active.
+Returns `true` if the answer was accepted, `false` for expired, unknown,
+invalidated, or already answered IDs.
+
+### `is_permission_pending(request_id: int) -> bool`
+
+Returns whether this ID still accepts an answer. An individual ID becomes
+unanswerable after its allow choice is recorded, even while its group waits for
+other answers. Use `permission_request_finished` to observe the group's final
+result and clear pending dialogs.
+
+### `get_permission_setting(permission_type: String, requesting_url: String, top_level_url: String) -> String`
+
+Synchronously reads a supported permission's content setting from the browser's
+shared request context. Call on Godot's main thread after the browser is ready,
+with explicit absolute HTTP(S) URLs for the requesting and top-level pages.
+Empty URLs and URLs containing credentials are rejected.
+
+Returns `allow`, `block`, `ask`, `default`, `session_only`, or `unknown` for a
+CEF value; `unsupported`, `unavailable`, or `invalid_url` when the query cannot
+be performed. `default` does not imply `ask`.
+
+This is a profile lookup, not a check of effective application, browser, and OS
+authorization. It does not modify policy or answer pending requests. See
+[Querying profile settings](./permissions.md#querying-profile-settings) for
+supported labels, URL scope, and the camera/microphone limitation.
+
+## File and JavaScript Dialogs
+
+These methods are available on `CefTexture` and `CefTexture2D`. Connect the
+request signals and set `dialog_policy = 1` to answer requests with your own
+Godot UI. See [Dialogs](./dialogs.md) for request metadata, policy, completion
+results, and `FileDialog` / JavaScript dialog examples.
+
+| Method | Meaning |
+|--------|---------|
+| `continue_file_dialog(request_id: int, file_paths: PackedStringArray) -> bool` | Return absolute filesystem paths; an empty array cancels |
+| `cancel_file_dialog(request_id: int) -> bool` | Cancel a file chooser |
+| `continue_js_dialog(request_id: int, accepted: bool, user_input: String) -> bool` | Answer alert/confirm/prompt/before-unload; input is used for prompt |
+| `cancel_js_dialog(request_id: int) -> bool` | Cancel/reject a JavaScript dialog |
+| `is_dialog_pending(request_id: int) -> bool` | Whether the request still accepts an answer |
+
+Answer methods return `false` for stale, expired, completed, unknown, or
+wrong-type IDs. An invalid file path selection returns `false` and leaves the
+request pending. Resolve application-provided `res://` or `user://` paths with
+`ProjectSettings.globalize_path()` before passing them to CEF.
 
 ## Cookie & Session Management
 

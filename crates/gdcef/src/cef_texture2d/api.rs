@@ -2,12 +2,187 @@ use crate::utils::should_enable_ipc_inspector;
 
 #[godot_api]
 impl CefTexture2D {
+    #[signal]
+    fn tooltip_changed(text: GString);
+
+    #[signal]
+    fn fullscreen_changed(fullscreen: bool);
+
+    #[signal]
+    fn loading_progress_changed(progress: f64);
+
+    #[signal]
+    fn status_message_changed(message: GString);
+
+    #[signal]
+    fn favicon_urls_changed(urls: PackedStringArray);
+
+    #[func]
+    pub fn get_browser_hidden(&self) -> bool {
+        self.browser_hidden
+    }
+
+    #[func]
+    pub fn set_browser_hidden(&mut self, hidden: bool) {
+        self.browser_hidden = hidden;
+        backend::set_browser_hidden(self.runtime.app_mut(), hidden);
+    }
+
+    #[func]
+    pub fn is_browser_hidden(&self) -> bool {
+        self.browser_hidden
+    }
+
+    #[signal]
+    fn file_dialog_requested(info: Gd<crate::dialog_info::FileDialogRequestInfo>);
+
+    #[signal]
+    fn js_dialog_requested(info: Gd<crate::dialog_info::JsDialogRequestInfo>);
+
+    #[signal]
+    fn dialog_request_finished(request_id: i64, result: GString);
+
+    fn dialog_controller(&self) -> Option<crate::dialogs::DialogController> {
+        self.runtime
+            .app()
+            .state
+            .as_ref()
+            .map(|state| state.dialogs.clone())
+    }
+
+    #[func]
+    pub fn get_dialog_policy(&self) -> i32 {
+        self.dialog_policy
+    }
+
+    #[func]
+    pub fn set_dialog_policy(&mut self, policy: i32) {
+        self.dialog_policy = policy.clamp(0, 2);
+        if let Some(controller) = self.dialog_controller() {
+            controller.set_policy(self.dialog_policy);
+        }
+    }
+
+    #[func]
+    pub fn continue_file_dialog(&self, request_id: i64, file_paths: PackedStringArray) -> bool {
+        self.dialog_controller().is_some_and(|controller| {
+            controller.resolve_file(
+                request_id,
+                file_paths
+                    .as_slice()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            )
+        })
+    }
+
+    #[func]
+    pub fn cancel_file_dialog(&self, request_id: i64) -> bool {
+        self.dialog_controller()
+            .is_some_and(|controller| controller.cancel_file(request_id))
+    }
+
+    #[func]
+    pub fn continue_js_dialog(&self, request_id: i64, accepted: bool, user_input: GString) -> bool {
+        self.dialog_controller().is_some_and(|controller| {
+            controller.resolve_js(request_id, accepted, user_input.to_string())
+        })
+    }
+
+    #[func]
+    pub fn cancel_js_dialog(&self, request_id: i64) -> bool {
+        self.dialog_controller()
+            .is_some_and(|controller| controller.cancel_js(request_id))
+    }
+
+    #[func]
+    pub fn is_dialog_pending(&self, request_id: i64) -> bool {
+        self.dialog_controller()
+            .is_some_and(|controller| controller.is_pending(request_id))
+    }
+
+    #[signal]
+    fn permission_requested(permission_type: GString, url: GString, request_id: i64);
+
+    #[signal]
+    fn permission_request_finished(request_id: i64, result: GString);
+
+    #[func]
+    pub fn grant_permission(&self, request_id: i64) -> bool {
+        self.runtime
+            .app()
+            .state
+            .as_ref()
+            .is_some_and(|state| state.permissions.resolve(request_id, true))
+    }
+
+    #[func]
+    pub fn deny_permission(&self, request_id: i64) -> bool {
+        self.runtime
+            .app()
+            .state
+            .as_ref()
+            .is_some_and(|state| state.permissions.resolve(request_id, false))
+    }
+
+    #[func]
+    pub fn is_permission_pending(&self, request_id: i64) -> bool {
+        self.runtime
+            .app()
+            .state
+            .as_ref()
+            .is_some_and(|state| state.permissions.is_pending(request_id))
+    }
+
+    /// Read the profile's content setting; this is not a device-access check.
+    #[func]
+    pub fn get_permission_setting(
+        &self,
+        permission_type: GString,
+        requesting_url: GString,
+        top_level_url: GString,
+    ) -> GString {
+        crate::permission_query::query(
+            self.runtime.app(),
+            &permission_type.to_string(),
+            &requesting_url.to_string(),
+            &top_level_url.to_string(),
+        )
+        .into()
+    }
+
+    #[func]
+    pub fn get_permission_policy(&self) -> i32 {
+        self.permission_policy
+    }
+
+    #[func]
+    pub fn set_permission_policy(&mut self, policy: i32) {
+        self.permission_policy = policy.clamp(-1, 2);
+        if let Some(state) = self.runtime.app().state.as_ref() {
+            state
+                .permissions
+                .set_policy(crate::settings::resolve_permission_policy(
+                    self.permission_policy,
+                ));
+        }
+    }
+
     pub(crate) fn runtime_app(&self) -> &App {
         self.runtime.app()
     }
 
     pub(crate) fn runtime_app_mut(&mut self) -> &mut App {
         self.runtime.app_mut()
+    }
+
+    pub(crate) fn cancel_active_touches(&mut self) {
+        if let Some(host) = self.runtime.app().host() {
+            input::cancel_screen_touches(&host, &mut self.touch_id_map);
+        } else {
+            self.touch_id_map.clear();
+        }
     }
 
     #[func]
@@ -31,8 +206,32 @@ impl CefTexture2D {
     }
 
     #[func]
-    fn _on_frame_pre_draw(&mut self) {
+    fn _connect_runtime_hooks(&mut self) {
+        self.connect_runtime_hooks();
+    }
+
+    #[func]
+    fn _on_process_frame(&mut self) {
         self.tick();
+    }
+
+    #[func]
+    fn _on_frame_pre_draw(&mut self) {
+        if self.runtime.runtime_enabled() {
+            self.update_texture();
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            if self
+                .runtime
+                .app()
+                .state
+                .as_ref()
+                .is_some_and(|state| matches!(state.render_mode, RenderMode::Accelerated { .. }))
+            {
+                // Queue publication before asking CEF for its next accelerated
+                // frame. The signal itself does not imply GPU completion.
+                self.runtime.request_external_begin_frame();
+            }
+        }
     }
 
     #[func]
@@ -90,7 +289,6 @@ impl CefTexture2D {
         }
 
         self.texture_size = clamped;
-        self.refresh_fallback_texture();
         let logical_size = self.logical_size();
         let dpi = self.get_dpi();
         self.runtime.handle_size_change(logical_size, dpi);
@@ -99,8 +297,38 @@ impl CefTexture2D {
 
     #[func]
     pub fn shutdown(&mut self) {
+        let event_queues = self
+            .runtime
+            .app()
+            .state
+            .as_ref()
+            .map(|state| state.event_queues.clone());
         self.runtime.shutdown();
         self.cleanup_instance();
+        // Explicit shutdown can close a permission dialog while the resource is
+        // still alive. Drop/PREDELETE cleanup must not emit Godot signals.
+        let (finished, dialogs_finished) = event_queues
+            .and_then(|queues| {
+                queues.lock().ok().map(|mut queues| {
+                    (
+                        std::mem::take(&mut queues.permission_request_finished),
+                        std::mem::take(&mut queues.dialog_request_finished),
+                    )
+                })
+            })
+            .unwrap_or_default();
+        for (request_id, result) in finished {
+            self.base_mut().emit_signal(
+                "permission_request_finished",
+                &[request_id.to_variant(), GString::from(&result).to_variant()],
+            );
+        }
+        for (request_id, result) in dialogs_finished {
+            self.base_mut().emit_signal(
+                "dialog_request_finished",
+                &[request_id.to_variant(), GString::from(&result).to_variant()],
+            );
+        }
     }
 
     #[func]
@@ -232,12 +460,15 @@ impl CefTexture2D {
             frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
 
             if let Ok(mut queues) = state.event_queues.lock()
-                && should_enable_ipc_inspector() {
-                queues.debug_ipc_events.push_back(crate::browser::DebugIpcEvent::text(
+                && should_enable_ipc_inspector()
+            {
+                queues
+                    .debug_ipc_events
+                    .push_back(crate::browser::DebugIpcEvent::text(
                         crate::browser::DebugIpcDirection::ToRenderer,
                         message_string,
                     ));
-                }
+            }
         }
     }
 
@@ -248,7 +479,9 @@ impl CefTexture2D {
             return;
         };
         let Some(frame) = state.browser.main_frame() else {
-            godot::global::godot_warn!("[CefTexture2D] Cannot send binary IPC message: no main frame");
+            godot::global::godot_warn!(
+                "[CefTexture2D] Cannot send binary IPC message: no main frame"
+            );
             return;
         };
 
@@ -275,15 +508,15 @@ impl CefTexture2D {
         argument_list.set_binary(0, Some(&mut binary_value));
         frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
         if let Ok(mut queues) = state.event_queues.lock()
-
-            && should_enable_ipc_inspector() {
-                queues
-                    .debug_ipc_events
-                    .push_back(crate::browser::DebugIpcEvent::binary(
-                        crate::browser::DebugIpcDirection::ToRenderer,
-                        &bytes,
-                    ));
-            }
+            && should_enable_ipc_inspector()
+        {
+            queues
+                .debug_ipc_events
+                .push_back(crate::browser::DebugIpcEvent::binary(
+                    crate::browser::DebugIpcDirection::ToRenderer,
+                    &bytes,
+                ));
+        }
     }
 
     #[func]
@@ -333,7 +566,8 @@ impl CefTexture2D {
         frame.send_process_message(cef::ProcessId::RENDERER, Some(&mut process_message));
 
         if let Ok(mut queues) = state.event_queues.lock()
-            && should_enable_ipc_inspector() {
+            && should_enable_ipc_inspector()
+        {
             queues
                 .debug_ipc_events
                 .push_back(crate::browser::DebugIpcEvent::data_from_variant(
@@ -341,7 +575,7 @@ impl CefTexture2D {
                     &data,
                     bytes.len(),
                 ));
-            }
+        }
     }
 
     #[func]

@@ -1,6 +1,16 @@
 use super::*;
 
 impl CefTextureRuntime {
+    /// Builds the per-resource runtime wrapper.
+    ///
+    /// `runtime_enabled` is supplied by the owner and starts as
+    /// `!Engine::is_editor_hint()`: game and `--headless` runs may create a
+    /// browser and drive lifecycle, while editor tool instances stay inert.
+    /// [`Self::shutdown`] clears it permanently. `CefTexture` relies on that to
+    /// stop the runtime it borrows from an internal helper, so the helper's
+    /// deferred hook installation sees `false` and never starts a second
+    /// browser. The headless integration `lifecycle` case exercises
+    /// shutdown-before-deferred-startup.
     pub(crate) fn new(runtime_enabled: bool) -> Self {
         Self {
             app: App::default(),
@@ -21,10 +31,6 @@ impl CefTextureRuntime {
 
     pub(crate) fn runtime_enabled(&self) -> bool {
         self.runtime_enabled
-    }
-
-    pub(crate) fn set_runtime_enabled(&mut self, enabled: bool) {
-        self.runtime_enabled = enabled;
     }
 
     pub(crate) fn set_url(&self, url: GString) {
@@ -51,6 +57,8 @@ impl CefTextureRuntime {
         backend::apply_popup_policy(&self.app, policy);
     }
 
+    /// Permanently disables this runtime. Existing hooks still exist until the
+    /// owner disconnects them, but browser creation and ticking stop.
     pub(crate) fn shutdown(&mut self) {
         self.runtime_enabled = false;
     }
@@ -63,6 +71,8 @@ impl CefTextureRuntime {
             enable_accelerated_osr,
             background_color,
             popup_policy,
+            permission_policy,
+            dialog_policy,
             preload_script,
             preload_script_path,
             software_target_texture,
@@ -84,6 +94,8 @@ impl CefTextureRuntime {
             enable_accelerated_osr,
             background_color,
             popup_policy,
+            permission_policy,
+            dialog_policy,
             preload_script: preload_script.to_string(),
             preload_script_path: preload_script_path.to_string(),
             software_target_texture,
@@ -123,10 +135,7 @@ impl CefTextureRuntime {
         backend::update_primary_texture(state, log_prefix)
     }
 
-    pub(crate) fn message_loop_and_begin_frame(&self) {
-        if self.app.state.is_some() {
-            cef::do_message_loop_work();
-        }
+    pub(crate) fn request_external_begin_frame(&self) {
         backend::request_external_begin_frame(&self.app);
     }
 
@@ -137,9 +146,9 @@ impl CefTextureRuntime {
         backend::cleanup_runtime(&mut self.app, popup_texture_2d_rd);
     }
 
-    pub(crate) fn drain_event_queues(&self, log_prefix: &str) {
+    pub(crate) fn drain_event_queues(&self, log_prefix: &str) -> crate::browser::EventQueues {
         let Some(event_queues) = self.app.state.as_ref().map(|state| &state.event_queues) else {
-            return;
+            return Default::default();
         };
 
         let Ok(mut queues) = event_queues.lock() else {
@@ -147,9 +156,9 @@ impl CefTextureRuntime {
                 "[{}] Failed to lock event queues while draining events",
                 log_prefix
             );
-            return;
+            return Default::default();
         };
 
-        let _ = std::mem::take(&mut *queues);
+        std::mem::take(&mut *queues)
     }
 }

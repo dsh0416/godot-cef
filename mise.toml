@@ -1,14 +1,75 @@
+min_version = '2026.10.0'
+
 # Install toolchain dependencies with:
 #   mise install
 
 [tools]
 # Nightly is required by retour-rs for feature(unboxed_closures, tuple_trait).
 rust = { version = "nightly", components = "rustfmt,clippy" }
-node = "24.16.0"
-pnpm = "11.3.0"
-"cargo:export-cef-dir" = "148.2.0+148.0.8"
+node = "26"
+pnpm = "latest"
+"cargo:export-cef-dir" = "154.5.0"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 
-[env]
-# Keep this in sync with the resolved cef / cef-dll-sys version in Cargo.lock,
-# using the CEF runtime build version after the '+'.
-CEF_VERSION = "148.0.8"
+[tools.godot]
+version = "4.6-stable"
+# Select the standard editor, excluding Mono and export-template archives.
+matching_regex = '^Godot_v[^_]+_(linux\.|macos\.|win64|windows_arm64)'
+
+[tools.godot.platforms]
+linux-x64 = { rename_exe = { "Godot_v*_linux.x86_64" = "godot" } }
+linux-arm64 = { rename_exe = { "Godot_v*_linux.arm64" = "godot" } }
+macos-x64 = { bin_path = "Godot.app/Contents/MacOS" }
+macos-arm64 = { bin_path = "Godot.app/Contents/MacOS" }
+
+[tool_alias]
+# mise 2026.10.0's Aqua backend misreads Godot_v filenames as v-prefixed tags.
+godot = "github:godotengine/godot"
+
+[settings]
+lockfile = true
+
+# Build tooling is an independent package: native CI does not install the docs site.
+[tasks."build:setup"]
+description = "Install the locked build-script runtime dependencies"
+run = "pnpm --dir scripts/build install --frozen-lockfile --prod 1>&2"
+sources = ["scripts/build/package.json", "scripts/build/pnpm-lock.yaml"]
+outputs = ["scripts/build/node_modules/.modules.yaml"]
+
+[tasks.cef-version]
+description = "Print the CEF runtime version locked by Cargo"
+depends = ["build:setup"]
+run = "node scripts/build/main.ts cef-version"
+
+[tasks.validate-versions]
+description = "Check workspace and CEF version pins"
+depends = ["build:setup"]
+run = "node scripts/build/main.ts validate-versions"
+
+[tasks.build]
+description = "Compile native libraries and helpers with Cargo"
+run = "node scripts/build/main.ts build"
+
+[tasks.assemble]
+description = "Assemble an addon from existing native binaries and CEF"
+run = "node scripts/build/main.ts assemble"
+
+[tasks.bundle]
+description = "Build native binaries, then assemble the addon"
+usage = '''
+flag "-r --release" help="Build release binaries"
+flag "--target <target>" default="host" help="Rust target, or host (universal on macOS)"
+flag "--target-dir <dir>" default="" help="Cargo output root (defaults to CARGO_TARGET_DIR or target/)"
+'''
+# Keep an omitted directory in the option token: mise drops standalone empty arguments.
+depends = [{ task = "build", args = ["--profile", "{% if usage.release %}release{% else %}debug{% endif %}", "--target", "{{ usage.target }}", "--target-dir={{ usage.target_dir }}"] }]
+# Read parsed usage_* environment variables in Node; never interpolate paths into shell code.
+run = "node scripts/build/main.ts assemble"
+
+[tasks.pack]
+description = "Pack downloaded platform artifacts into a Full or Store addon"
+run = "node scripts/build/main.ts pack"
+
+[tasks.validate]
+description = "Validate addon artifacts and optional distribution variant"
+run = "node scripts/build/main.ts validate"

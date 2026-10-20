@@ -1,0 +1,17 @@
+[package]
+name = "gdcef_itest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+godot = { workspace = true }
+serde_json = "1"

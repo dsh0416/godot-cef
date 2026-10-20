@@ -20,9 +20,11 @@ cef_app = { path = "../cef_app" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libloading = { workspace = true }
+libc = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libloading = { workspace = true }
+libc = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { workspace = true }

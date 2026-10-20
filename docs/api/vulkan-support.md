@@ -2,6 +2,10 @@
 
 This page documents how Godot CEF enables GPU-accelerated rendering on Vulkan backends through runtime function hooking, and the limitations of this approach.
 
+This page covers architectures in the full GitHub Release addon. The smaller
+Asset Store addon omits Windows/Linux ARM64; use the full package for those
+targets. See [Distribution variants](./distribution-variants).
+
 ## Background
 
 GPU-accelerated offscreen rendering (OSR) in CEF requires sharing textures between the CEF renderer process and the host application (Godot). This is achieved through platform-specific external memory APIs:
@@ -28,6 +32,11 @@ Since Godot doesn't provide an API to request additional Vulkan extensions durin
 4. The modified request is passed to the real `vkCreateDevice` function
 5. Godot now has a Vulkan device with external memory support enabled
 
+Queue interception also covers both Vulkan function resolvers and loader exports.
+It serializes host submissions per actual queue, including Godot's background
+transfer work, and verifies device/queue provenance before accelerated startup.
+See [Accelerated frame handoff](./accelerated-handoff) for GPU barriers and completion.
+
 ### Platform-Specific Extensions
 
 **Windows:**
@@ -42,6 +51,9 @@ Since Godot doesn't provide an API to request additional Vulkan extensions durin
 - `VK_KHR_external_memory` — Base extension for external memory
 - `VK_KHR_external_memory_fd` — File descriptor based sharing
 - `VK_EXT_external_memory_dma_buf` — DMA-BUF sharing for zero-copy transfers
+- `VK_EXT_image_drm_format_modifier` — Producer image layout
+- `VK_EXT_queue_family_foreign` — External producer ownership
+- `VK_KHR_external_semaphore_fd` — Producer sync-file import
 
 ### Linux NVIDIA Driver Requirement
 
@@ -103,7 +115,7 @@ Vulkan hook-based acceleration is **only available on x86_64 (64-bit x86) archit
 The hooking mechanism relies on the [retour](https://github.com/darfink/retour-rs) library for runtime function detouring. This library currently does not support ARM64 architecture, which means:
 
 - **Windows ARM64** — Vulkan hooks not available
-- **Linux ARM64** — Vulkan hooks not available  
+- **Linux ARM64** — Vulkan hooks not available
 - **macOS (Apple Silicon)** — Vulkan hooks not available
 
 On unsupported architectures, the extension automatically falls back to software rendering.

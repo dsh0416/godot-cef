@@ -1,0 +1,110 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body { margin:0; width:100%; height:100%; overflow:hidden; background:black }
+canvas { display:block; width:100%; height:100% }
+</style></head><body><canvas></canvas><script>
+const canvas = document.querySelector('canvas');
+const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00'];
+let current = 1;
+window.paint = sequence => {
+  current = sequence;
+  canvas.width = Math.round(innerWidth * devicePixelRatio);
+  canvas.height = Math.round(innerHeight * devicePixelRatio);
+  const context = canvas.getContext('2d', { alpha: false });
+  context.fillStyle = colors[sequence % colors.length];
+  context.fillRect(0, 0, canvas.width, canvas.height / 2);
+  for (let bit = 0; bit < 8; bit++) {
+    context.fillStyle = (sequence & (1 << bit)) ? '#ffffff' : '#000000';
+    const left = Math.floor(bit * canvas.width / 8);
+    const right = Math.ceil((bit + 1) * canvas.width / 8);
+    context.fillRect(left, canvas.height / 2, right - left, canvas.height);
+  }
+};
+window.paintWhenSize = (sequence, width, height, physicalPixels) => {
+  let lastDimensions = '';
+  const waitForSize = () => {
+    // CefTexture's get_view_rect divides its physical extent by screen scale
+    // and truncates to integer CSS pixels. CefTexture2D requests CSS pixels.
+    const expectedWidth = physicalPixels ? Math.trunc(width / devicePixelRatio) : width;
+    const expectedHeight = physicalPixels ? Math.trunc(height / devicePixelRatio) : height;
+    const matched = innerWidth === expectedWidth && innerHeight === expectedHeight;
+    if (matched) window.paint(sequence);
+    const dimensions = JSON.stringify({ sequence, physicalPixels,
+      requestedWidth: width, requestedHeight: height,
+      expectedWidth, expectedHeight, innerWidth, innerHeight, devicePixelRatio,
+      canvasWidth: canvas.width, canvasHeight: canvas.height, painted: matched });
+    if (dimensions !== lastDimensions) {
+      console.log('GDCEF_PAGE_DIMENSIONS ' + dimensions);
+      lastDimensions = dimensions;
+    }
+    if (!matched) setTimeout(waitForSize, 10);
+  };
+  waitForSize();
+};
+window.startBurst = (first, count, delay) => {
+  let offset = 0;
+  const paintNext = () => {
+    window.paint(first + offset++);
+    if (offset < count) setTimeout(paintNext, delay);
+  };
+  paintNext();
+};
+window.startPacing = (warmupMs, durationMs) => {
+  const context = canvas.getContext('2d', { alpha: false });
+  const bins = [], intervals = [];
+  let start, measuredStart, previous, binStart, tailStart;
+  let frames = 0, binFrames = 0, tailFrames = 0;
+  const tick = async timestamp => {
+    start ??= timestamp;
+    context.fillStyle = `hsl(${timestamp / 5 % 360},100%,50%)`;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#000000';
+    context.fillRect(timestamp / 3 % canvas.width, 0, 30, canvas.height);
+    if (timestamp - start >= warmupMs) {
+      measuredStart ??= timestamp;
+      binStart ??= timestamp;
+      if (previous !== undefined) {
+        intervals.push(timestamp - previous);
+        frames++;
+        binFrames++;
+        if (tailStart !== undefined) tailFrames++;
+      }
+      previous = timestamp;
+      if (timestamp - measuredStart >= durationMs / 2) tailStart ??= timestamp;
+      if (timestamp - binStart >= 1000) {
+        bins.push({ elapsed_ms: timestamp - binStart, frames: binFrames,
+          fps: binFrames * 1000 / (timestamp - binStart) });
+        binStart = timestamp;
+        binFrames = 0;
+      }
+      if (timestamp - measuredStart >= durationMs) {
+        const elapsed = timestamp - measuredStart;
+        const sorted = intervals.slice().sort((a, b) => a - b);
+        const report = { warmup_ms: warmupMs, elapsed_ms: elapsed, frames,
+          fps: frames * 1000 / elapsed, tail_fps: tailFrames * 1000 / (timestamp - tailStart),
+          median_interval_ms: sorted[Math.floor(sorted.length / 2)], max_interval_ms: sorted.at(-1),
+          bins, innerWidth, innerHeight, devicePixelRatio };
+        const run = new URLSearchParams(location.search).get('run');
+        const response = await fetch(`/pacing?run=${encodeURIComponent(run)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report)
+        });
+        if (!response.ok) throw new Error(`Pacing report rejected: ${response.status}`);
+        window.paint(2);
+        // Keep native frames in flight during final readback and scene teardown.
+        // The strip stays outside the sentinel/sequence sample positions.
+        const keepDrawing = time => {
+          context.fillStyle = `hsl(${time / 5 % 360},100%,50%)`;
+          context.fillRect(0, canvas.height - 4, canvas.width, 4);
+          requestAnimationFrame(keepDrawing);
+        };
+        requestAnimationFrame(keepDrawing);
+        return;
+      }
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+};
+addEventListener('resize', () => window.paint(current));
+window.paint(current);
+</script></body></html>

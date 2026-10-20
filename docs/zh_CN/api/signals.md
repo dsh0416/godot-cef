@@ -2,6 +2,24 @@
 
 `CefTexture` 会发出一系列信号，用于通知游戏侧浏览器事件与状态变化。
 
+下方的显示、权限及文件 / JavaScript 对话框信号也适用于 `CefTexture2D`。
+Godot 界面示例见[显示事件与可见性](./display-events.md)、[权限](./permissions.md)
+和[对话框](./dialogs.md)。
+
+## 显示事件
+
+以下信号同时适用于 `CefTexture` 和 `CefTexture2D`：
+
+| 信号 | 描述 |
+|------|------|
+| `tooltip_changed(text: String)` | 浏览器 tooltip 文本变化，空文本用于清除提示。 |
+| `fullscreen_changed(fullscreen: bool)` | 网页内容进入或退出全屏模式。应用决定如何调整 Godot 窗口或布局。 |
+| `loading_progress_changed(progress: float)` | CEF 估计的加载进度，范围为 `0.0` 到 `1.0`。 |
+| `status_message_changed(message: String)` | 浏览器状态消息变化，包括悬停链接的目标 URL。空文本用于清除消息。 |
+| `favicon_urls_changed(urls: PackedStringArray)` | 候选 favicon URL 变化。空数组用于清除候选项，不会自动下载图像。 |
+
+tooltip、进度条、全屏、状态栏和 favicon URL 示例见[显示事件与可见性](./display-events.md)。
+
 ## `ipc_message(message: String)`
 
 当网页端通过 `sendIpcMessage` 向 Godot 发送消息时发出。用于网页 UI 与游戏逻辑之间的双向通信（IPC）。
@@ -308,14 +326,17 @@ func _on_popup_requested(url: String, disposition: int, user_gesture: bool):
 
 ## `permission_requested(permission_type: String, url: String, request_id: int)`
 
-当网页请求权限（例如摄像头、麦克风、地理位置、剪贴板或通知），且 `godot_cef/security/default_permission_policy` 设置为 `2`（SIGNAL）时触发。
+适用于 `CefTexture` 和 `CefTexture2D`。当网页请求权限，且浏览器实际使用的
+`permission_policy` 为 `2`（SIGNAL）时触发。该属性默认值 `-1` 表示继承项目权限策略。
 
 **参数：**
-- `permission_type`：权限类型（例如 `camera`、`microphone`、`geolocation`、`clipboard`、`notifications`）
-- `url`：发起请求的来源 URL
+- `permission_type`：权限类型，例如 `camera`、`microphone`、`local_network` 或 `loopback_network`；完整列表见[权限](./permissions.md)
+- `url`：CEF 提供的请求来源 origin，不是目标局域网地址
 - `request_id`：用于 `grant_permission()` / `deny_permission()` 的请求 ID
 
-当一次浏览器权限请求包含多个权限（例如摄像头 + 麦克风）时，会按权限类型分别触发多个信号，且每个信号都有独立的 `request_id`。
+一次 CEF 请求包含多项权限时，按类型分别发出信号，并分配独立 ID。
+只有所有 ID 都获准才允许该请求；拒绝一项会拒绝整组。未连接监听器时取消请求且不授权，
+完成结果为 `dismissed`；CEF 提示会关闭，不记为用户显式拒绝该站点。
 
 ```gdscript
 func _ready():
@@ -323,12 +344,52 @@ func _ready():
 
 func _on_permission_requested(permission_type: String, url: String, request_id: int):
     print("权限请求: ", permission_type, " 来源: ", url)
-    var allow = permission_type in ["microphone", "camera"] and url.begins_with("https://trusted.example")
+    var allow = permission_type in ["microphone", "camera"] and url == "https://trusted.example/"
     if allow:
         cef_texture.grant_permission(request_id)
     else:
         cef_texture.deny_permission(request_id)
 ```
+
+## `permission_request_finished(request_id: int, result: String)`
+
+适用于两种浏览器类型。整组 CEF 请求结束时，为其中每个 ID 发出此信号。
+`result` 为 `allowed`、`denied`、`dismissed`、`timed_out`、`navigation`、
+`browser_closed`、`renderer_terminated` 或 `policy_changed`。
+同组 ID 收到相同的最终结果，包括此前已单独回答允许的 ID。
+允许权限不保证设备或网络操作一定成功。
+
+信号送达要求 Godot 对象仍存活。释放节点或资源时不保证最终信号，
+应用应在自己的销毁流程中清理对应的权限界面。
+
+可用此信号移除队列中的请求、关闭失效的权限对话框。
+异步界面回答前应检查 `is_permission_pending(request_id)`，完整示例见[权限](./permissions.md)。
+
+## `file_dialog_requested(info: FileDialogRequestInfo)`
+
+`CefTexture` 和 `CefTexture2D` 均提供此信号。当 `dialog_policy = 1`（Signal）
+且 CEF 请求文件选择时发出。`info` 包含 ID、模式、标题、默认路径与筛选元数据。
+通过 `continue_file_dialog()` 或 `cancel_file_dialog()` 回答。
+
+完整字段与 Godot `FileDialog` 示例见[对话框](./dialogs.md#filedialogrequestinfo)。
+Signal 模式不会自动创建界面。
+
+## `js_dialog_requested(info: JsDialogRequestInfo)`
+
+两种浏览器类型均在 Signal 策略下提供此信号。`info.kind` 为 `alert`、`confirm`、
+`prompt` 或 `before_unload`，其他字段包括 ID、来源 URL、消息、默认输入与重载标记。
+通过 `continue_js_dialog()` 或 `cancel_js_dialog()` 回答。
+
+完整字段与示例见[对话框](./dialogs.md#jsdialogrequestinfo)。
+
+## `dialog_request_finished(request_id: int, result: String)`
+
+两种浏览器类型均提供此信号。在应用对话框请求完成或失效时发出。
+应隐藏其界面并从应用状态中移除 ID。结果包括 `accepted`、`canceled`、`timed_out`、
+`unhandled`、`navigation`、`policy_changed`、`reset`、`dialog_closed`、
+`browser_closed` 和 `renderer_terminated`，参见[对话框生命周期](./dialogs.md#策略与生命周期)。
+
+释放浏览器时不保证最终信号一定送达，应用的浏览器清理流程也应清理界面。
 
 ## `render_process_terminated(status: int, error_message: String)`
 

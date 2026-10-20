@@ -7,24 +7,125 @@ mod vulkan_common;
 #[cfg(target_os = "windows")]
 mod windows;
 
+mod handoff;
+mod publication;
+mod snapshot_pool;
+
+pub(crate) use publication::drain_pending_publications;
+
+/// An exclusively leased, initialized snapshot slot. Backend capture must
+/// finish all reads of CEF storage and restore the agreed source state before
+/// returning. This handle is resolved on the render thread, never during paint.
+#[derive(Clone, Copy)]
+pub struct NativeCaptureTarget {
+    pub native_handle: u64,
+    pub width: u32,
+    pub height: u32,
+    pub format: SnapshotFormat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotFormat {
+    Bgra8,
+    Rgba8,
+}
+
+impl SnapshotFormat {
+    fn from_cef(info: &AcceleratedPaintInfo) -> Result<Self, String> {
+        match *info.format.as_ref() {
+            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_BGRA_8888 => Ok(Self::Bgra8),
+            cef::sys::cef_color_type_t::CEF_COLOR_TYPE_RGBA_8888 => Ok(Self::Rgba8),
+            _ => Err("Unsupported CEF accelerated pixel format".into()),
+        }
+    }
+
+    pub fn rd_format(self) -> godot::classes::rendering_device::DataFormat {
+        use godot::classes::rendering_device::DataFormat;
+        match self {
+            Self::Bgra8 => DataFormat::B8G8R8A8_SRGB,
+            Self::Rgba8 => DataFormat::R8G8B8A8_SRGB,
+        }
+    }
+}
+
 use cef::{AcceleratedPaintInfo, PaintElementType};
 use godot::classes::RenderingServer;
 use godot::global::godot_print;
 use godot::prelude::*;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
+
+pub(crate) const REPAINT_VIEW: u8 = 1;
+pub(crate) const REPAINT_POPUP: u8 = 2;
+
+/// Claim one retry while holding render state. A concurrently dropped callback
+/// can set the bit again; completing this attempt must not clear that newer bit.
+struct RepaintAttempt {
+    pending: Arc<AtomicU8>,
+    bit: u8,
+    captured: bool,
+}
+
+impl RepaintAttempt {
+    fn claim(pending: &Arc<AtomicU8>, bit: u8) -> Self {
+        pending.fetch_and(!bit, Ordering::AcqRel);
+        Self {
+            pending: Arc::clone(pending),
+            bit,
+            captured: false,
+        }
+    }
+}
+
+impl Drop for RepaintAttempt {
+    fn drop(&mut self) {
+        if !self.captured {
+            self.pending.fetch_or(self.bit, Ordering::Release);
+        }
+    }
+}
 
 #[cfg(target_os = "linux")]
 pub use linux::GodotTextureImporter;
 #[cfg(target_os = "linux")]
-pub use linux::get_godot_gpu_device_ids;
+use linux::get_godot_gpu_device_ids as native_gpu_device_ids;
 #[cfg(target_os = "macos")]
 pub use macos::GodotTextureImporter;
 #[cfg(target_os = "macos")]
-pub use macos::get_godot_gpu_device_ids;
+use macos::get_godot_gpu_device_ids as native_gpu_device_ids;
 #[cfg(target_os = "windows")]
 pub use windows::GodotTextureImporter;
 #[cfg(target_os = "windows")]
-pub use windows::get_godot_gpu_device_ids;
+use windows::get_godot_gpu_device_ids as native_gpu_device_ids;
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
+    crate::render::on_render_thread_sync(native_gpu_device_ids)
+        .ok()
+        .flatten()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+pub struct GodotTextureImporter;
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+impl GodotTextureImporter {
+    pub fn new() -> Result<Self, String> {
+        Err("Accelerated OSR is unsupported on this platform".into())
+    }
+
+    pub fn capture(
+        &mut self,
+        _info: &AcceleratedPaintInfo,
+        _target: NativeCaptureTarget,
+    ) -> Result<(), String> {
+        Err("Accelerated OSR is unsupported on this platform".into())
+    }
+
+    pub fn prepare_publication(&self) -> Result<(), String> {
+        Err("Accelerated OSR is unsupported on this platform".into())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderBackend {
@@ -60,10 +161,6 @@ impl RenderBackend {
         );
 
         backend
-    }
-
-    pub fn supports_accelerated_osr(&self) -> bool {
-        self.accelerated_osr_support_diagnostic().0
     }
 
     pub fn accelerated_osr_support_diagnostic(&self) -> (bool, String) {
@@ -109,74 +206,10 @@ impl RenderBackend {
 }
 
 pub fn accelerated_osr_support_diagnostic() -> (bool, String) {
-    let backend = RenderBackend::detect();
-    let (backend_supported, backend_reason) = backend.accelerated_osr_support_diagnostic();
-    if !backend_supported {
-        return (false, backend_reason);
-    }
-
-    #[cfg(target_os = "linux")]
-    if backend == RenderBackend::Vulkan {
-        return linux::vulkan_support_diagnostic();
-    }
-
-    let supported = is_accelerated_osr_supported();
-    if supported {
-        return (true, backend_reason);
-    }
-
-    (
-        false,
-        format!(
-            "{} but platform texture importer is unavailable",
-            backend_reason
-        ),
-    )
+    RenderBackend::detect().accelerated_osr_support_diagnostic()
 }
 
-pub struct AcceleratedRenderState {
-    pub importer: GodotTextureImporter,
-    pub dst_rd_rid: Rid,
-    pub dst_width: u32,
-    pub dst_height: u32,
-    pub needs_resize: Option<(u32, u32)>,
-    pub popup_rd_rid: Option<Rid>,
-    pub popup_width: u32,
-    pub popup_height: u32,
-    pub popup_dirty: bool,
-    pub popup_has_content: bool,
-    pub needs_popup_texture: Option<(u32, u32)>,
-    pub has_pending_copy: bool,
-}
-
-impl AcceleratedRenderState {
-    pub fn new(importer: GodotTextureImporter, dst_rd_rid: Rid, width: u32, height: u32) -> Self {
-        Self {
-            importer,
-            dst_rd_rid,
-            dst_width: width,
-            dst_height: height,
-            needs_resize: None,
-            popup_rd_rid: None,
-            popup_width: 0,
-            popup_height: 0,
-            popup_dirty: false,
-            popup_has_content: false,
-            needs_popup_texture: None,
-            has_pending_copy: false,
-        }
-    }
-
-    pub fn process_pending_copy(&mut self) -> Result<(), String> {
-        if !self.has_pending_copy {
-            return Ok(());
-        }
-
-        self.importer.process_pending_copy(self.dst_rd_rid)?;
-        self.has_pending_copy = false;
-        Ok(())
-    }
-}
+pub use handoff::{AcceleratedInitializationError, AcceleratedRenderState};
 
 #[derive(Clone)]
 pub struct AcceleratedRenderHandler {
@@ -185,6 +218,7 @@ pub struct AcceleratedRenderHandler {
     pub cursor_type: Arc<Mutex<cef_app::CursorType>>,
     pub popup_state: Arc<Mutex<cef_app::PopupState>>,
     render_state: Option<Arc<Mutex<AcceleratedRenderState>>>,
+    repaint_requests: Arc<AtomicU8>,
 }
 
 impl AcceleratedRenderHandler {
@@ -195,10 +229,14 @@ impl AcceleratedRenderHandler {
             cursor_type: Arc::new(Mutex::new(cef_app::CursorType::default())),
             popup_state: Arc::new(Mutex::new(cef_app::PopupState::new())),
             render_state: None,
+            repaint_requests: Arc::new(AtomicU8::new(0)),
         }
     }
 
     pub fn set_render_state(&mut self, state: Arc<Mutex<AcceleratedRenderState>>) {
+        if let Ok(mut state) = state.lock() {
+            state.set_repaint_requests(Arc::clone(&self.repaint_requests));
+        }
         self.render_state = Some(state);
     }
 
@@ -207,96 +245,27 @@ impl AcceleratedRenderHandler {
         type_: PaintElementType,
         info: Option<&AcceleratedPaintInfo>,
     ) {
-        let Some(info) = info else { return };
-        if type_ == PaintElementType::POPUP {
-            let src_width = info.extra.coded_size.width as u32;
-            let src_height = info.extra.coded_size.height as u32;
-
-            let Some(render_state_arc) = &self.render_state else {
-                return;
-            };
-            let Ok(mut state) = render_state_arc.lock() else {
-                return;
-            };
-
-            let need_new_texture = match state.popup_rd_rid {
-                None => true,
-                Some(_) => state.popup_width != src_width || state.popup_height != src_height,
-            };
-
-            if need_new_texture {
-                state.needs_popup_texture = Some((src_width, src_height));
-                return;
-            }
-
-            // For popups, use synchronous copy (they're small and infrequent)
-            if let Some(popup_rid) = state.popup_rd_rid {
-                let result = state
-                    .importer
-                    .queue_copy(info)
-                    .and_then(|_| state.importer.process_pending_copy(popup_rid))
-                    .and_then(|_| state.importer.wait_for_copy());
-
-                match result {
-                    Ok(_) => {
-                        state.popup_dirty = true;
-                        state.popup_has_content = true;
-                    }
-                    Err(e) => {
-                        godot::global::godot_error!(
-                            "[AcceleratedOSR] Failed to import popup texture: {}",
-                            e
-                        );
-                    }
-                }
-            }
-            return;
-        }
-
-        if type_ != PaintElementType::VIEW {
-            return;
-        }
-
-        let src_width = info.extra.coded_size.width as u32;
-        let src_height = info.extra.coded_size.height as u32;
-
-        // Queue the copy operation for deferred processing
-        // This returns immediately after duplicating the handle
-        let Some(render_state_arc) = &self.render_state else {
+        let (Some(info), Some(shared)) = (info, &self.render_state) else {
             return;
         };
-
-        let Ok(mut state) = render_state_arc.lock() else {
-            godot::global::godot_error!("[AcceleratedOSR] Failed to lock render state");
+        let bit = if type_ == PaintElementType::VIEW {
+            REPAINT_VIEW
+        } else if type_ == PaintElementType::POPUP {
+            REPAINT_POPUP
+        } else {
             return;
         };
-
-        // Check if texture dimensions changed - defer resize to main loop
-        if src_width != state.dst_width || src_height != state.dst_height {
-            state.needs_resize = Some((src_width, src_height));
-            // Note: we still queue the copy below to capture this frame.
-            // The frame will be processed AFTER resize in update_texture().
-        }
-
-        // Queue the copy operation (fast - just duplicates handle)
-        // The actual GPU work will be done in process_pending_copy()
-        // We queue even during resize to capture the frame - dst_rd_rid will be
-        // passed at processing time after any resize is complete.
-        match state.importer.queue_copy(info) {
-            Ok(_) => {
-                state.has_pending_copy = true;
-            }
-            Err(e) => {
-                if !e.contains("D3D12 device removed") {
-                    godot::global::godot_error!(
-                        "[AcceleratedOSR] Failed to queue texture copy: {}",
-                        e
-                    );
-                }
-            }
-        }
+        // Dropping a static page's only paint requires an explicit new paint;
+        // external begin-frame alone does not invalidate unchanged content.
+        self.repaint_requests.fetch_or(bit, Ordering::Release);
+        // Never wait for a future draw or for a slot. All GPU reads of info are
+        // completed inside capture; only application-owned snapshots survive.
+        let Ok(mut state) = shared.try_lock() else {
+            return;
+        };
+        let mut attempt = RepaintAttempt::claim(&self.repaint_requests, bit);
+        attempt.captured = state.capture(type_, info);
     }
-
     pub fn get_size(&self) -> Arc<Mutex<cef_app::PhysicalSize<f32>>> {
         self.size.clone()
     }
@@ -316,43 +285,35 @@ impl AcceleratedRenderHandler {
 
 pub type PlatformAcceleratedRenderHandler = AcceleratedRenderHandler;
 
-pub fn is_accelerated_osr_supported() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos::is_supported()
-    }
-    #[cfg(target_os = "windows")]
-    {
-        windows::is_supported()
-    }
-    #[cfg(target_os = "linux")]
-    {
-        linux::is_supported()
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    {
-        false
-    }
-}
+#[cfg(test)]
+mod repaint_tests {
+    use super::*;
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-pub struct GodotTextureImporter;
-
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-impl GodotTextureImporter {
-    pub fn new() -> Option<Self> {
-        None
+    #[test]
+    fn dropped_capture_keeps_retry_until_a_later_capture_succeeds() {
+        let pending = Arc::new(AtomicU8::new(REPAINT_VIEW | REPAINT_POPUP));
+        // Bootstrap/full-pool rejection leaves this paint pending.
+        drop(RepaintAttempt::claim(&pending, REPAINT_VIEW));
+        assert_eq!(
+            pending.load(Ordering::Acquire),
+            REPAINT_VIEW | REPAINT_POPUP
+        );
+        // Main-thread invalidation does not consume the pending frame request.
+        assert_ne!(pending.load(Ordering::Acquire) & REPAINT_VIEW, 0);
+        let mut retry = RepaintAttempt::claim(&pending, REPAINT_VIEW);
+        retry.captured = true;
+        drop(retry);
+        assert_eq!(pending.load(Ordering::Acquire), REPAINT_POPUP);
     }
 
-    pub fn queue_copy(&mut self, _info: &AcceleratedPaintInfo) -> Result<(), String> {
-        Err("Accelerated OSR not supported on this platform".to_string())
-    }
-
-    pub fn process_pending_copy(&mut self, _dst_rd_rid: Rid) -> Result<(), String> {
-        Err("Accelerated OSR not supported on this platform".to_string())
-    }
-
-    pub fn wait_for_copy(&mut self) -> Result<(), String> {
-        Err("Accelerated OSR not supported on this platform".to_string())
+    #[test]
+    fn successful_capture_cannot_clear_a_newer_dropped_paint() {
+        let pending = Arc::new(AtomicU8::new(REPAINT_VIEW));
+        let mut older = RepaintAttempt::claim(&pending, REPAINT_VIEW);
+        // Another callback fails try_lock while the older native copy runs.
+        pending.fetch_or(REPAINT_VIEW, Ordering::Release);
+        older.captured = true;
+        drop(older);
+        assert_eq!(pending.load(Ordering::Acquire), REPAINT_VIEW);
     }
 }

@@ -12,6 +12,7 @@ const VK_KHR_EXTERNAL_MEMORY_FD_NAME: &CStr = c"VK_KHR_external_memory_fd";
 const VK_EXT_EXTERNAL_MEMORY_DMA_BUF_NAME: &CStr = c"VK_EXT_external_memory_dma_buf";
 const VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_NAME: &CStr = c"VK_EXT_image_drm_format_modifier";
 const VK_EXT_QUEUE_FAMILY_FOREIGN_NAME: &CStr = c"VK_EXT_queue_family_foreign";
+const VK_KHR_EXTERNAL_SEMAPHORE_FD_NAME: &CStr = c"VK_KHR_external_semaphore_fd";
 
 define_vulkan_hook!(
     log_prefix: "[VulkanHook/Linux]",
@@ -22,6 +23,7 @@ define_vulkan_hook!(
         VK_KHR_EXTERNAL_MEMORY_FD_NAME,
         VK_EXT_EXTERNAL_MEMORY_DMA_BUF_NAME,
         VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_NAME,
-        VK_EXT_QUEUE_FAMILY_FOREIGN_NAME
+        VK_EXT_QUEUE_FAMILY_FOREIGN_NAME,
+        VK_KHR_EXTERNAL_SEMAPHORE_FD_NAME
     ]
 );

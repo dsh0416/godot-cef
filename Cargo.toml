@@ -3,20 +3,19 @@ resolver = "3"
 members = ["crates/*", "xtask", "benches"]
 
 [workspace.package]
-version = "1.15.1"
+version = "2.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/dsh0416/godot-cef"
 
 [workspace.dependencies]
-godot = { version = "0.5.3", features = ["api-4-5", "experimental-threads"] }
-cef = { version = "148.2.0", features = ["sandbox", "accelerated_osr"] }
-cef-dll-sys = { version = "148.2.0", features = ["sandbox"] }
+godot = { version = "0.5.5", features = ["api-4-6", "experimental-threads"] }
+cef = { version = "154.5.0", features = ["sandbox", "accelerated_osr"] }
+cef-dll-sys = { version = "154.5.0", features = ["sandbox"] }
 process_path = "0.1.4"
-plist = { version = "1" }
-serde = { version = "1", features = ["derive"] }
-libloading = { version = "0.9" }
-wide = "1.0"
+serde = { version = "1.0.229", features = ["derive"] }
+libloading = { version = "0.9.0" }
+wide = "1.7.0"
 ash = { version = "0.38", default-features = false, features = ["std", "debug", "loaded"] }
 windows = { version = "0.62", features = [
     "Win32_Foundation",
@@ -25,8 +24,6 @@ windows = { version = "0.62", features = [
     "Win32_System_Memory",
     "Win32_System_LibraryLoader",
     "Win32_Graphics_Direct3D",
-    "Win32_Graphics_Direct3D11",
-    "Win32_Graphics_Direct3D11on12",
     "Win32_Graphics_Direct3D12",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
@@ -48,13 +45,13 @@ objc2-metal = { version = "0.3", features = [
     "MTLPixelFormat",
 ] }
 retour = { version = "0.4.0-alpha.4", features = ["static-detour"] }
-libc = "0.2"
-criterion = { version = "0.8", features = ["html_reports"] }
-url = "2"
-percent-encoding = "2"
-adblock = "0.12"
-ciborium = "0.2"
-quick-xml = "0.40"
+libc = "0.2.189"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+url = "2.5.8"
+percent-encoding = "2.3.2"
+adblock = "0.13.3"
+ciborium = "0.2.2"
+quick-xml = "0.42.0"
 
 [workspace.lints.rust]
 unconditional_panic = "deny"

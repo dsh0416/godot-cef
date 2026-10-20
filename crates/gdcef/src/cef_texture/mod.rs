@@ -1,21 +1,25 @@
 pub(crate) mod backend;
 mod browser_lifecycle;
 mod cookie_ops;
+mod dialogs;
+mod focus_state;
 mod ime;
-mod permission_ops;
+mod input_routing;
+mod pointer_state;
 mod rendering;
 mod signals;
+mod source_drag;
 
-use cef::{self, ImplBrowserHost, ImplDragData, do_message_loop_work};
+use cef::{self, ImplBrowserHost, ImplDragData};
 use godot::classes::notify::ControlNotification;
 use godot::classes::texture_rect::ExpandMode;
 use godot::classes::{
-    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, InputEventKey,
-    InputEventMagnifyGesture, InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture,
-    InputEventScreenDrag, InputEventScreenTouch, LineEdit, TextureRect,
+    CanvasItemMaterial, ITextureRect, ImageTexture, InputEvent, LineEdit, RenderingServer,
+    TextureRect,
 };
 use godot::prelude::*;
 
+use crate::browser::RenderMode;
 use crate::cef_texture2d::CefTexture2D;
 use crate::{cef_init, input};
 
@@ -34,7 +38,7 @@ pub struct CefTexture {
     #[var(get = get_enable_accelerated_osr, set = set_enable_accelerated_osr)]
     /// Enable GPU-accelerated Off-Screen Rendering (OSR).
     /// If true, uses shared textures (Vulkan/D3D12/Metal) for high performance.
-    /// If false or unsupported, falls back to software rendering.
+    /// If false, uses software rendering.
     enable_accelerated_osr: bool,
 
     #[export]
@@ -43,6 +47,16 @@ pub struct CefTexture {
     /// Useful for transparent pages.
     background_color: Color,
 
+    #[export]
+    #[var(get = get_browser_hidden, set = set_browser_hidden)]
+    /// Stop browser painting while keeping browser tasks and events active.
+    browser_hidden: bool,
+
+    #[export]
+    #[var(get = get_pause_rendering_when_hidden, set = set_pause_rendering_when_hidden)]
+    /// Also hide CEF when this control or an ancestor is not visible in the tree.
+    pause_rendering_when_hidden: bool,
+
     #[export(enum = (Block = 0, Redirect = 1, SignalOnly = 2))]
     #[var(get = get_popup_policy, set = set_popup_policy)]
     /// Controls how popup windows (window.open, target="_blank") are handled.
@@ -50,6 +64,16 @@ pub struct CefTexture {
     /// Redirect: navigate the current browser to the popup URL.
     /// SignalOnly: emit `popup_requested` signal and let GDScript decide.
     popup_policy: i32,
+
+    #[export(enum = (ProjectDefault = -1, DenyAll = 0, AllowAll = 1, Signal = 2))]
+    #[var(get = get_permission_policy, set = set_permission_policy)]
+    /// Browser permission handling. ProjectDefault inherits the project setting at creation.
+    permission_policy: i32,
+
+    #[export(enum = (Native = 0, Signal = 1, Cancel = 2))]
+    #[var(get = get_dialog_policy, set = set_dialog_policy)]
+    /// Native CEF dialogs, application-owned asynchronous signals, or cancellation.
+    dialog_policy: i32,
 
     #[export]
     #[var(get = get_preload_script, set = set_preload_script)]
@@ -75,11 +99,15 @@ pub struct CefTexture {
     last_cursor: cef_app::CursorType,
     last_max_fps: i32,
     browser_create_deferred_pending: bool,
+    frame_hook: Option<Callable>,
 
     // IME state
     ime_active: bool,
     ime_proxy: Option<Gd<LineEdit>>,
-    ime_focus_regrab_pending: bool,
+    focus_state: focus_state::FocusState,
+    focus_reconcile_pending: bool,
+    pointer_state: pointer_state::PointerState,
+    last_pointer_position: Vector2,
 
     // Popup state
     popup_overlay: Option<Gd<TextureRect>>,
@@ -104,7 +132,11 @@ impl ITextureRect for CefTexture {
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
+            browser_hidden: false,
+            pause_rendering_when_hidden: false,
             popup_policy: crate::browser::popup_policy::BLOCK,
+            permission_policy: -1,
+            dialog_policy: 0,
             preload_script: GString::new(),
             preload_script_path: GString::new(),
             ime_position: Vector2i::new(0, 0),
@@ -114,9 +146,13 @@ impl ITextureRect for CefTexture {
             last_cursor: cef_app::CursorType::Arrow,
             last_max_fps: 0,
             browser_create_deferred_pending: false,
+            frame_hook: None,
             ime_active: false,
             ime_proxy: None,
-            ime_focus_regrab_pending: false,
+            focus_state: Default::default(),
+            focus_reconcile_pending: false,
+            pointer_state: Default::default(),
+            last_pointer_position: Vector2::ZERO,
             popup_overlay: None,
             popup_texture: None,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -126,30 +162,70 @@ impl ITextureRect for CefTexture {
 
     fn on_notification(&mut self, what: ControlNotification) {
         match what {
+            ControlNotification::ENTER_TREE => {
+                self.reconcile_browser_visibility();
+                // Install the hook after the notification returns, including
+                // when an existing browser node is added to the tree again.
+                self.base_mut().call_deferred("_connect_frame_hook", &[]);
+            }
             ControlNotification::READY => {
                 self.on_ready();
             }
             ControlNotification::PROCESS => {
                 self.on_process();
             }
+            ControlNotification::INTERNAL_PROCESS => {
+                self.refresh_browser_drag();
+                if self.browser_input_available() {
+                    self.reconcile_browser_focus();
+                } else {
+                    self.suspend_browser_input();
+                }
+            }
             ControlNotification::RESIZED => {
                 // React immediately to control size changes so CEF receives
                 // resize notifications even if process timing is delayed.
                 let _ = self.handle_size_change();
-                self.update_texture();
             }
             ControlNotification::PREDELETE => {
+                self.disconnect_frame_hook();
+                self.suspend_browser_input();
                 self.cleanup_instance();
             }
-            ControlNotification::FOCUS_ENTER => {
-                if let Some(host) = self.with_app(|app| app.host()) {
-                    host.set_focus(true as _);
+            ControlNotification::EXIT_TREE => {
+                // Godot may still report tree membership during EXIT_TREE.
+                let hidden = self.browser_hidden || self.pause_rendering_when_hidden;
+                self.with_app_mut(|app| backend::set_browser_hidden(app, hidden));
+                self.disconnect_frame_hook();
+                self.suspend_browser_input();
+            }
+            ControlNotification::PAUSED
+            | ControlNotification::DISABLED
+            | ControlNotification::WM_WINDOW_FOCUS_OUT => {
+                self.suspend_browser_input();
+            }
+            ControlNotification::DRAG_END => {
+                self.cancel_browser_drag();
+            }
+            ControlNotification::WM_WINDOW_FOCUS_IN => {
+                self.defer_browser_focus_update();
+            }
+            ControlNotification::VISIBILITY_CHANGED => {
+                self.reconcile_browser_visibility();
+                if !self.base().is_visible_in_tree() {
+                    self.suspend_browser_input();
+                } else {
+                    self.defer_browser_focus_update();
                 }
             }
-            ControlNotification::FOCUS_EXIT => {
-                if let Some(host) = self.with_app(|app| app.host()) {
-                    host.set_focus(false as _);
-                }
+            ControlNotification::FOCUS_ENTER | ControlNotification::FOCUS_EXIT => {
+                self.defer_browser_focus_update();
+            }
+            ControlNotification::MOUSE_ENTER => {
+                self.pointer_state.enter();
+            }
+            ControlNotification::MOUSE_EXIT => {
+                self.handle_browser_mouse_exit();
             }
             ControlNotification::OS_IME_UPDATE => {
                 self.handle_os_ime_update();
@@ -161,10 +237,86 @@ impl ITextureRect for CefTexture {
     fn input(&mut self, event: Gd<InputEvent>) {
         self.handle_input_event(event);
     }
+
+    fn gui_input(&mut self, event: Gd<InputEvent>) {
+        self.handle_gui_input_event(event);
+    }
+
+    fn has_point(&self, point: Vector2) -> bool {
+        // Accelerated select/autocomplete popups can extend outside the view.
+        // Keep them in this control's GUI target and coordinate space.
+        let popup_rect = self
+            .popup_overlay
+            .as_ref()
+            .and_then(|overlay| overlay.is_visible().then(|| overlay.get_rect()));
+        input_routing::browser_has_point(point, self.base().get_size(), popup_rect)
+    }
 }
 
 #[godot_api]
 impl CefTexture {
+    #[signal]
+    fn tooltip_changed(text: GString);
+
+    #[signal]
+    fn fullscreen_changed(fullscreen: bool);
+
+    #[signal]
+    fn loading_progress_changed(progress: f64);
+
+    #[signal]
+    fn status_message_changed(message: GString);
+
+    #[signal]
+    fn favicon_urls_changed(urls: PackedStringArray);
+
+    #[func]
+    pub fn get_browser_hidden(&self) -> bool {
+        self.browser_hidden
+    }
+
+    #[func]
+    pub fn set_browser_hidden(&mut self, hidden: bool) {
+        self.browser_hidden = hidden;
+        self.reconcile_browser_visibility();
+    }
+
+    #[func]
+    pub fn get_pause_rendering_when_hidden(&self) -> bool {
+        self.pause_rendering_when_hidden
+    }
+
+    #[func]
+    pub fn set_pause_rendering_when_hidden(&mut self, enabled: bool) {
+        self.pause_rendering_when_hidden = enabled;
+        self.reconcile_browser_visibility();
+    }
+
+    /// Reports the effective rendering visibility, including ancestor visibility.
+    #[func]
+    pub fn is_browser_hidden(&self) -> bool {
+        self.browser_hidden
+            || (self.pause_rendering_when_hidden && !self.base().is_visible_in_tree())
+    }
+
+    fn reconcile_browser_visibility(&mut self) {
+        let hidden = self.is_browser_hidden();
+        self.with_app_mut(|app| backend::set_browser_hidden(app, hidden));
+    }
+
+    #[func]
+    pub fn get_dialog_policy(&self) -> i32 {
+        self.dialog_policy
+    }
+
+    #[func]
+    pub fn set_dialog_policy(&mut self, policy: i32) {
+        self.dialog_policy = policy.clamp(0, 2);
+        if let Some(controller) = self.dialog_controller() {
+            controller.set_policy(self.dialog_policy);
+        }
+    }
+
     fn with_app<R>(&self, f: impl FnOnce(&crate::browser::App) -> R) -> R {
         let helper = self.texture2d_helper.bind();
         f(helper.runtime_app())
@@ -175,12 +327,6 @@ impl CefTexture {
         f(helper.runtime_app_mut())
     }
 
-    fn event_position_to_local(&self, position: Vector2) -> Vector2 {
-        // `input()` delivers positions in viewport space for this node path, while
-        // CEF expects view-local coordinates relative to the browser texture.
-        position - self.base().get_global_position()
-    }
-
     fn make_browser_material() -> Gd<godot::classes::Material> {
         let mut material = CanvasItemMaterial::new_gd();
         material.set_blend_mode(godot::classes::canvas_item_material::BlendMode::PREMULT_ALPHA);
@@ -189,6 +335,15 @@ impl CefTexture {
 
     #[signal]
     fn ipc_message(message: GString);
+
+    #[signal]
+    fn file_dialog_requested(info: Gd<crate::dialog_info::FileDialogRequestInfo>);
+
+    #[signal]
+    fn js_dialog_requested(info: Gd<crate::dialog_info::JsDialogRequestInfo>);
+
+    #[signal]
+    fn dialog_request_finished(request_id: i64, result: GString);
 
     #[signal]
     fn ipc_binary_message(data: PackedByteArray);
@@ -241,6 +396,9 @@ impl CefTexture {
     #[signal]
     fn permission_requested(permission_type: GString, url: GString, request_id: i64);
 
+    #[signal]
+    fn permission_request_finished(request_id: i64, result: GString);
+
     /// Emitted after a find-in-page operation completes or is updated.
     ///
     /// - `count` is the total number of matches found.
@@ -279,6 +437,7 @@ impl CefTexture {
         self.base_mut().set_material(&Self::make_browser_material());
         // Must explicitly enable processing when using on_notification instead of fn process()
         self.base_mut().set_process(true);
+        self.base_mut().set_process_internal(true);
         // Enable focus so we receive FOCUS_ENTER/EXIT notifications and can forward to CEF.
         self.base_mut().set_focus_mode(FocusMode::CLICK);
 
@@ -293,6 +452,7 @@ impl CefTexture {
 
     #[func]
     fn on_process(&mut self) {
+        self.reconcile_browser_visibility();
         // Lazy browser creation: if browser doesn't exist yet (e.g., size was 0 in on_ready
         // because we're inside a Container), try to create it now that layout may be complete.
         if self.with_app(|app| app.state.is_none() && app.can_create_browser()) {
@@ -307,17 +467,70 @@ impl CefTexture {
 
         self.handle_max_fps_change();
         _ = self.handle_size_change();
-        self.update_texture();
 
-        if self.with_app(|app| app.state.is_some()) {
-            do_message_loop_work();
+        // Software browsers must keep progressing in headless Godot, where
+        // frame_pre_draw is never emitted. Accelerated pacing follows the
+        // publication request in _on_frame_pre_draw instead.
+        if self.with_app(|app| {
+            app.state
+                .as_ref()
+                .is_some_and(|state| matches!(state.render_mode, RenderMode::Software { .. }))
+        }) {
+            self.request_external_begin_frame();
         }
-
-        self.request_external_begin_frame();
         self.update_cursor();
 
         // Process all event queues with a single lock (more efficient than per-queue locks)
         self.process_all_event_queues();
+    }
+
+    #[func]
+    fn _connect_frame_hook(&mut self) {
+        if self.frame_hook.is_some()
+            || !self.base().is_inside_tree()
+            || self.base().is_queued_for_deletion()
+        {
+            return;
+        }
+        let callable = self.base().callable("_on_frame_pre_draw");
+        let error = RenderingServer::singleton().connect("frame_pre_draw", &callable);
+        if error == godot::global::Error::OK {
+            self.frame_hook = Some(callable);
+        } else {
+            godot::global::godot_error!("[CefTexture] Failed to connect render frame: {error:?}");
+        }
+    }
+
+    fn disconnect_frame_hook(&mut self) {
+        if let Some(callable) = self.frame_hook.take() {
+            let mut rendering_server = RenderingServer::singleton();
+            if rendering_server.is_connected("frame_pre_draw", &callable) {
+                rendering_server.disconnect("frame_pre_draw", &callable);
+            }
+        }
+    }
+
+    #[func]
+    fn _on_frame_pre_draw(&mut self) {
+        // RenderingServer signals do not inherit a node's process mode. Keep
+        // publication subject to the same pause/disable rules as PROCESS.
+        if !self.base().is_inside_tree()
+            || self.base().is_queued_for_deletion()
+            || !self.base().can_process()
+            || !self.base().is_processing()
+        {
+            return;
+        }
+        self.update_texture();
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+        if self.with_app(|app| {
+            app.state
+                .as_ref()
+                .is_some_and(|state| matches!(state.render_mode, RenderMode::Accelerated { .. }))
+        }) {
+            // This orders CPU publication requests, not GPU completion.
+            self.request_external_begin_frame();
+        }
     }
 
     #[func]
@@ -327,61 +540,7 @@ impl CefTexture {
             self.create_browser();
         }
         self.base_mut().set_process(true);
-    }
-
-    fn handle_input_event(&mut self, event: Gd<InputEvent>) {
-        let pixel_scale = self.get_pixel_scale_factor();
-        let device_scale = self.get_device_scale_factor();
-
-        if let Ok(mut mouse_button) = event.clone().try_cast::<InputEventMouseButton>() {
-            let local_position = self.event_position_to_local(mouse_button.get_position());
-            mouse_button.set_position(local_position);
-            self.texture2d_helper.bind().forward_mouse_button_event(
-                mouse_button,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut mouse_motion) = event.clone().try_cast::<InputEventMouseMotion>() {
-            let local_position = self.event_position_to_local(mouse_motion.get_position());
-            mouse_motion.set_position(local_position);
-            self.texture2d_helper.bind().forward_mouse_motion_event(
-                mouse_motion,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut pan_gesture) = event.clone().try_cast::<InputEventPanGesture>() {
-            let local_position = self.event_position_to_local(pan_gesture.get_position());
-            pan_gesture.set_position(local_position);
-            self.texture2d_helper.bind().forward_pan_gesture_event(
-                pan_gesture,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut screen_touch) = event.clone().try_cast::<InputEventScreenTouch>() {
-            let local_position = self.event_position_to_local(screen_touch.get_position());
-            screen_touch.set_position(local_position);
-            self.texture2d_helper.bind_mut().forward_screen_touch_event(
-                screen_touch,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(mut screen_drag) = event.clone().try_cast::<InputEventScreenDrag>() {
-            let local_position = self.event_position_to_local(screen_drag.get_position());
-            screen_drag.set_position(local_position);
-            self.texture2d_helper.bind_mut().forward_screen_drag_event(
-                screen_drag,
-                pixel_scale,
-                device_scale,
-            );
-        } else if let Ok(magnify_gesture) = event.clone().try_cast::<InputEventMagnifyGesture>() {
-            self.texture2d_helper
-                .bind()
-                .forward_magnify_gesture_event(magnify_gesture);
-        } else if let Ok(key_event) = event.try_cast::<InputEventKey>() {
-            self.texture2d_helper
-                .bind()
-                .forward_key_event(key_event, self.ime_active);
-        }
+        self.reconcile_browser_focus();
     }
 
     #[func]
@@ -769,46 +928,32 @@ impl CefTexture {
 
     #[func]
     pub fn drag_source_ended(&mut self, position: Vector2, operation: i32) {
-        let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(
-            crate::cef_i32_to_raw!(operation),
-        ));
-        self.with_app_mut(|app| {
-            let Some(host) = app.host() else {
-                return;
-            };
-            if !app.drag_state.is_dragging_from_browser {
-                return;
-            }
-            host.drag_source_ended_at(position.x as i32, position.y as i32, op);
-            host.drag_source_system_drag_ended();
-            app.drag_state.is_dragging_from_browser = false;
-            app.drag_state.source_position = None;
-            app.drag_state.allowed_ops = 0;
-        });
+        self.finish_browser_drag(None, Some(position), operation);
+    }
+
+    #[func]
+    pub fn drag_source_ended_for_session(
+        &mut self,
+        session_id: i64,
+        position: Vector2,
+        operation: i32,
+    ) {
+        self.finish_browser_drag(Some(session_id), Some(position), operation);
     }
 
     #[func]
     pub fn drag_source_system_ended(&mut self) {
-        self.with_app_mut(|app| {
-            let Some(host) = app.host() else {
-                return;
-            };
-            if !app.drag_state.is_dragging_from_browser {
-                return;
-            }
-            let (x, y) = app.drag_state.source_position.unwrap_or((0, 0));
-            let op = cef::DragOperationsMask::from(cef::sys::cef_drag_operations_mask_t(0));
-            host.drag_source_ended_at(x, y, op);
-            host.drag_source_system_drag_ended();
-            app.drag_state.is_dragging_from_browser = false;
-            app.drag_state.source_position = None;
-            app.drag_state.allowed_ops = 0;
-        });
+        self.finish_browser_drag(None, None, 0);
+    }
+
+    #[func]
+    pub fn drag_source_system_ended_for_session(&mut self, session_id: i64) {
+        self.finish_browser_drag(Some(session_id), None, 0);
     }
 
     #[func]
     pub fn is_dragging_from_browser(&self) -> bool {
-        self.with_app(|app| app.drag_state.is_dragging_from_browser)
+        self.source_drag_session_id().is_some()
     }
 
     #[func]
@@ -829,12 +974,52 @@ impl CefTexture {
 
     #[func]
     pub fn grant_permission(&self, request_id: i64) -> bool {
-        self.with_app(|app| permission_ops::resolve_permission_request(app, request_id, true))
+        self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
+            .is_some_and(|permissions| permissions.resolve(request_id, true))
     }
 
     #[func]
     pub fn deny_permission(&self, request_id: i64) -> bool {
-        self.with_app(|app| permission_ops::resolve_permission_request(app, request_id, false))
+        self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
+            .is_some_and(|permissions| permissions.resolve(request_id, false))
+    }
+
+    #[func]
+    pub fn is_permission_pending(&self, request_id: i64) -> bool {
+        self.with_app(|app| app.state.as_ref().map(|state| state.permissions.clone()))
+            .is_some_and(|permissions| permissions.is_pending(request_id))
+    }
+
+    /// Read the profile's content setting; this is not a device-access check.
+    #[func]
+    pub fn get_permission_setting(
+        &self,
+        permission_type: GString,
+        requesting_url: GString,
+        top_level_url: GString,
+    ) -> GString {
+        self.with_app(|app| {
+            crate::permission_query::query(
+                app,
+                &permission_type.to_string(),
+                &requesting_url.to_string(),
+                &top_level_url.to_string(),
+            )
+        })
+        .into()
+    }
+
+    #[func]
+    pub fn get_permission_policy(&self) -> i32 {
+        self.permission_policy
+    }
+
+    #[func]
+    pub fn set_permission_policy(&mut self, policy: i32) {
+        self.permission_policy = policy.clamp(-1, 2);
+        self.texture2d_helper
+            .bind_mut()
+            .set_permission_policy(self.permission_policy);
     }
 
     /// Retrieves all cookies. Results are emitted via `cookies_received` signal.

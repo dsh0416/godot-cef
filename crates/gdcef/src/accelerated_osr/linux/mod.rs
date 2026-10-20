@@ -5,12 +5,9 @@
 
 mod vulkan;
 
-use super::RenderBackend;
+use super::{NativeCaptureTarget, RenderBackend};
 use cef::AcceleratedPaintInfo;
-use godot::global::{godot_print, godot_warn};
-use godot::prelude::*;
-
-const NVIDIA_VENDOR_ID: u32 = 0x10de;
+use godot::global::godot_print;
 
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     vulkan::get_godot_gpu_device_ids()
@@ -21,90 +18,30 @@ pub struct GodotTextureImporter {
 }
 
 impl GodotTextureImporter {
-    pub fn new() -> Option<Self> {
+    pub fn new() -> Result<Self, String> {
         let render_backend = RenderBackend::detect();
-
-        if !render_backend.supports_accelerated_osr() {
-            godot_warn!(
-                "[AcceleratedOSR/Linux] Render backend {:?} does not support accelerated OSR",
-                render_backend
-            );
-            return None;
-        }
 
         match render_backend {
             RenderBackend::Vulkan => {
-                let (supported, reason) = vulkan_support_diagnostic();
-                if !supported {
-                    godot_warn!(
-                        "[AcceleratedOSR/Linux] Vulkan accelerated OSR unavailable: {}",
-                        reason
-                    );
-                    return None;
-                }
-
                 let vulkan_importer = vulkan::VulkanTextureImporter::new()?;
                 godot_print!("[AcceleratedOSR/Linux] Using Vulkan backend with DMA-BUF");
-                Some(Self { vulkan_importer })
+                Ok(Self { vulkan_importer })
             }
-            _ => {
-                godot_warn!(
-                    "[AcceleratedOSR/Linux] Unsupported render backend: {:?}",
-                    render_backend
-                );
-                None
-            }
+            _ => Err(format!(
+                "Unsupported Linux accelerated rendering backend: {render_backend:?}"
+            )),
         }
     }
 
-    pub fn queue_copy(&mut self, info: &AcceleratedPaintInfo) -> Result<(), String> {
-        self.vulkan_importer.queue_copy(info)
+    pub fn capture(
+        &mut self,
+        info: &AcceleratedPaintInfo,
+        target: NativeCaptureTarget,
+    ) -> Result<(), String> {
+        self.vulkan_importer.capture(info, target)
     }
 
-    pub fn process_pending_copy(&mut self, dst_rd_rid: Rid) -> Result<(), String> {
-        self.vulkan_importer.process_pending_copy(dst_rd_rid)
+    pub fn prepare_publication(&self) -> Result<(), String> {
+        self.vulkan_importer.prepare_publication()
     }
-
-    pub fn wait_for_copy(&mut self) -> Result<(), String> {
-        self.vulkan_importer.wait_for_copy()
-    }
-}
-
-pub fn is_supported() -> bool {
-    let render_backend = RenderBackend::detect();
-    if !render_backend.supports_accelerated_osr() {
-        return false;
-    }
-
-    match render_backend {
-        RenderBackend::Vulkan => vulkan_support_diagnostic().0,
-        _ => false,
-    }
-}
-
-unsafe impl Send for GodotTextureImporter {}
-unsafe impl Sync for GodotTextureImporter {}
-
-pub fn vulkan_support_diagnostic() -> (bool, String) {
-    match vulkan_support_probe() {
-        Ok(reason) => (true, reason),
-        Err(reason) => (false, reason),
-    }
-}
-
-fn vulkan_support_probe() -> Result<String, String> {
-    let Some((vendor_id, _device_id)) = vulkan::get_godot_gpu_device_ids() else {
-        return Ok(
-            "Vulkan backend supports accelerated OSR; GPU vendor could not be determined"
-                .to_string(),
-        );
-    };
-
-    if vendor_id != NVIDIA_VENDOR_ID {
-        return Ok(format!(
-            "Vulkan backend on GPU vendor 0x{vendor_id:04x} supports accelerated OSR"
-        ));
-    }
-
-    Ok("NVIDIA Vulkan backend assumes nvidia-drm.modeset is enabled".to_string())
 }

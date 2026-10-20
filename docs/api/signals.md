@@ -2,6 +2,25 @@
 
 The `CefTexture` node emits various signals to notify your game about browser events and state changes.
 
+The display, permission, and file/JavaScript dialog signals below are also
+available on `CefTexture2D`. See [Display Events and Visibility](./display-events.md),
+[Permissions](./permissions.md), and [Dialogs](./dialogs.md) for Godot UI examples.
+
+## Display Events
+
+Available on `CefTexture` and `CefTexture2D`:
+
+| Signal | Description |
+|--------|-------------|
+| `tooltip_changed(text: String)` | The browser tooltip text changed. Empty text clears it. |
+| `fullscreen_changed(fullscreen: bool)` | Web content entered or exited fullscreen mode. The application decides how to adjust its Godot window or layout. |
+| `loading_progress_changed(progress: float)` | CEF's estimated loading progress, from `0.0` to `1.0`. |
+| `status_message_changed(message: String)` | The browser status message changed, including hovered link target URLs. Empty text clears it. |
+| `favicon_urls_changed(urls: PackedStringArray)` | Candidate favicon URLs changed. An empty array clears them; images are not downloaded automatically. |
+
+See [Display Events and Visibility](./display-events.md) for tooltip, progress,
+fullscreen, status label, and favicon URL examples.
+
 ## `ipc_message(message: String)`
 
 Emitted when JavaScript sends a message to Godot via the `sendIpcMessage` function. Use this for bidirectional communication between your web UI and game logic.
@@ -347,14 +366,20 @@ Use the `popup_policy` property to control popup behavior:
 
 ## `permission_requested(permission_type: String, url: String, request_id: int)`
 
-Emitted when a web page requests a permission (for example camera, microphone, geolocation, clipboard, or notifications), and `godot_cef/security/default_permission_policy` is set to `2` (SIGNAL).
+Available on `CefTexture` and `CefTexture2D`. Emitted when a web page requests a
+permission and the browser's effective `permission_policy` is `2` (SIGNAL).
+The default property value `-1` inherits the project permission policy.
 
 **Parameters:**
-- `permission_type`: Requested permission type (for example `camera`, `microphone`, `geolocation`, `clipboard`, `notifications`)
-- `url`: Requesting origin URL
+- `permission_type`: Requested type, such as `camera`, `microphone`, `local_network`, or `loopback_network`; see the [complete list](./permissions.md#permission-type-names)
+- `url`: Requesting origin reported by CEF, not the destination LAN address
 - `request_id`: Unique request ID used by `grant_permission()` / `deny_permission()`
 
-When a single browser prompt includes multiple permissions (for example camera + microphone), this signal is emitted once per permission type, each with a distinct `request_id`.
+When one CEF request includes multiple permissions, the signal is emitted once
+per type with a distinct ID. All IDs must be granted to allow the request;
+denying one rejects the entire group. Without a listener, the request is canceled
+without authorization and finishes as `dismissed`; CEF prompts are dismissed
+without recording an explicit site denial.
 
 ```gdscript
 func _ready():
@@ -362,12 +387,58 @@ func _ready():
 
 func _on_permission_requested(permission_type: String, url: String, request_id: int):
     print("Permission requested: ", permission_type, " from ", url)
-    var allow = permission_type in ["microphone", "camera"] and url.begins_with("https://trusted.example")
+    var allow = permission_type in ["microphone", "camera"] and url == "https://trusted.example/"
     if allow:
         cef_texture.grant_permission(request_id)
     else:
         cef_texture.deny_permission(request_id)
 ```
+
+## `permission_request_finished(request_id: int, result: String)`
+
+Available on both browser types. Emitted for every ID when its grouped CEF
+request finishes. `result` is `allowed`, `denied`, `dismissed`, `timed_out`,
+`navigation`, `browser_closed`, `renderer_terminated`, or `policy_changed`.
+All IDs in a group receive the same final result, even if an individual allow
+answer was recorded earlier. An allowed decision does not guarantee device or
+network operation success.
+
+Delivery requires a live Godot object. Freeing the node/resource does not
+guarantee a final signal; clear its permission UI during your own teardown.
+
+Use this signal to remove queued requests and close stale permission dialogs.
+Check `is_permission_pending(request_id)` before answering from asynchronous UI.
+See [Permissions](./permissions.md#queueing-a-godot-permission-dialog).
+
+## `file_dialog_requested(info: FileDialogRequestInfo)`
+
+Available on `CefTexture` and `CefTexture2D`. Emitted in Signal dialog policy
+(`dialog_policy = 1`) when CEF requests a file chooser. `info` contains the ID,
+mode, title, default path, and accept-filter metadata. Answer with
+`continue_file_dialog()` or `cancel_file_dialog()`.
+
+See [Dialogs](./dialogs.md#filedialogrequestinfo) for the DTO fields and a Godot
+`FileDialog` example. Signal mode does not create a dialog automatically.
+
+## `js_dialog_requested(info: JsDialogRequestInfo)`
+
+Available on both browser types in Signal dialog policy. `info.kind` is `alert`,
+`confirm`, `prompt`, or `before_unload`. Other fields include the ID, origin URL,
+message, default prompt input, and reload flag. Answer with
+`continue_js_dialog()` or `cancel_js_dialog()`.
+
+See [Dialogs](./dialogs.md#jsdialogrequestinfo) for the DTO and examples.
+
+## `dialog_request_finished(request_id: int, result: String)`
+
+Available on both browser types. Emitted when a custom dialog request completes
+or is invalidated. Hide its UI and remove its ID from application state. Results
+include `accepted`, `canceled`, `timed_out`, `unhandled`, `navigation`,
+`policy_changed`, `reset`, `dialog_closed`, `browser_closed`, and
+`renderer_terminated`. See [dialog lifetime](./dialogs.md#policy-and-lifetime).
+
+Freeing a browser does not guarantee a final signal; also clean up the UI in
+the application's browser teardown path.
 
 ## `find_result(count: int, active_index: int, final_update: bool)`
 

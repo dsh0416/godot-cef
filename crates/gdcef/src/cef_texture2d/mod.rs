@@ -4,7 +4,7 @@ use godot::classes::notify::ObjectNotification;
 use godot::classes::{
     Engine, ITexture2D, Image, ImageTexture, InputEvent, InputEventKey, InputEventMagnifyGesture,
     InputEventMouseButton, InputEventMouseMotion, InputEventPanGesture, InputEventScreenDrag,
-    InputEventScreenTouch, RenderingServer, Texture2D,
+    InputEventScreenTouch, RenderingServer, SceneTree, Texture2D,
 };
 use godot::prelude::*;
 use std::collections::HashMap;
@@ -13,13 +13,14 @@ use crate::browser::{App, RenderMode};
 use crate::cef_init;
 use crate::cef_texture::backend;
 use crate::input;
-use crate::render;
 use cef_app::ipc_contract::{
     ROUTE_IPC_BINARY_GODOT_TO_RENDERER, ROUTE_IPC_DATA_GODOT_TO_RENDERER,
     ROUTE_IPC_GODOT_TO_RENDERER,
 };
 
 mod lifecycle;
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+mod popup_compositor;
 mod rendering;
 mod runtime;
 
@@ -38,6 +39,8 @@ pub(crate) struct RuntimeCreateConfig {
     enable_accelerated_osr: bool,
     background_color: Color,
     popup_policy: i32,
+    permission_policy: i32,
+    dialog_policy: i32,
     preload_script: GString,
     preload_script_path: GString,
     software_target_texture: Option<Gd<ImageTexture>>,
@@ -55,7 +58,7 @@ pub struct CefTexture2D {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     stable_texture_2d_rd: Option<Gd<godot::classes::Texture2Drd>>,
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-    placeholder_rd_rid: Rid,
+    popup_compositor: Option<popup_compositor::PopupCompositor>,
 
     #[export]
     #[var(get = get_url_property, set = set_url_property)]
@@ -75,9 +78,22 @@ pub struct CefTexture2D {
     )]
     background_color: Color,
 
+    #[export]
+    #[var(get = get_browser_hidden, set = set_browser_hidden)]
+    /// Resources have no scene visibility; their owner explicitly controls OSR.
+    browser_hidden: bool,
+
     #[export(enum = (Block = 0, Redirect = 1, SignalOnly = 2))]
     #[var(get = get_popup_policy, set = set_popup_policy)]
     popup_policy: i32,
+
+    #[export(enum = (ProjectDefault = -1, DenyAll = 0, AllowAll = 1, Signal = 2))]
+    #[var(get = get_permission_policy, set = set_permission_policy)]
+    permission_policy: i32,
+
+    #[export(enum = (Native = 0, Signal = 1, Cancel = 2))]
+    #[var(get = get_dialog_policy, set = set_dialog_policy)]
+    dialog_policy: i32,
 
     #[export]
     #[var(get = get_preload_script, set = set_preload_script)]
@@ -95,8 +111,8 @@ pub struct CefTexture2D {
     last_find_match_case: bool,
     touch_id_map: HashMap<i32, i32>,
     next_touch_id: i32,
-    frame_hook_callable: Option<Callable>,
-    frame_hook_connected: bool,
+    process_hook: Option<(InstanceId, Callable)>,
+    frame_hook: Option<Callable>,
 }
 
 #[godot_api]
@@ -105,28 +121,34 @@ impl ITexture2D for CefTexture2D {
         let texture_size = Vector2i::new(1024, 1024);
         let fallback_texture = Self::make_placeholder_texture(texture_size);
         let editor_hint = Engine::singleton().is_editor_hint();
-        let frame_hook_callable = base.to_init_gd().callable("_on_frame_pre_draw");
-        RenderingServer::singleton().connect("frame_pre_draw", &frame_hook_callable);
+        // Wait until construction and scene loading finish. Method callables only
+        // keep the object ID, so neither this queued call nor the signal hooks
+        // keep an otherwise unused resource alive.
+        if !editor_hint {
+            base.to_init_gd()
+                .call_deferred("_connect_runtime_hooks", &[]);
+        }
 
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        let (stable_texture_2d_rd, placeholder_rd_rid) =
-            match render::create_rd_texture(texture_size.x, texture_size.y) {
-                Ok((rd_rid, t2d)) => (Some(t2d), rd_rid),
-                Err(_) => (None, Rid::Invalid),
-            };
+        let stable_texture_2d_rd = Some(godot::classes::Texture2Drd::new_gd());
 
         Self {
             base,
+            // Game and headless runs start enabled; editor tool instances do not.
+            // `shutdown()` flips this off for CefTexture's borrowed helper.
             runtime: CefTextureRuntime::new(!editor_hint),
             fallback_texture,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             stable_texture_2d_rd,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-            placeholder_rd_rid,
+            popup_compositor: None,
             url: "https://google.com".into(),
             enable_accelerated_osr: true,
             background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.0),
+            browser_hidden: false,
             popup_policy: crate::browser::popup_policy::BLOCK,
+            permission_policy: -1,
+            dialog_policy: 0,
             preload_script: GString::new(),
             preload_script_path: GString::new(),
             texture_size,
@@ -134,8 +156,8 @@ impl ITexture2D for CefTexture2D {
             last_find_match_case: false,
             touch_id_map: HashMap::new(),
             next_touch_id: 0,
-            frame_hook_callable: Some(frame_hook_callable),
-            frame_hook_connected: true,
+            process_hook: None,
+            frame_hook: None,
         }
     }
 
@@ -159,10 +181,19 @@ impl ITexture2D for CefTexture2D {
 
     fn get_rid(&self) -> Rid {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        if self.enable_accelerated_osr
+        if self
+            .runtime
+            .app()
+            .state
+            .as_ref()
+            .is_some_and(|state| matches!(state.render_mode, RenderMode::Accelerated { .. }))
             && let Some(stable) = &self.stable_texture_2d_rd
+            && stable.get_texture_rd_rid().is_valid()
         {
-            return stable.get_rid();
+            return self
+                .popup_compositor
+                .as_ref()
+                .map_or_else(|| stable.get_rid(), popup_compositor::PopupCompositor::rid);
         }
 
         self.fallback_texture.get_rid()

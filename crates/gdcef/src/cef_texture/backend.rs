@@ -1,7 +1,6 @@
 use adblock::lists::{FilterSet, ParseOptions};
 use cef::{
-    BrowserSettings, CefStringUtf16, ImplBrowser, ImplBrowserHost, ImplDictionaryValue,
-    RequestContextSettings, WindowInfo,
+    BrowserSettings, CefStringUtf16, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, WindowInfo,
 };
 use cef_app::PhysicalSize;
 use cef_app::ipc_contract::EXTRA_INFO_PRELOAD_SCRIPT;
@@ -12,19 +11,20 @@ use godot::classes::image::Format as ImageFormat;
 use godot::classes::{AudioServer, DisplayServer, Engine, ImageTexture, Texture2Drd};
 use godot::prelude::*;
 use software_render::{DestBuffer, PopupBuffer, composite_popup};
-use std::collections::HashMap;
 use std::fs;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::accelerated_osr::{
-    self, AcceleratedRenderState, GodotTextureImporter, PlatformAcceleratedRenderHandler,
+    self, AcceleratedInitializationError, AcceleratedRenderState, PlatformAcceleratedRenderHandler,
 };
 use crate::browser::{App, BrowserState, PopupPolicyFlag, PopupStateQueue, RenderMode};
 use crate::error::CefError;
 use crate::utils::get_display_scale_factor;
-use crate::{godot_protocol, render, webrender};
+use crate::{godot_protocol, webrender};
+
+static SHARED_REQUEST_CONTEXT: Mutex<Option<cef::RequestContext>> = Mutex::new(None);
 
 /// Shared browser creation inputs used by both `CefTexture` and `CefTexture2D`.
 pub(crate) struct BackendCreateParams {
@@ -35,6 +35,8 @@ pub(crate) struct BackendCreateParams {
     pub enable_accelerated_osr: bool,
     pub background_color: Color,
     pub popup_policy: i32,
+    pub permission_policy: i32,
+    pub dialog_policy: i32,
     pub preload_script: String,
     pub preload_script_path: String,
     pub software_target_texture: Option<Gd<ImageTexture>>,
@@ -49,10 +51,8 @@ struct BrowserCreateParams {
     url: String,
     preload_script: Option<String>,
     popup_policy: PopupPolicyFlag,
-    permission_policy: crate::browser::PermissionPolicyFlag,
-    permission_request_counter: crate::browser::PermissionRequestIdCounter,
-    pending_permission_requests: crate::browser::PendingPermissionRequests,
-    pending_permission_aggregates: crate::browser::PendingPermissionAggregates,
+    permission_policy: i32,
+    dialog_policy: i32,
 }
 
 fn color_to_cef_color(color: Color) -> u32 {
@@ -87,9 +87,48 @@ fn build_adblock_engine(log_prefix: &str) -> Option<Rc<adblock::Engine>> {
     };
 
     let mut filter_set = FilterSet::new(true);
-    let _metadata = filter_set.add_filter_list(&rules, ParseOptions::default());
+    let _metadata = filter_set.add_filter_list(rules, ParseOptions::default());
     godot::global::godot_print!("[{}] Adblock filter list loaded.", log_prefix);
-    Some(Rc::new(adblock::Engine::from_filter_set(filter_set, true)))
+    Some(Rc::new(adblock::Engine::new_with_filter_set(filter_set)))
+}
+
+fn shared_request_context(log_prefix: &str) -> Result<cef::RequestContext, CefError> {
+    let mut shared = match SHARED_REQUEST_CONTEXT.lock() {
+        Ok(context) => context,
+        Err(poisoned) => {
+            godot::global::godot_warn!(
+                "[{}] Shared request context mutex was poisoned; continuing with recovered state",
+                log_prefix
+            );
+            poisoned.into_inner()
+        }
+    };
+
+    if let Some(context) = shared.as_ref() {
+        return Ok(context.clone());
+    }
+
+    let mut handler = webrender::RequestContextHandlerImpl::build(
+        webrender::OsrRequestContextHandler::new(build_adblock_engine(log_prefix)),
+    );
+    let mut global_context = cef::request_context_get_global_context().ok_or_else(|| {
+        CefError::BrowserCreationFailed("failed to get global request context".to_string())
+    })?;
+    // Share the global CefBrowserContext itself. Recreating a context from the
+    // same cache path can produce a separate wrapper whose scheme handlers are
+    // not used by requests associated with the global Chromium Profile.
+    let mut context = cef::request_context_cef_create_context_shared(
+        Some(&mut global_context),
+        Some(&mut handler),
+    )
+    .ok_or_else(|| {
+        CefError::BrowserCreationFailed("failed to create shared request context".to_string())
+    })?;
+
+    godot_protocol::register_res_scheme_handler_on_context(&mut context);
+    godot_protocol::register_user_scheme_handler_on_context(&mut context);
+    *shared = Some(context.clone());
+    Ok(context)
 }
 
 pub(crate) fn should_use_accelerated_osr(enable_accelerated_osr: bool, log_prefix: &str) -> bool {
@@ -240,9 +279,52 @@ pub(crate) fn handle_size_change(
     true
 }
 
-pub(crate) fn request_external_begin_frame(app: &App) {
+pub(crate) fn set_browser_hidden(app: &mut App, hidden: bool) {
+    if app.browser_hidden == hidden {
+        return;
+    }
+    app.browser_hidden = hidden;
     if let Some(host) = app.host() {
+        host.was_hidden(hidden as _);
+        if !hidden {
+            host.invalidate(cef::PaintElementType::VIEW);
+        }
+    }
+}
+
+pub(crate) fn request_external_begin_frame(app: &App) {
+    if !app.browser_hidden
+        && let Some(host) = app.host()
+    {
         host.send_external_begin_frame();
+    }
+}
+
+/// Called from pre-draw only after all main-thread Texture2DRD bindings have
+/// been updated. This orders display replacement before old-pool retirement.
+pub(crate) fn queue_texture_publication(app: &App) {
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    if let Some(state) = &app.state
+        && let RenderMode::Accelerated { render_state, .. } = &state.render_mode
+    {
+        AcceleratedRenderState::queue_frame(render_state);
+        let pending = render_state
+            .lock()
+            .map(|state| state.pending_repaints())
+            .unwrap_or(0);
+        // Calling CEF can cause another paint. Release render state first, and
+        // keep requests pending across bootstrap/exhaustion until capture wins.
+        if !app.browser_hidden
+            && pending != 0
+            && let Some(host) = state.browser.host()
+        {
+            if pending & accelerated_osr::REPAINT_VIEW != 0 {
+                host.invalidate(cef::PaintElementType::VIEW);
+            }
+            if pending & accelerated_osr::REPAINT_POPUP != 0 {
+                host.invalidate(cef::PaintElementType::POPUP);
+            }
+        }
     }
 }
 
@@ -258,7 +340,7 @@ pub(crate) fn apply_popup_policy(app: &App, policy: i32) {
 /// uses this to update its `TextureRect` texture binding immediately.
 pub(crate) fn update_primary_texture(
     state: &mut BrowserState,
-    log_prefix: &str,
+    _log_prefix: &str,
 ) -> Option<Gd<Texture2Drd>> {
     if let RenderMode::Software {
         frame_buffer,
@@ -353,42 +435,23 @@ pub(crate) fn update_primary_texture(
         texture_2d_rd,
     } = &mut state.render_mode
     {
-        let Ok(mut accel_state) = render_state.lock() else {
-            return None;
+        let rid = match render_state.lock() {
+            Ok(state) => state.dst_rd_rid,
+            Err(_) => return None,
         };
-
-        let texture_to_set = if let Some((new_w, new_h)) = accel_state.needs_resize.take()
-            && new_w > 0
-            && new_h > 0
-        {
-            render::free_rd_texture(accel_state.dst_rd_rid);
-
-            let (new_rd_rid, new_texture_2d_rd) =
-                match render::create_rd_texture(new_w as i32, new_h as i32) {
-                    Ok(result) => result,
-                    Err(e) => {
-                        godot::global::godot_error!("[{}] {}", log_prefix, e);
-                        return None;
-                    }
-                };
-
-            accel_state.dst_rd_rid = new_rd_rid;
-            accel_state.dst_width = new_w;
-            accel_state.dst_height = new_h;
-
-            *texture_2d_rd = new_texture_2d_rd.clone();
-            Some(new_texture_2d_rd)
+        let replacement = if rid.is_valid() && texture_2d_rd.get_texture_rd_rid() != rid {
+            // All retained references must leave the old RD resource before its
+            // publication generation can retire. Keep the wrapper stable across
+            // resizes, just as the standalone CefTexture2D resource does.
+            texture_2d_rd.set_texture_rd_rid(rid);
+            Some(texture_2d_rd.clone())
         } else {
             None
         };
-
-        if accel_state.has_pending_copy
-            && let Err(e) = accel_state.process_pending_copy()
-        {
-            godot::global::godot_error!("[{}] Failed to process pending copy: {}", log_prefix, e);
+        if let Ok(mut state) = render_state.lock() {
+            state.acknowledge_view(rid);
         }
-
-        return texture_to_set;
+        return replacement;
     }
 
     None
@@ -415,15 +478,7 @@ pub(crate) fn try_create_browser(
         should_use_accelerated_osr(params.enable_accelerated_osr, params.log_prefix);
 
     let popup_policy: PopupPolicyFlag = Arc::new(AtomicI32::new(params.popup_policy));
-    let default_permission_policy = crate::settings::get_default_permission_policy();
-    let permission_policy: crate::browser::PermissionPolicyFlag =
-        Arc::new(AtomicI32::new(default_permission_policy));
-    let permission_request_counter: crate::browser::PermissionRequestIdCounter =
-        Arc::new(AtomicI64::new(0));
-    let pending_permission_requests: crate::browser::PendingPermissionRequests =
-        Arc::new(Mutex::new(HashMap::new()));
-    let pending_permission_aggregates: crate::browser::PendingPermissionAggregates =
-        Arc::new(Mutex::new(HashMap::new()));
+    let permission_policy = crate::settings::resolve_permission_policy(params.permission_policy);
 
     let window_info = WindowInfo {
         bounds: cef::Rect {
@@ -444,20 +499,9 @@ pub(crate) fn try_create_browser(
         ..Default::default()
     };
 
-    let adblock_engine = build_adblock_engine(params.log_prefix);
-    let mut context = cef::request_context_create_context(
-        Some(&RequestContextSettings::default()),
-        Some(&mut webrender::RequestContextHandlerImpl::build(
-            webrender::OsrRequestContextHandler::new(adblock_engine),
-        )),
-    );
-    if let Some(ctx) = context.as_mut() {
-        godot_protocol::register_res_scheme_handler_on_context(ctx);
-        godot_protocol::register_user_scheme_handler_on_context(ctx);
-    }
-
     let preload_script =
         resolve_preload_script(&params.preload_script, &params.preload_script_path)?;
+    let mut context = Some(shared_request_context(params.log_prefix)?);
     let create_params = BrowserCreateParams {
         dpi: params.dpi,
         pixel_width,
@@ -466,9 +510,7 @@ pub(crate) fn try_create_browser(
         preload_script,
         popup_policy,
         permission_policy,
-        permission_request_counter,
-        pending_permission_requests,
-        pending_permission_aggregates,
+        dialog_policy: params.dialog_policy,
     };
 
     if use_accelerated {
@@ -478,6 +520,7 @@ pub(crate) fn try_create_browser(
             &browser_settings,
             context.as_mut(),
             create_params,
+            params.software_target_texture.clone(),
             params.log_prefix,
         )?;
     } else {
@@ -491,6 +534,13 @@ pub(crate) fn try_create_browser(
         )?;
     }
 
+    // Set initial visibility after creation, including browsers whose owner
+    // was hidden before its first main-loop tick. The CEF pump remains active.
+    if app.browser_hidden
+        && let Some(host) = app.host()
+    {
+        host.was_hidden(true as _);
+    }
     Ok(())
 }
 
@@ -501,16 +551,16 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
         return;
     }
     app.mark_browser_closing();
-
-    if let Some(state) = &app.state
-        && let Ok(mut pending) = state.pending_permission_requests.lock()
-    {
-        pending.clear();
+    if let Some(state) = &app.state {
+        if let Ok(mut drag) = state.source_drag.lock() {
+            drag.enabled = false;
+        }
+        state.finish_source_drag(None, None, 0);
     }
-    if let Some(state) = &app.state
-        && let Ok(mut pending) = state.pending_permission_aggregates.lock()
-    {
-        pending.clear();
+
+    if let Some(state) = &app.state {
+        state.permissions.close("browser_closed");
+        state.dialogs.close("browser_closed");
     }
 
     if let Some(state) = &app.state
@@ -530,12 +580,7 @@ pub(crate) fn cleanup_runtime(app: &mut App, popup_texture_2d_rd: Option<&mut Gd
         if let Some(popup_texture_2d_rd) = popup_texture_2d_rd {
             popup_texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
         }
-        if let Ok(mut rs) = render_state.lock() {
-            render::free_rd_texture(rs.dst_rd_rid);
-            if let Some(popup_rid) = rs.popup_rd_rid.take() {
-                render::free_rd_texture(popup_rid);
-            }
-        }
+        AcceleratedRenderState::shutdown(render_state);
     }
 
     if let Some(state) = app.state.take()
@@ -565,9 +610,7 @@ fn create_software_browser(
         preload_script,
         popup_policy,
         permission_policy,
-        permission_request_counter,
-        pending_permission_requests,
-        pending_permission_aggregates,
+        dialog_policy,
     } = params;
     godot::global::godot_print!(
         "[{}] Creating browser in software rendering mode",
@@ -600,10 +643,8 @@ fn create_software_browser(
     let queues = webrender::ClientQueues::new(
         sample_rate,
         enable_audio_capture,
-        permission_policy.clone(),
-        permission_request_counter.clone(),
-        pending_permission_requests.clone(),
-        pending_permission_aggregates.clone(),
+        permission_policy,
+        dialog_policy,
     );
 
     let mut texture = software_target_texture.unwrap_or_else(ImageTexture::new_gd);
@@ -621,8 +662,11 @@ fn create_software_browser(
         texture.set_image(&initial_image);
     }
 
-    let cef_render_handler =
-        webrender::SoftwareOsrHandler::build(render_handler, queues.event_queues.clone());
+    let cef_render_handler = webrender::SoftwareOsrHandler::build(
+        render_handler,
+        queues.event_queues.clone(),
+        queues.source_drag.clone(),
+    );
     let mut client = webrender::CefClientImpl::build(
         cef_render_handler,
         cursor_type.clone(),
@@ -641,10 +685,15 @@ fn create_software_browser(
         context,
     )
     .ok_or_else(|| {
+        queues.permissions.close("browser_closed");
+        queues.dialogs.close("browser_closed");
         CefError::BrowserCreationFailed("browser_host_create_browser_sync returned None".into())
     })?;
 
     let event_queues = queues.event_queues.clone();
+    let source_drag = queues.source_drag.clone();
+    let permissions = queues.permissions.clone();
+    let dialogs = queues.dialogs.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Software {
@@ -657,9 +706,10 @@ fn create_software_browser(
         popup_state,
         event_queues,
         audio: queues.into_audio_state(),
+        source_drag,
         popup_policy,
-        pending_permission_requests,
-        pending_permission_aggregates,
+        permissions,
+        dialogs,
     });
 
     Ok(())
@@ -672,27 +722,36 @@ fn create_accelerated_browser(
     browser_settings: &BrowserSettings,
     context: Option<&mut cef::RequestContext>,
     params: BrowserCreateParams,
+    software_target_texture: Option<Gd<ImageTexture>>,
     log_prefix: &str,
 ) -> Result<(), CefError> {
     godot::global::godot_print!(
         "[{}] Creating browser in accelerated rendering mode",
         log_prefix
     );
-    let importer = match GodotTextureImporter::new() {
-        Some(imp) => imp,
-        None => {
+    let mut extra_info = build_browser_extra_info(params.preload_script.as_deref())?;
+    let render_state = match AcceleratedRenderState::create(
+        params.pixel_width as u32,
+        params.pixel_height as u32,
+    ) {
+        Ok(state) => state,
+        Err(AcceleratedInitializationError::Importer(error)) => {
             godot::global::godot_warn!(
-                "[{}] Failed to create GPU texture importer, falling back to software rendering",
-                log_prefix
+                "[{}] Failed to create GPU texture importer ({}), falling back to software rendering",
+                log_prefix,
+                error
             );
             return create_software_browser(
                 app,
                 browser_settings,
                 context,
                 params,
-                None,
+                software_target_texture,
                 log_prefix,
             );
+        }
+        Err(AcceleratedInitializationError::Resources(error)) => {
+            return Err(CefError::GpuDeviceError(error));
         }
     };
     let BrowserCreateParams {
@@ -700,22 +759,18 @@ fn create_accelerated_browser(
         pixel_width,
         pixel_height,
         url,
-        preload_script,
+        preload_script: _,
         popup_policy,
         permission_policy,
-        permission_request_counter,
-        pending_permission_requests,
-        pending_permission_aggregates,
+        dialog_policy,
     } = params;
 
-    let (rd_texture_rid, texture_2d_rd) = render::create_rd_texture(pixel_width, pixel_height)?;
-    let render_state = Arc::new(Mutex::new(AcceleratedRenderState::new(
-        importer,
-        rd_texture_rid,
-        pixel_width as u32,
-        pixel_height as u32,
-    )));
-
+    let rd_texture_rid = render_state
+        .lock()
+        .map_err(|_| CefError::GpuDeviceError("Snapshot state lock poisoned".into()))?
+        .dst_rd_rid;
+    let mut texture_2d_rd = Texture2Drd::new_gd();
+    texture_2d_rd.set_texture_rd_rid(rd_texture_rid);
     let mut render_handler = PlatformAcceleratedRenderHandler::new(
         dpi,
         PhysicalSize::new(pixel_width as f32, pixel_height as f32),
@@ -731,21 +786,22 @@ fn create_accelerated_browser(
     let queues = webrender::ClientQueues::new(
         sample_rate,
         enable_audio_capture,
-        permission_policy.clone(),
-        permission_request_counter.clone(),
-        pending_permission_requests.clone(),
-        pending_permission_aggregates.clone(),
+        permission_policy,
+        dialog_policy,
     );
 
-    let cef_render_handler =
-        webrender::AcceleratedOsrHandler::build(render_handler, queues.event_queues.clone());
+    let cef_render_handler = webrender::AcceleratedOsrHandler::build(
+        render_handler,
+        queues.event_queues.clone(),
+        queues.source_drag.clone(),
+    );
     let mut client = webrender::CefClientImpl::build(
         cef_render_handler,
         cursor_type.clone(),
         queues.clone(),
         popup_policy.clone(),
     );
-    let mut extra_info = build_browser_extra_info(preload_script.as_deref())?;
+
     let cef_url: CefStringUtf16 = url.as_str().into();
 
     let browser = match cef::browser_host_create_browser_sync(
@@ -758,7 +814,10 @@ fn create_accelerated_browser(
     ) {
         Some(browser) => browser,
         None => {
-            render::free_rd_texture(rd_texture_rid);
+            queues.permissions.close("browser_closed");
+            queues.dialogs.close("browser_closed");
+            texture_2d_rd.set_texture_rd_rid(Rid::Invalid);
+            AcceleratedRenderState::shutdown(&render_state);
             return Err(CefError::BrowserCreationFailed(
                 "browser_host_create_browser_sync returned None (accelerated)".into(),
             ));
@@ -766,6 +825,9 @@ fn create_accelerated_browser(
     };
 
     let event_queues = queues.event_queues.clone();
+    let source_drag = queues.source_drag.clone();
+    let permissions = queues.permissions.clone();
+    let dialogs = queues.dialogs.clone();
     app.state = Some(BrowserState {
         browser,
         render_mode: RenderMode::Accelerated {
@@ -778,9 +840,10 @@ fn create_accelerated_browser(
         popup_state,
         event_queues,
         audio: queues.into_audio_state(),
+        source_drag,
         popup_policy,
-        pending_permission_requests,
-        pending_permission_aggregates,
+        permissions,
+        dialogs,
     });
     Ok(())
 }
@@ -788,13 +851,21 @@ fn create_accelerated_browser(
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn create_accelerated_browser(
     app: &mut App,
-    window_info: &WindowInfo,
+    _window_info: &WindowInfo,
     browser_settings: &BrowserSettings,
     context: Option<&mut cef::RequestContext>,
     params: BrowserCreateParams,
+    software_target_texture: Option<Gd<ImageTexture>>,
     log_prefix: &str,
 ) -> Result<(), CefError> {
-    create_software_browser(app, browser_settings, context, params, None, log_prefix)
+    create_software_browser(
+        app,
+        browser_settings,
+        context,
+        params,
+        software_target_texture,
+        log_prefix,
+    )
 }
 
 #[cfg(test)]

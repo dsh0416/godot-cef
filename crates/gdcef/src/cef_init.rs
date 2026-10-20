@@ -9,11 +9,37 @@ use crate::utils::get_subprocess_path;
 
 use crate::accelerated_osr::RenderBackend;
 use crate::error::{CefError, CefResult};
+use crate::profile_dir;
 use crate::settings;
 
 struct CefState {
     ref_count: usize,
     initialized: bool,
+}
+
+impl CefState {
+    fn needs_initialize(&self) -> bool {
+        !self.initialized
+    }
+
+    fn mark_initialized(&mut self) {
+        self.initialized = true;
+    }
+
+    fn retain(&mut self) {
+        self.ref_count += 1;
+    }
+
+    fn release(&mut self) {
+        if self.ref_count == 0 {
+            return;
+        }
+
+        self.ref_count -= 1;
+        // CEF does not support a reliable initialize -> shutdown -> initialize cycle
+        // within the same process. Keep the process-wide CEF runtime alive after the
+        // last browser instance is released so a later CefTexture can be created.
+    }
 }
 
 static CEF_STATE: Mutex<CefState> = Mutex::new(CefState {
@@ -34,35 +60,27 @@ fn lock_cef_state() -> MutexGuard<'static, CefState> {
 }
 
 pub fn cef_retain() -> CefResult<()> {
+    crate::cef_pump::ensure_installed().map_err(CefError::InitializationFailed)?;
     let mut state = lock_cef_state();
 
-    if state.ref_count == 0 {
+    if state.needs_initialize() {
         load_cef_framework()?;
         cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
         initialize_cef()?;
-        state.initialized = true;
+        state.mark_initialized();
+        crate::cef_pump::activate();
 
         settings::warn_if_insecure_settings();
         settings::log_production_security_baseline();
     }
 
-    state.ref_count += 1;
+    state.retain();
     Ok(())
 }
 
 pub fn cef_release() {
     let mut state = lock_cef_state();
-
-    if state.ref_count == 0 {
-        return;
-    }
-
-    state.ref_count -= 1;
-
-    if state.ref_count == 0 && state.initialized {
-        cef::shutdown();
-        state.initialized = false;
-    }
+    state.release();
 }
 
 /// Loads the CEF framework library (macOS-specific)
@@ -89,9 +107,13 @@ fn load_sandbox(args: &cef::MainArgs) {
         Ok(framework_path) => {
             if let Err(e) = cef_app::load_sandbox_from_path(&framework_path, args) {
                 godot::global::godot_warn!("Failed to load CEF sandbox: {}", e);
+                drop(e);
             }
         }
-        Err(e) => godot::global::godot_warn!("Failed to load CEF sandbox: {}", e),
+        Err(e) => {
+            godot::global::godot_warn!("Failed to load CEF sandbox: {}", e);
+            drop(e);
+        }
     }
 }
 
@@ -129,8 +151,47 @@ fn initialize_cef() -> CefResult<()> {
     let godot_backend = detect_godot_render_backend();
     let (accel_supported, accel_reason) =
         crate::accelerated_osr::accelerated_osr_support_diagnostic();
-    let enable_remote_debugging = should_enable_remote_debugging();
-    let remote_debugging_port = settings::get_remote_devtools_port();
+    let mut enable_remote_debugging = should_enable_remote_debugging();
+    let profile = profile_dir::claim_process_profile(&settings::get_data_path());
+    let preferred_debugging_port = settings::get_remote_devtools_port();
+    let remote_debugging_port = if enable_remote_debugging {
+        match profile_dir::claim_devtools_port(
+            &settings::get_data_path(),
+            preferred_debugging_port,
+            32,
+        ) {
+            Some(chosen) => {
+                if chosen != preferred_debugging_port {
+                    godot::global::godot_print!(
+                        "[CefInit] Remote debugging port {} is busy. Listening on {}.",
+                        preferred_debugging_port,
+                        chosen
+                    );
+                }
+                chosen
+            }
+            None => {
+                godot::global::godot_warn!(
+                    "[CefInit] No free remote debugging port near {}. Remote debugging is disabled for this process.",
+                    preferred_debugging_port
+                );
+                enable_remote_debugging = false;
+                0
+            }
+        }
+    } else {
+        preferred_debugging_port
+    };
+
+    if profile.primary {
+        godot::global::godot_print!("[CefInit] CEF profile: {}", profile.path.display());
+    } else {
+        godot::global::godot_print!(
+            "[CefInit] {} is already used by another process. This process is using {}. Browsers in this process still share one profile.",
+            settings::get_data_path().display(),
+            profile.path.display()
+        );
+    }
 
     let security_config = settings::get_security_config();
     let user_agent = settings::get_user_agent();
@@ -183,7 +244,48 @@ fn initialize_cef() -> CefResult<()> {
         CefError::InitializationFailed(format!("Failed to get subprocess path: {}", e))
     })?;
 
-    let root_cache_path = settings::get_data_path();
+    #[cfg(target_os = "linux")]
+    struct SignalRestorer {
+        signals: Vec<(libc::c_int, libc::sigaction)>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl SignalRestorer {
+        fn save() -> Self {
+            let sigs = [
+                libc::SIGSEGV,
+                libc::SIGBUS,
+                libc::SIGILL,
+                libc::SIGFPE,
+                libc::SIGTRAP,
+                libc::SIGABRT,
+                libc::SIGCHLD,
+                libc::SIGSYS,
+            ];
+            let mut saved = Vec::new();
+            for &sig in &sigs {
+                unsafe {
+                    let mut old_act: libc::sigaction = std::mem::zeroed();
+                    if libc::sigaction(sig, std::ptr::null(), &mut old_act) == 0 {
+                        saved.push((sig, old_act));
+                    }
+                }
+            }
+            SignalRestorer { signals: saved }
+        }
+
+        fn restore(self) {
+            for (sig, old_act) in self.signals {
+                unsafe {
+                    libc::sigaction(sig, &old_act, std::ptr::null_mut());
+                }
+            }
+        }
+    }
+
+    let profile_path = profile.path.to_str().ok_or_else(|| {
+        CefError::InitializationFailed("cache path is not valid UTF-8".to_string())
+    })?;
 
     let settings = Settings {
         browser_subprocess_path: subprocess_path
@@ -195,12 +297,9 @@ fn initialize_cef() -> CefResult<()> {
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         log_severity: cef::LogSeverity::DEFAULT as _,
-        root_cache_path: root_cache_path
-            .to_str()
-            .ok_or_else(|| {
-                CefError::InitializationFailed("cache path is not valid UTF-8".to_string())
-            })?
-            .into(),
+        no_sandbox: true as _,
+        cache_path: profile_path.into(),
+        root_cache_path: profile_path.into(),
         ..Default::default()
     };
 
@@ -241,6 +340,10 @@ fn initialize_cef() -> CefResult<()> {
         }
     };
 
+    #[cfg(target_os = "linux")]
+    let signal_restorer = SignalRestorer::save();
+
+    profile_dir::release_devtools_listener();
     let ret = cef::initialize(
         Some(args.as_main_args()),
         Some(&settings),
@@ -248,11 +351,39 @@ fn initialize_cef() -> CefResult<()> {
         std::ptr::null_mut(),
     );
 
+    #[cfg(target_os = "linux")]
+    {
+        signal_restorer.restore();
+        unsafe {
+            libc::prctl(libc::PR_SET_DUMPABLE, 1);
+        }
+    }
+
     if ret != 1 {
+        profile_dir::release_devtools_port();
         return Err(CefError::InitializationFailed(
             "CEF initialization returned error code".to_string(),
         ));
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn releasing_last_reference_keeps_cef_initialized_for_recreate() {
+        let mut state = CefState {
+            ref_count: 1,
+            initialized: true,
+        };
+
+        state.release();
+
+        assert_eq!(state.ref_count, 0);
+        assert!(state.initialized);
+        assert!(!state.needs_initialize());
+    }
 }

@@ -221,15 +221,45 @@ fn create_touch_event(
     }
 }
 
-fn touch_id_for_index(
-    _touch_id_map: &mut HashMap<i32, i32>,
-    _next_touch_id: &mut i32,
+fn touch_id_for_event(
+    touch_id_map: &mut HashMap<i32, i32>,
     index: i32,
-) -> i32 {
-    // Use the Godot touch index directly as the CEF touch ID.
-    // This avoids unbounded growth and potential overflow of a separate counter,
-    // while still providing a stable ID for the duration of each touch.
-    index
+    type_: TouchEventType,
+) -> Option<i32> {
+    if type_ == TouchEventType::PRESSED {
+        if touch_id_map.contains_key(&index) {
+            return None;
+        }
+        // Godot indices are stable for a touch. Track only accepted presses so
+        // late moves/releases after a focus-loss cancellation are ignored.
+        touch_id_map.insert(index, index);
+        Some(index)
+    } else if type_ == TouchEventType::MOVED {
+        touch_id_map.get(&index).copied()
+    } else {
+        touch_id_map.remove(&index)
+    }
+}
+
+fn cancelled_touch_events(touch_id_map: &mut HashMap<i32, i32>) -> Vec<TouchEvent> {
+    touch_id_map
+        .drain()
+        .map(|(_, id)| TouchEvent {
+            id,
+            type_: TouchEventType::CANCELLED,
+            pointer_type: PointerType::TOUCH,
+            ..Default::default()
+        })
+        .collect()
+}
+
+pub(crate) fn cancel_screen_touches(
+    host: &impl ImplBrowserHost,
+    touch_id_map: &mut HashMap<i32, i32>,
+) {
+    for event in cancelled_touch_events(touch_id_map) {
+        host.send_touch_event(Some(&event));
+    }
 }
 
 /// Handles screen touch events and sends them to CEF browser host.
@@ -239,7 +269,7 @@ pub fn handle_screen_touch(
     pixel_scale_factor: f32,
     device_scale_factor: f32,
     touch_id_map: &mut HashMap<i32, i32>,
-    next_touch_id: &mut i32,
+    _next_touch_id: &mut i32,
 ) {
     let index = event.get_index();
     let is_canceled = event.is_canceled();
@@ -252,7 +282,9 @@ pub fn handle_screen_touch(
         TouchEventType::RELEASED
     };
 
-    let id = touch_id_for_index(touch_id_map, next_touch_id, index);
+    let Some(id) = touch_id_for_event(touch_id_map, index, type_) else {
+        return;
+    };
     let touch_event = create_touch_event(
         event.get_position(),
         pixel_scale_factor,
@@ -262,10 +294,6 @@ pub fn handle_screen_touch(
         1.0,
     );
     host.send_touch_event(Some(&touch_event));
-
-    if !is_pressed || is_canceled {
-        touch_id_map.remove(&index);
-    }
 }
 
 /// Handles screen drag events and sends them to CEF browser host.
@@ -275,10 +303,12 @@ pub fn handle_screen_drag(
     pixel_scale_factor: f32,
     device_scale_factor: f32,
     touch_id_map: &mut HashMap<i32, i32>,
-    next_touch_id: &mut i32,
+    _next_touch_id: &mut i32,
 ) {
     let index = event.get_index();
-    let id = touch_id_for_index(touch_id_map, next_touch_id, index);
+    let Some(id) = touch_id_for_event(touch_id_map, index, TouchEventType::MOVED) else {
+        return;
+    };
     let touch_event = create_touch_event(
         event.get_position(),
         pixel_scale_factor,
@@ -301,7 +331,20 @@ pub fn handle_magnify_gesture(host: &impl ImplBrowserHost, event: &Gd<InputEvent
     host.set_zoom_level(current_zoom + (factor * MAGNIFY_ZOOM_SENSITIVITY));
 }
 
-/// Handles keyboard events and sends them to CEF browser host
+/// Keeps browser shortcuts out of the hidden native text proxy.
+pub(crate) fn should_deliver_key_to_ime_proxy(
+    keycode: Key,
+    ctrl: bool,
+    alt: bool,
+    meta: bool,
+) -> bool {
+    // Tab belongs to the page's focus traversal. Editing shortcuts are also
+    // browser-owned: allowing the proxy to paste would insert the text twice.
+    // Ctrl+Alt is how some platforms expose AltGr and must still produce text.
+    keycode != Key::TAB && !meta && (!ctrl || alt)
+}
+
+/// Handles keyboard events and sends them to CEF browser host.
 pub fn handle_key_event(
     host: &impl ImplBrowserHost,
     frame: Option<&impl ImplFrame>,
@@ -566,6 +609,70 @@ pub fn ime_set_composition(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ime_proxy_receives_text_but_not_browser_navigation_or_shortcuts() {
+        assert!(should_deliver_key_to_ime_proxy(Key::A, false, false, false));
+        assert!(should_deliver_key_to_ime_proxy(
+            Key::NONE,
+            false,
+            false,
+            false
+        ));
+        assert!(should_deliver_key_to_ime_proxy(Key::E, true, true, false));
+        assert!(!should_deliver_key_to_ime_proxy(
+            Key::TAB,
+            false,
+            false,
+            false
+        ));
+        assert!(!should_deliver_key_to_ime_proxy(Key::V, true, false, false));
+        assert!(!should_deliver_key_to_ime_proxy(Key::V, false, false, true));
+        assert!(!should_deliver_key_to_ime_proxy(Key::A, true, false, false));
+    }
+
+    #[test]
+    fn cancelling_touches_terminates_each_id_and_rejects_stale_events() {
+        let mut ids = HashMap::new();
+        assert_eq!(
+            touch_id_for_event(&mut ids, 2, TouchEventType::PRESSED),
+            Some(2)
+        );
+        assert_eq!(
+            touch_id_for_event(&mut ids, 7, TouchEventType::PRESSED),
+            Some(7)
+        );
+        assert_eq!(
+            touch_id_for_event(&mut ids, 2, TouchEventType::PRESSED),
+            None
+        );
+        let mut cancelled = cancelled_touch_events(&mut ids);
+        cancelled.sort_by_key(|event| event.id);
+        assert_eq!(
+            cancelled.iter().map(|event| event.id).collect::<Vec<_>>(),
+            vec![2, 7]
+        );
+        assert!(
+            cancelled
+                .iter()
+                .all(|event| event.type_ == TouchEventType::CANCELLED)
+        );
+        assert!(cancelled_touch_events(&mut ids).is_empty());
+        assert_eq!(touch_id_for_event(&mut ids, 2, TouchEventType::MOVED), None);
+        assert_eq!(
+            touch_id_for_event(&mut ids, 7, TouchEventType::RELEASED),
+            None
+        );
+        assert_eq!(
+            touch_id_for_event(&mut ids, 2, TouchEventType::PRESSED),
+            Some(2)
+        );
+        assert_eq!(
+            touch_id_for_event(&mut ids, 2, TouchEventType::RELEASED),
+            Some(2)
+        );
+        assert!(ids.is_empty());
+    }
 
     #[test]
     fn test_get_control_char_code() {

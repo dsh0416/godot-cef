@@ -7,8 +7,8 @@ use cef::ImplBrowser;
 use cef_app::{CursorType, FrameBuffer, PhysicalSize, PopupState};
 use godot::classes::{ImageTexture, Texture2D, Texture2Drd};
 use godot::prelude::*;
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicI32};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -38,11 +38,33 @@ pub mod permission_policy {
     pub const SIGNAL: i32 = 2;
 }
 
-/// Shared default permission policy state, readable from the CEF UI thread.
-pub type PermissionPolicyFlag = Arc<AtomicI32>;
+/// Browser dialog handling policies.
+pub mod dialog_policy {
+    pub const NATIVE: i32 = 0;
+    pub const SIGNAL: i32 = 1;
+    pub const CANCEL: i32 = 2;
+}
 
-/// Monotonic request-id counter for permission requests.
-pub type PermissionRequestIdCounter = Arc<AtomicI64>;
+#[derive(Debug, Clone)]
+pub struct FileDialogRequestEvent {
+    pub request_id: i64,
+    pub mode: i32,
+    pub title: String,
+    pub default_file_path: String,
+    pub accept_filters: Vec<String>,
+    pub accept_extensions: Vec<String>,
+    pub accept_descriptions: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsDialogRequestEvent {
+    pub request_id: i64,
+    pub kind: String,
+    pub origin_url: String,
+    pub message_text: String,
+    pub default_prompt_text: String,
+    pub is_reload: bool,
+}
 
 /// Represents a loading state event from the browser.
 #[derive(Debug, Clone)]
@@ -93,6 +115,7 @@ pub struct DragDataInfo {
 #[derive(Debug, Clone)]
 pub enum DragEvent {
     Started {
+        session_id: i64,
         drag_data: DragDataInfo,
         x: i32,
         y: i32,
@@ -159,6 +182,16 @@ pub struct FindResultEvent {
     pub count: i32,
     pub active_index: i32,
     pub final_update: bool,
+}
+
+/// Display metadata copied from CEF callbacks, in callback order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DisplayEvent {
+    Tooltip(String),
+    Fullscreen(bool),
+    LoadingProgress(f64),
+    StatusMessage(String),
+    FaviconUrls(Vec<String>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -327,53 +360,6 @@ mod ipc_debug_tests {
         }
     }
 }
-#[derive(Clone)]
-pub enum PendingPermissionDecision {
-    Media {
-        callback: cef::MediaAccessCallback,
-        permission_bit: u32,
-        callback_token: usize,
-    },
-    Prompt {
-        callback: cef::PermissionPromptCallback,
-        prompt_id: u64,
-        callback_token: usize,
-    },
-}
-
-pub type PendingPermissionRequests = Arc<Mutex<HashMap<i64, PendingPermissionDecision>>>;
-
-#[derive(Clone)]
-pub enum PendingPermissionAggregate {
-    Media {
-        callback: cef::MediaAccessCallback,
-        granted_mask: u32,
-    },
-    Prompt {
-        callback: cef::PermissionPromptCallback,
-        all_granted: bool,
-    },
-}
-
-impl PendingPermissionAggregate {
-    pub fn new_media(callback: cef::MediaAccessCallback, granted_mask: u32) -> Self {
-        Self::Media {
-            callback,
-            granted_mask,
-        }
-    }
-
-    pub fn new_prompt(callback: cef::PermissionPromptCallback, all_granted: bool) -> Self {
-        Self::Prompt {
-            callback,
-            all_granted,
-        }
-    }
-}
-
-/// Per-callback aggregation state used to resolve multi-permission requests.
-pub type PendingPermissionAggregates = Arc<Mutex<HashMap<usize, PendingPermissionAggregate>>>;
-
 /// Consolidated event queues for browser-to-Godot communication.
 ///
 /// All UI-thread callbacks write to this single structure, which is then
@@ -394,6 +380,8 @@ pub struct EventQueues {
     pub url_changes: VecDeque<String>,
     /// Title change notifications.
     pub title_changes: VecDeque<String>,
+    /// Browser display metadata notifications, including empty clear values.
+    pub display_events: VecDeque<DisplayEvent>,
     /// Loading state events.
     pub loading_states: VecDeque<LoadingStateEvent>,
     /// IME enable/disable requests.
@@ -412,6 +400,12 @@ pub struct EventQueues {
     pub download_updates: VecDeque<DownloadUpdateEvent>,
     /// Permission request events.
     pub permission_requests: VecDeque<PermissionRequestEvent>,
+    /// Final results for every public id belonging to a completed permission request.
+    pub permission_request_finished: VecDeque<(i64, String)>,
+    /// Custom file chooser and JavaScript dialog requests.
+    pub file_dialog_requests: VecDeque<FileDialogRequestEvent>,
+    pub js_dialog_requests: VecDeque<JsDialogRequestEvent>,
+    pub dialog_request_finished: VecDeque<(i64, String)>,
     /// Find-in-page result events.
     pub find_results: VecDeque<FindResultEvent>,
     /// Cookie operation results.
@@ -463,9 +457,7 @@ pub type AudioShutdownFlag = Arc<AtomicBool>;
 #[derive(Debug, Clone, Default)]
 pub struct DragState {
     pub is_drag_over: bool,
-    pub is_dragging_from_browser: bool,
     pub allowed_ops: u32,
-    pub source_position: Option<(i32, i32)>,
 }
 
 /// Rendering mode for the CEF browser.
@@ -536,14 +528,14 @@ pub struct BrowserState {
     pub popup_state: PopupStateQueue,
     /// Consolidated event queues for browser-to-Godot communication.
     pub event_queues: EventQueuesHandle,
+    pub(crate) source_drag: crate::drag::SourceDragHandle,
     /// Audio capture state (present when audio capture is enabled).
     pub audio: Option<AudioState>,
     /// Shared popup policy flag, readable from CEF's IO thread.
     pub popup_policy: PopupPolicyFlag,
-    /// Shared map of pending permission callbacks keyed by request id.
-    pub pending_permission_requests: PendingPermissionRequests,
-    /// Shared per-callback aggregation state for multi-permission requests.
-    pub pending_permission_aggregates: PendingPermissionAggregates,
+    /// Shared permission policy and pending callback ownership.
+    pub permissions: crate::permissions::PermissionController,
+    pub dialogs: crate::dialogs::DialogController,
 }
 
 /// CEF browser state and shared resources.
@@ -570,6 +562,8 @@ pub struct App {
     pub drag_state: DragState,
     /// Tracks whether this instance currently holds one `cef_retain()` reference.
     pub cef_retained: bool,
+    /// Desired OSR visibility, retained even before browser creation.
+    pub browser_hidden: bool,
     /// Tracks browser lifecycle transitions for invariant checks.
     lifecycle_state: LifecycleState,
 }
@@ -666,17 +660,13 @@ mod tests {
         let mut app = App::default();
         for _ in 0..1000 {
             app.drag_state.is_drag_over = true;
-            app.drag_state.is_dragging_from_browser = true;
             app.drag_state.allowed_ops = u32::MAX;
-            app.drag_state.source_position = Some((10, 20));
 
             app.clear_runtime_state();
 
             assert!(app.state.is_none());
             assert!(!app.drag_state.is_drag_over);
-            assert!(!app.drag_state.is_dragging_from_browser);
             assert_eq!(app.drag_state.allowed_ops, 0);
-            assert_eq!(app.drag_state.source_position, None);
         }
     }
 

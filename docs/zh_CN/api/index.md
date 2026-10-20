@@ -1,6 +1,6 @@
 ---
 title: Godot CEF API 参考
-description: Godot CEF 的 CefTexture 节点完整 API 文档，涵盖属性、方法、信号、音频捕获、输入法、拖放、下载与生产环境安全基线。
+description: Godot CEF 的 CefTexture 节点完整 API 文档，涵盖属性、方法、信号、文件与 JavaScript 对话框、音频捕获、输入法、拖放、下载与生产环境安全基线。
 ---
 
 # API 参考
@@ -34,10 +34,22 @@ func _ready():
 - **双向通信（IPC）**：Godot ↔ JavaScript
 - **输入处理**：鼠标、键盘与输入法（IME）
 - **导航与状态**：前进/后退、加载状态等
+- **显示事件**：tooltip、全屏、加载进度、悬停链接和 favicon URL
+- **渲染可见性控制**：隐藏浏览器视图时减少渲染工作
 - **拖放**：Godot 与网页间的双向拖放
+- **文件与 JavaScript 对话框**：通过应用提供的 Godot 界面回答
 - **下载处理**：拦截下载请求并由游戏侧决定策略
 
 ## 全局配置
+
+所有 `CefTexture` 和 `CefTexture2D` 实例共用同一个 CEF 任务调度服务，
+到期时在每次 Godot 主循环迭代中至多执行一次。暂停场景、隐藏浏览器或
+释放最后一个浏览器都不会断开该服务。浏览器渲染和节点信号仍遵循各自的
+处理设置。
+
+该服务依赖 Godot 的 `SceneTree` 主循环，并在其主线程运行。
+全局帧率限制、窗口最小化后的降频和阻塞主线程的操作都会延迟 CEF 任务；
+浏览器帧率设置不能绕过这些限制。
 
 由于 CEF 的架构限制，部分参数只能在 Godot 启动阶段设置**一次**。这些设置通过**项目设置**配置，并应用于所有 `CefTexture` 实例。
 
@@ -53,6 +65,8 @@ func _ready():
 | `godot_cef/security/ignore_certificate_errors` | 忽略 SSL/TLS 证书错误 |
 | `godot_cef/security/disable_web_security` | 禁用网页安全（CORS、同源策略） |
 | `godot_cef/security/default_permission_policy` | 默认权限策略（`0` 全拒绝，`1` 全允许，`2` 发信号） |
+| `godot_cef/security/permission_request_timeout_seconds` | 未回答权限请求的期限（默认 `60` 秒，最小 `1`） |
+| `godot_cef/dialogs/request_timeout_seconds` | 未回答的 Signal 文件 / JavaScript 对话框期限（默认 `60` 秒，最小 `1`） |
 | `godot_cef/audio/enable_audio_capture` | 将浏览器音频通过 Godot 音频系统路由（默认：`false`） |
 | `godot_cef/debug/remote_devtools_port` | Chrome DevTools 远程调试端口（默认：`9229`） |
 | `godot_cef/performance/max_frame_rate` | 浏览器最大帧率（默认：`0` = 跟随 Godot FPS） |
@@ -61,7 +75,9 @@ func _ready():
 | `godot_cef/network/proxy_bypass_list` | 不走代理的主机列表（默认：空） |
 | `godot_cef/advanced/custom_command_line_switches` | 自定义 CEF 命令行开关（每行一个） |
 
-这些参数会在初始化期间以命令行开关的形式传递给 CEF 子进程，运行时无法修改。如需更改这些设置，请重启 Godot 应用程序。
+请在初始化之前配置 CEF 全局设置；更改启动设置需要重启应用。
+权限决定由集成层处理，两种浏览器类型都提供可在运行时修改的 `permission_policy`
+覆盖属性。应用提示和超时规则见[权限](./permissions.md)。
 
 ::: warning
 安全相关选项风险较高，只应在明确的场景下启用。如果启用了任何安全选项，启动时会打印警告日志。
@@ -102,12 +118,15 @@ func _ready():
 - [**属性**](./properties.md) - 节点属性和配置
 - [**方法**](./methods.md) - 控制浏览器的可用方法
 - [**信号**](./signals.md) - CefTexture 节点发出的事件
+- [**显示事件与可见性**](./display-events.md) - Godot 界面集成与隐藏浏览器渲染
+- [**权限**](./permissions.md) - 摄像头、麦克风、局域网访问、应用权限对话框与配置查询
+- [**对话框**](./dialogs.md) - 文件选择、JavaScript alert/confirm/prompt 与离开页面确认
 - [**IPC 检查器**](./ipc-inspector.md) - 用于查看 IPC 流量的调试工具
 - [**音频捕获**](./audio-capture.md) - 将浏览器音频接入 Godot 音频系统
 - [**输入法（IME）支持**](./ime-support.md) - 输入法（IME）集成
 - [**拖放**](./drag-and-drop.md) - 双向拖放支持
 - [**下载**](./downloads.md) - 处理网页文件下载
-- [**兼容性矩阵**](./compatibility-matrix.md) - 平台/后端的加速渲染与回退行为
+- [**兼容性矩阵**](./compatibility-matrix.md) - 受支持的平台与后端矩阵、启动回退行为
 - [**生产环境安全基线**](./security-baseline.md) - 发布版本的推荐安全默认配置
 
 ## 基本使用示例

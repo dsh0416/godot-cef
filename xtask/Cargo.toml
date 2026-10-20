@@ -10,6 +10,21 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-plist = { workspace = true }
+clap = { version = "4.6.6", features = ["derive"] }
+getrandom = "0.4.0"
+httparse = "1.10.1"
 serde = { workspace = true }
+serde_json = "1"
+form_urlencoded = "1.2.2"
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Pipes",
+] }

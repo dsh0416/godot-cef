@@ -25,6 +25,7 @@ When a drag event occurs, you receive a `DragDataInfo` object containing informa
 
 | Property | Type | Description |
 |----------|------|-------------|
+| `session_id` | `int` | Unique outgoing drag ID; `0` for data created manually or received from outside |
 | `is_link` | `bool` | True if dragging a URL link |
 | `is_file` | `bool` | True if dragging files |
 | `is_fragment` | `bool` | True if dragging text/HTML content |
@@ -117,6 +118,10 @@ func _notification(what):
 
 When users start dragging content from the web page (e.g., an image, link, or selected text), CefTexture emits signals that you can connect to and handle in your game.
 
+Browser drags are accepted only while a visible, processing `CefTexture` has a `drag_started` listener. Without one, CEF handles the rejected drag and remains responsive. A standalone `CefTexture2D` does not accept browser drags.
+
+Finish an accepted drag from your drop handler. The node cancels unfinished drags after mouse release, when a Godot drag ends, on Escape, window focus loss, hiding, pausing, or teardown. This also protects against a listener that receives the signal but never finishes the drag.
+
 ### Signals
 
 #### `drag_started(drag_data: DragDataInfo, position: Vector2, allowed_ops: int)`
@@ -173,6 +178,14 @@ func _on_drag_entered(drag_data: DragDataInfo, mask: int):
 ### Notifying CEF When Browser Drag Ends
 
 When a drag that started from the browser ends, notify CEF exactly once:
+
+For delayed callbacks, retain `drag_data.session_id` and use `drag_source_ended_for_session(session_id, position, operation)` or `drag_source_system_ended_for_session(session_id)`. Stale and repeated completions are ignored, including after browser recreation. The legacy methods below act on the **current** drag and should only be used synchronously. Completion positions use CEF view coordinates, as supplied by `drag_started`.
+
+```gdscript
+func finish_drag(data: DragDataInfo, position: Vector2, accepted: bool):
+    var operation = DragOperation.COPY if accepted else DragOperation.NONE
+    cef_texture.drag_source_ended_for_session(data.session_id, position, operation)
+```
 
 #### `drag_source_ended(position: Vector2, operation: int)`
 

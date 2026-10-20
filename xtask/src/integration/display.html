@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Godot CEF display fixture</title>
+<link id="icon" rel="icon" type="image/svg+xml">
+<style>
+  body { margin: 0; }
+  #link { position: absolute; left: 16px; top: 16px; width: 300px; height: 40px; }
+  #fullscreen { position: absolute; left: 16px; top: 80px; width: 300px; height: 40px; }
+</style>
+<a id="link" title="悬停提示: 雪 ✓">Hover this link</a>
+<button id="fullscreen">Enter fullscreen</button>
+<script>
+  const params = new URL(location.href).searchParams;
+  const run = params.get('run');
+  const generation = Number(params.get('generation'));
+  window.report = (event) => fetch(`/event?run=${encodeURIComponent(run)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({generation, ...event}), keepalive: true,
+  }).then((response) => {
+    if (!response.ok) throw new Error(`Fixture report failed: ${response.status}`);
+  });
+  const fail = (error) => report({type: 'fixture_error', message: String(error)});
+  let frames = 0;
+  let ticks = 0;
+  const frame = () => { frames++; requestAnimationFrame(frame); };
+  requestAnimationFrame(frame);
+  setInterval(() => { ticks++; }, 50);
+  window.snapshot = (phase) => report({
+    type: 'display_snapshot', phase, frames, ticks,
+    hidden: document.hidden, visibility: document.visibilityState,
+    evaluated: window.hiddenEvaluation === 42,
+  }).catch(fail);
+  window.afterFrame = (phase) => requestAnimationFrame(() => snapshot(phase));
+  window.changeIcon = () => {
+    document.querySelector('#icon').href = `/display-icon.svg?run=${encodeURIComponent(run)}&phase=changed`;
+  };
+  const link = document.querySelector('#link');
+  link.href = `/hover-target?run=${encodeURIComponent(run)}&label=${encodeURIComponent('雪 ✓')}`;
+  document.querySelector('#icon').href = `/display-icon.svg?run=${encodeURIComponent(run)}&phase=initial`;
+  document.querySelector('#fullscreen').addEventListener('click', (event) => {
+    report({type: 'display_click', trusted: event.isTrusted, activated: navigator.userActivation.isActive}).catch(fail);
+    document.documentElement.requestFullscreen().catch(fail);
+  });
+  document.addEventListener('fullscreenchange', () => {
+    report({type: 'display_fullscreen', fullscreen: document.fullscreenElement !== null}).catch(fail);
+  });
+  window.addEventListener('load', () => {
+    // This report deliberately does not require rAF: an initially hidden browser
+    // must still load and run timers/eval while its animation frames are paused.
+    report({type: 'display_loaded', preload: window.__gdcef_preload === true}).catch(fail);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      report({
+        type: 'display_ready', link_href: link.href, tooltip: link.title,
+        link_hit: document.elementFromPoint(50, 34)?.id,
+        fullscreen_hit: document.elementFromPoint(50, 100)?.id,
+      }).catch(fail);
+    }));
+  });
+</script>

@@ -1,0 +1,84 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Godot CEF dialog fixture</title>
+<style>
+  body { margin: 0; }
+  #file { position: absolute; left: 16px; top: 16px; width: 300px; height: 40px; }
+  #activate { position: absolute; left: 16px; top: 80px; width: 300px; height: 40px; }
+  #leave { position: absolute; left: 16px; top: 144px; width: 300px; height: 40px; }
+</style>
+<input id="file" type="file" accept=".txt,text/plain">
+<button id="activate">Activate before-unload handler</button>
+<a id="leave">Navigate away</a>
+<script>
+  const params = new URL(location.href).searchParams;
+  const run = params.get('run');
+  const generation = Number(params.get('generation'));
+  window.report = (event) => fetch(`/event?run=${encodeURIComponent(run)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({generation, ...event}), keepalive: true,
+  }).then((response) => {
+    if (!response.ok) throw new Error(`Fixture report failed: ${response.status}`);
+  });
+  const fail = (error) => report({type: 'fixture_error', message: String(error)});
+  window.runJsFixture = (kind, phase) => {
+    const message = `dialog-${phase}: 雪 ✓`;
+    let value;
+    switch (kind) {
+      case 'alert': alert(message); value = 'returned'; break;
+      case 'confirm': value = confirm(message); break;
+      case 'prompt': value = prompt(message, 'default 雪'); break;
+      default: throw new Error(`Unknown JS dialog: ${kind}`);
+    }
+    report({type: 'js_result', phase, kind, value}).catch(fail);
+  };
+  const file = document.querySelector('#file');
+  let filePhase = -1;
+  window.prepareFile = (phase, multiple) => {
+    filePhase = phase;
+    file.value = '';
+    file.multiple = multiple;
+    report({type: 'file_prepared', phase}).catch(fail);
+  };
+  file.addEventListener('change', async () => {
+    try {
+      const files = await Promise.all(Array.from(file.files).map((entry) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => resolve({name: entry.name, text: reader.result});
+        reader.readAsText(entry);
+      })));
+      await report({type: 'file_result', phase: filePhase, files});
+    } catch (error) { fail(error); }
+  });
+  file.addEventListener('cancel', () => report({type: 'file_canceled', phase: filePhase}).catch(fail));
+  document.querySelector('#activate').addEventListener('click', () => {
+    window.addEventListener('beforeunload', (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    });
+    report({type: 'before_unload_armed', activated: navigator.userActivation.hasBeenActive}).catch(fail);
+  });
+  document.querySelector('#leave').href = `/blank?run=${encodeURIComponent(run)}`;
+  if (params.get('case') === 'dialog_before_unload') {
+    document.addEventListener('click', (event) => report({
+      type: 'input_click', target: event.target.id, trusted: event.isTrusted,
+      x: event.clientX, y: event.clientY,
+    }).catch(fail), true);
+  }
+  // CEF needs to publish the first layout/hit-test data before native browser
+  // mouse events can reach these controls. The Resource has no GUI viewport
+  // roundtrip, so a report sent while parsing can race that first frame.
+  window.addEventListener('load', () => requestAnimationFrame(() => requestAnimationFrame(() => {
+    const controls = Object.fromEntries(['file', 'activate', 'leave'].map((id) => {
+      const rect = document.getElementById(id).getBoundingClientRect();
+      return [id, {x: rect.x, y: rect.y, width: rect.width, height: rect.height}];
+    }));
+    report({
+      type: 'dialog_ready', preload: window.__gdcef_preload === true,
+      width: innerWidth, height: innerHeight, device_pixel_ratio: devicePixelRatio,
+      controls, activate_hit: document.elementFromPoint(50, 100)?.id,
+      leave_hit: document.elementFromPoint(50, 164)?.id,
+    }).catch(fail);
+  })));
+</script>

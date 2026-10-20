@@ -1,6 +1,6 @@
 [configuration]
 entry_symbol = "gdext_rust_init"
-compatibility_minimum = 4.5
+compatibility_minimum = 4.6
 reloadable = true
 
 [libraries]
@@ -31,8 +31,6 @@ windows.x86_64 = {
   "bin/x86_64-pc-windows-msvc/dxil.dll" : "",
   "bin/x86_64-pc-windows-msvc/icudtl.dat" : "",
   "bin/x86_64-pc-windows-msvc/libcef.dll" : "",
-  "bin/x86_64-pc-windows-msvc/libEGL.dll" : "",
-  "bin/x86_64-pc-windows-msvc/libGLESv2.dll" : "",
   "bin/x86_64-pc-windows-msvc/resources.pak" : "",
   "bin/x86_64-pc-windows-msvc/v8_context_snapshot.bin" : "",
   "bin/x86_64-pc-windows-msvc/vk_swiftshader.dll" : "",
@@ -55,18 +53,11 @@ windows.arm64 = {
   "bin/aarch64-pc-windows-msvc/dxil.dll" : "",
   "bin/aarch64-pc-windows-msvc/icudtl.dat" : "",
   "bin/aarch64-pc-windows-msvc/libcef.dll" : "",
-  "bin/aarch64-pc-windows-msvc/libEGL.dll" : "",
-  "bin/aarch64-pc-windows-msvc/libGLESv2.dll" : "",
   "bin/aarch64-pc-windows-msvc/resources.pak" : "",
   "bin/aarch64-pc-windows-msvc/v8_context_snapshot.bin" : "",
   "bin/aarch64-pc-windows-msvc/vk_swiftshader.dll" : "",
   "bin/aarch64-pc-windows-msvc/vk_swiftshader_icd.json" : "",
   "bin/aarch64-pc-windows-msvc/vulkan-1.dll" : ""
-}
-
-macos = {
-  "bin/universal-apple-darwin/Godot CEF.framework" : "Contents/Frameworks",
-  "bin/universal-apple-darwin/Godot CEF.app" : "Contents/Frameworks"
 }
 
 linux.x86_64 = {
@@ -75,12 +66,15 @@ linux.x86_64 = {
 
   "bin/x86_64-unknown-linux-gnu/chrome-sandbox" : "",
   "bin/x86_64-unknown-linux-gnu/libcef.so" : "",
-  "bin/x86_64-unknown-linux-gnu/libEGL.so" : "",
-  "bin/x86_64-unknown-linux-gnu/libGLESv2.so" : "",
   "bin/x86_64-unknown-linux-gnu/libvk_swiftshader.so" : "",
   "bin/x86_64-unknown-linux-gnu/libvulkan.so.1" : "",
   "bin/x86_64-unknown-linux-gnu/v8_context_snapshot.bin" : "",
-  "bin/x86_64-unknown-linux-gnu/vk_swiftshader_icd.json" : ""  
+  "bin/x86_64-unknown-linux-gnu/vk_swiftshader_icd.json" : "",
+  "bin/x86_64-unknown-linux-gnu/icudtl.dat" : "",
+  "bin/x86_64-unknown-linux-gnu/resources.pak" : "",
+  "bin/x86_64-unknown-linux-gnu/chrome_100_percent.pak" : "",
+  "bin/x86_64-unknown-linux-gnu/chrome_200_percent.pak" : "",
+  "bin/x86_64-unknown-linux-gnu/locales" : ""
 }
 
 linux.arm64 = {
@@ -89,10 +83,13 @@ linux.arm64 = {
 
   "bin/aarch64-unknown-linux-gnu/chrome-sandbox" : "",
   "bin/aarch64-unknown-linux-gnu/libcef.so" : "",
-  "bin/aarch64-unknown-linux-gnu/libEGL.so" : "",
-  "bin/aarch64-unknown-linux-gnu/libGLESv2.so" : "",
   "bin/aarch64-unknown-linux-gnu/libvk_swiftshader.so" : "",
   "bin/aarch64-unknown-linux-gnu/libvulkan.so.1" : "",
   "bin/aarch64-unknown-linux-gnu/v8_context_snapshot.bin" : "",
-  "bin/aarch64-unknown-linux-gnu/vk_swiftshader_icd.json" : ""
+  "bin/aarch64-unknown-linux-gnu/vk_swiftshader_icd.json" : "",
+  "bin/aarch64-unknown-linux-gnu/icudtl.dat" : "",
+  "bin/aarch64-unknown-linux-gnu/resources.pak" : "",
+  "bin/aarch64-unknown-linux-gnu/chrome_100_percent.pak" : "",
+  "bin/aarch64-unknown-linux-gnu/chrome_200_percent.pak" : "",
+  "bin/aarch64-unknown-linux-gnu/locales" : ""
 }

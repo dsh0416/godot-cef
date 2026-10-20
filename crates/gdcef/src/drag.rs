@@ -1,11 +1,18 @@
 use godot::prelude::*;
 
+mod state;
+pub(crate) use state::{SourceDragHandle, SourceDragState};
+
 use crate::browser::DragDataInfo as InternalDragDataInfo;
 
 #[derive(GodotClass)]
 #[class(no_init)]
 pub struct DragDataInfo {
     base: Base<RefCounted>,
+
+    /// Identifies an outgoing drag; use with the session-aware completion methods.
+    #[var]
+    pub session_id: i64,
 
     #[var]
     pub is_link: bool,
@@ -38,6 +45,7 @@ impl DragDataInfo {
     pub fn create() -> Gd<Self> {
         Gd::from_init_fn(|base| Self {
             base,
+            session_id: 0,
             is_link: false,
             is_file: false,
             is_fragment: false,
@@ -60,6 +68,7 @@ impl DragDataInfo {
 
         Gd::from_init_fn(|base| Self {
             base,
+            session_id: 0,
             is_link: data.is_link,
             is_file: data.is_file,
             is_fragment: data.is_fragment,

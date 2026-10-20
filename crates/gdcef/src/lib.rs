@@ -2,16 +2,23 @@ mod accelerated_osr;
 mod browser;
 mod cef_init;
 mod cef_ipc_inspector;
+mod cef_pump;
 mod cef_texture;
 mod cef_texture2d;
 mod compat;
 mod cookie;
 mod cursor;
+mod dialog_info;
+mod dialogs;
+mod display_events;
 mod drag;
 mod error;
 mod godot_protocol;
 mod input;
 mod ipc_data;
+mod permission_query;
+mod permissions;
+mod profile_dir;
 mod render;
 mod settings;
 mod utils;
@@ -25,6 +32,19 @@ struct GodotCef;
 
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotCef {
+    fn on_stage_deinit(level: InitStage) {
+        if level == InitStage::Scene {
+            cef_pump::uninstall();
+            // Godot deletes the main loop and synchronizes queued instance
+            // cleanup before Scene deinit; RenderingServer is finalized later.
+            // Drain GPU completion callbacks while their API bindings are live.
+            // https://github.com/godotengine/godot/blob/89cea143987d564363e15d207438530651d943ac/main/main.cpp
+            if let Err(error) = accelerated_osr::drain_pending_publications() {
+                godot::global::godot_error!("[AcceleratedOSR] {error}");
+            }
+        }
+    }
+
     fn on_stage_init(level: InitStage) {
         match level {
             InitStage::Core => {

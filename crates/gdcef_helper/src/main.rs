@@ -20,6 +20,7 @@ pub static NvOptimusEnablement: u32 = 0x00000001;
 pub static AmdPowerXpressRequestHighPerformance: u32 = 0x00000001;
 
 mod utils;
+mod watchdog;
 
 fn main() -> std::process::ExitCode {
     #[cfg(target_os = "macos")]
@@ -62,6 +63,10 @@ fn main() -> std::process::ExitCode {
 
     let switch = CefString::from("type");
     let is_browser_process = cmd.has_switch(Some(&switch)) != 1;
+    if !is_browser_process {
+        watchdog::start_parent_watchdog(&cmd);
+    }
+
     let mut app = cef_app::AppBuilder::build(cef_app::OsrApp::new());
     let ret = execute_process(
         Some(args.as_main_args()),
