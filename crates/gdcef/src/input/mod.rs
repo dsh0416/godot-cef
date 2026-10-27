@@ -8,6 +8,8 @@ use godot::classes::{
     InputEventMouseMotion, InputEventPanGesture, InputEventScreenDrag, InputEventScreenTouch,
 };
 use godot::global::{Key, MouseButton, MouseButtonMask};
+#[cfg(target_os = "macos")]
+use godot::init::GdextBuild;
 use godot::prelude::*;
 use std::collections::HashMap;
 
@@ -190,16 +192,54 @@ pub fn handle_pan_gesture(
     let mouse_event =
         create_mouse_event(position, pixel_scale_factor, device_scale_factor, modifiers);
 
-    let delta = event.get_delta();
-    // Convert pan delta to scroll wheel delta
-    // Pan gesture delta is typically smaller, so we scale it up
-    // Negative because pan direction is opposite to scroll direction
-    let delta_x = (-delta.x * WHEEL_DELTA / device_scale_factor) as i32;
-    let delta_y = (-delta.y * WHEEL_DELTA / device_scale_factor) as i32;
+    let (delta_x, delta_y) = pan_gesture_wheel_delta(event.get_delta(), device_scale_factor);
 
     if delta_x != 0 || delta_y != 0 {
         host.send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);
     }
+}
+
+/// Converts a pan gesture delta to a CEF wheel delta in browser pixels.
+///
+/// On macOS, Godot makes the pan delta from the `NSEvent` scrolling delta, which is in
+/// points. Chromium scrolls a page by this delta, so CEF gets it without Godot's factor.
+/// The screen scale does not apply, because points are already device-independent.
+#[cfg(target_os = "macos")]
+fn pan_gesture_wheel_delta(delta: Vector2, _device_scale_factor: f32) -> (i32, i32) {
+    let (major, minor, _) = GdextBuild::godot_runtime_version_triple();
+    macos_pan_wheel_delta(delta, macos_pan_delta_factor(major, minor))
+}
+
+/// Converts a pan gesture delta to a CEF wheel delta in browser pixels.
+#[cfg(not(target_os = "macos"))]
+fn pan_gesture_wheel_delta(delta: Vector2, device_scale_factor: f32) -> (i32, i32) {
+    // Pan gesture delta is typically smaller, so we scale it up
+    // Negative because pan direction is opposite to scroll direction
+    let delta_x = (-delta.x * WHEEL_DELTA / device_scale_factor) as i32;
+    let delta_y = (-delta.y * WHEEL_DELTA / device_scale_factor) as i32;
+    (delta_x, delta_y)
+}
+
+/// Returns the factor that Godot applies to a precise macOS scrolling delta before it
+/// sends a pan gesture. Godot 4.8 removed the factor:
+/// <https://github.com/godotengine/godot/pull/123072>
+#[cfg(any(target_os = "macos", test))]
+fn macos_pan_delta_factor(godot_major: u8, godot_minor: u8) -> f32 {
+    if (godot_major, godot_minor) < (4, 8) {
+        0.03
+    } else {
+        1.0
+    }
+}
+
+/// Converts a macOS pan gesture delta back to the `NSEvent` scrolling delta in points.
+#[cfg(any(target_os = "macos", test))]
+fn macos_pan_wheel_delta(delta: Vector2, pan_delta_factor: f32) -> (i32, i32) {
+    // Negative because pan direction is opposite to scroll direction.
+    // CEF takes whole pixels, and the scrolling delta can have a fraction, so round it.
+    let delta_x = (-delta.x / pan_delta_factor).round() as i32;
+    let delta_y = (-delta.y / pan_delta_factor).round() as i32;
+    (delta_x, delta_y)
 }
 
 fn create_touch_event(
@@ -745,5 +785,49 @@ mod tests {
         assert!(!should_send_char_event(Key::LEFT, 0));
         // Non-printable, non-modifier, non-navigation keys with unicode=0 should not send CHAR
         assert!(!should_send_char_event(Key::F1, 0));
+    }
+
+    /// Makes a pan gesture delta as Godot does on macOS: the factor is applied in f64,
+    /// and the result is stored in an f32 `Vector2` with the opposite sign.
+    fn godot_macos_pan_delta(
+        scrolling_delta_x: f64,
+        scrolling_delta_y: f64,
+        factor: f64,
+    ) -> Vector2 {
+        Vector2::new(
+            -(scrolling_delta_x * factor) as f32,
+            -(scrolling_delta_y * factor) as f32,
+        )
+    }
+
+    #[test]
+    fn macos_pan_delta_factor_follows_godot_version() {
+        assert_eq!(macos_pan_delta_factor(4, 6), 0.03);
+        assert_eq!(macos_pan_delta_factor(4, 7), 0.03);
+        assert_eq!(macos_pan_delta_factor(4, 8), 1.0);
+        assert_eq!(macos_pan_delta_factor(5, 0), 1.0);
+    }
+
+    #[test]
+    fn macos_pan_wheel_delta_restores_scrolling_delta() {
+        // Godot 4.7 multiplies by 0.03 in f64. Godot 4.8 sends the delta unchanged.
+        for (minor, godot_factor) in [(7, 0.03), (8, 1.0)] {
+            let factor = macos_pan_delta_factor(4, minor);
+            for points in -200..=200 {
+                let delta = godot_macos_pan_delta(0.0, f64::from(points), godot_factor);
+                assert_eq!(macos_pan_wheel_delta(delta, factor), (0, points));
+                let delta = godot_macos_pan_delta(f64::from(points), 0.0, godot_factor);
+                assert_eq!(macos_pan_wheel_delta(delta, factor), (points, 0));
+            }
+        }
+    }
+
+    #[test]
+    fn macos_pan_wheel_delta_rounds_partial_points() {
+        let factor = macos_pan_delta_factor(4, 7);
+        let delta = godot_macos_pan_delta(0.4, 2.6, 0.03);
+        assert_eq!(macos_pan_wheel_delta(delta, factor), (0, 3));
+        let delta = godot_macos_pan_delta(-0.6, -2.4, 0.03);
+        assert_eq!(macos_pan_wheel_delta(delta, factor), (-1, -2));
     }
 }
