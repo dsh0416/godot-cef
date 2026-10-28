@@ -56,9 +56,9 @@ url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/5
 provenance = "github-attestations"
 
 [[tools."cargo:export-cef-dir"]]
-version = "154.5.0"
+version = "156.2.0"
 backend = "cargo:export-cef-dir"
-specifiers = ["154.5.0"]
+specifiers = ["156.2.0"]
 
 [[tools.godot]]
 version = "4.6-stable"
@@ -199,7 +199,7 @@ url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/662173351"
 provenance = "github-attestations"
 
 [[tools.rust]]
-version = "nightly-2026-10-27"
+version = "nightly-2026-10-28"
 backend = "core:rust"
 specifiers = ["nightly"]
 
