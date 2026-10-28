@@ -16,7 +16,7 @@ export const platforms: readonly Platform[] = [
   })),
 ];
 export const windowsAssets = [
-  "libcef.dll", "chrome_elf.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll",
+  "libcef.dll", "chrome_elf.dll", "d3dcompiler_47.dll", "dxcompiler.dll",
   "vk_swiftshader.dll", "vk_swiftshader_icd.json", "vulkan-1.dll", "icudtl.dat", "resources.pak",
   "chrome_100_percent.pak", "chrome_200_percent.pak", "v8_context_snapshot.bin", "bootstrap.exe", "bootstrapc.exe",
 ];
