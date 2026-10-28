@@ -36,4 +36,4 @@ runs:
     - name: Install sccache
       uses: mozilla-actions/sccache-action@v0.0.11
       with:
-        version: v0.18.0
+        version: v0.19.0
