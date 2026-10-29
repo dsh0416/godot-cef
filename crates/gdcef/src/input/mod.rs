@@ -436,79 +436,167 @@ pub fn handle_key_event(
         }
     }
 
-    // Get the Windows virtual key code from Godot key (CEF expects this on all platforms)
-    let windows_key_code = keycode::godot_key_to_windows_keycode(keycode);
+    #[cfg(target_os = "macos")]
+    let platform = KeyboardPlatform::MacOS;
+    #[cfg(not(target_os = "macos"))]
+    let platform = KeyboardPlatform::Other;
 
-    // Get platform-specific native key code
-    let native_key_code = keycode::godot_key_to_native_keycode(keycode);
+    let input = KeyInput {
+        keycode,
+        #[cfg(any(target_os = "macos", test))]
+        physical_keycode: event.get_physical_keycode(),
+        unicode: event.get_unicode(),
+        modifiers,
+        is_pressed,
+        is_echo,
+        focus_on_editable_field,
+    };
+    for key_event in key_events(input, platform).into_iter().flatten() {
+        host.send_key_event(Some(&key_event));
+    }
+}
 
-    // Get the character code - for printable keys use unicode,
-    // for control characters use their ASCII codes
-    let unicode = event.get_unicode();
+#[derive(Clone, Copy)]
+struct KeyInput {
+    keycode: Key,
+    #[cfg(any(target_os = "macos", test))]
+    physical_keycode: Key,
+    unicode: u32,
+    modifiers: u32,
+    is_pressed: bool,
+    is_echo: bool,
+    focus_on_editable_field: bool,
+}
 
-    let character = if unicode != 0 {
-        unicode as u16
-    } else {
-        // Use ASCII codes for control characters
-        get_control_char_code(keycode)
+#[derive(Clone, Copy)]
+enum KeyboardPlatform {
+    #[cfg(any(target_os = "macos", test))]
+    MacOS,
+    #[cfg(not(target_os = "macos"))]
+    Other,
+}
+
+/// Builds the events forwarded to CEF without requiring a running Godot instance.
+fn key_events(input: KeyInput, platform: KeyboardPlatform) -> [Option<KeyEvent>; 2] {
+    let windows_key_code = keycode::godot_key_to_windows_keycode(input.keycode);
+    let (native_key_code, character) = match platform {
+        #[cfg(any(target_os = "macos", test))]
+        KeyboardPlatform::MacOS => {
+            // Cocoa key codes describe physical positions, even when the layout
+            // or Shift changes Godot's logical key code (e.g. 1 becomes !).
+            let physical_keycode = if input.physical_keycode == Key::NONE {
+                input.keycode
+            } else {
+                input.physical_keycode
+            };
+            (
+                keycode::godot_key_to_macos_keycode(physical_keycode),
+                macos_key_character(input.keycode, input.unicode, input.modifiers),
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        KeyboardPlatform::Other => (
+            keycode::godot_key_to_native_keycode(input.keycode),
+            if input.unicode != 0 {
+                input.unicode as u16
+            } else {
+                get_control_char_code(input.keycode)
+            },
+        ),
+    };
+    let key_event = KeyEvent {
+        type_: if !input.is_pressed {
+            KeyEventType::KEYUP
+        } else if input.is_echo {
+            KeyEventType::KEYDOWN
+        } else {
+            KeyEventType::RAWKEYDOWN
+        },
+        modifiers: input.modifiers,
+        windows_key_code,
+        native_key_code,
+        character,
+        unmodified_character: character,
+        focus_on_editable_field: input.focus_on_editable_field as _,
+        ..Default::default()
     };
 
-    // For key press events, send RAWKEYDOWN for initial press, KEYDOWN for repeat
-    if is_pressed {
-        let key_event = KeyEvent {
-            type_: if is_echo {
-                KeyEventType::KEYDOWN
-            } else {
-                KeyEventType::RAWKEYDOWN
-            },
-            modifiers,
-            windows_key_code,
-            native_key_code,
-            is_system_key: 0,
-            character,
-            unmodified_character: character,
-            focus_on_editable_field: focus_on_editable_field as _,
-            ..Default::default()
-        };
-        host.send_key_event(Some(&key_event));
-
-        // Send a CHAR event for printable characters AND control characters that need it
-        // (Backspace, Tab, Enter need CHAR events for text input to work)
-        // When focus is on an editable field, we don't need to send CHAR events.
-        if should_send_char_event(keycode, unicode) && !focus_on_editable_field {
-            let char_event = KeyEvent {
-                type_: KeyEventType::CHAR,
-                modifiers,
-                // For CHAR events, use the character code (not the virtual key code)
-                // for windows_key_code and native_key_code, matching Windows WM_CHAR
-                // behavior where wParam contains the character value.
-                windows_key_code: character as i32,
-                native_key_code: character as i32,
-                is_system_key: 0,
-                character,
-                unmodified_character: character,
-                focus_on_editable_field: focus_on_editable_field as _,
-                ..Default::default()
-            };
-            host.send_key_event(Some(&char_event));
+    // Reconstructed characters identify the key to Cocoa; they must not turn a
+    // zero-Unicode event into text input. The IME proxy owns editable text input.
+    let char_event = if input.is_pressed
+        && should_send_char_event(input.keycode, input.unicode)
+        && !input.focus_on_editable_field
+    {
+        let mut char_event = key_event.clone();
+        char_event.type_ = KeyEventType::CHAR;
+        match platform {
+            #[cfg(any(target_os = "macos", test))]
+            KeyboardPlatform::MacOS => {
+                // CEF constructs an NSEvent for CHAR too, so keep its hardware
+                // key code instead of replacing it with the character value.
+            }
+            #[cfg(not(target_os = "macos"))]
+            KeyboardPlatform::Other => {
+                char_event.windows_key_code = character as i32;
+                char_event.native_key_code = character as i32;
+            }
         }
+        Some(char_event)
     } else {
-        // Key release event
-        // Skip KEYUP for navigation keys - works around a CEF issue where KEYUP
-        // triggers arrow key actions on macOS
-        if !is_navigation_key(keycode) {
-            let key_event = KeyEvent {
-                type_: KeyEventType::KEYUP,
-                modifiers,
-                windows_key_code,
-                native_key_code,
-                is_system_key: 0,
-                character,
-                unmodified_character: character,
-                focus_on_editable_field: focus_on_editable_field as _,
-                ..Default::default()
+        None
+    };
+    [Some(key_event), char_event]
+}
+
+/// Supplies Cocoa's character identity when Godot omits Unicode, notably on keyup.
+#[cfg(any(target_os = "macos", test))]
+fn macos_key_character(key: Key, unicode: u32, modifiers: u32) -> u16 {
+    if is_modifier_key(key) {
+        return 0;
+    }
+    if unicode != 0 {
+        return unicode as u16;
+    }
+
+    // CEF interprets two zero character fields as NSEventTypeFlagsChanged,
+    // regardless of KEYUP. Chromium then treats non-modifier keys as keydown.
+    // Use AppKit's function-key characters so keyup retains its original type.
+    match key {
+        Key::UP => 0xF700,
+        Key::DOWN => 0xF701,
+        Key::LEFT => 0xF702,
+        Key::RIGHT => 0xF703,
+        Key::INSERT => 0xF727,
+        Key::DELETE => 0xF728,
+        Key::HOME => 0xF729,
+        Key::END => 0xF72B,
+        Key::PAGEUP => 0xF72C,
+        Key::PAGEDOWN => 0xF72D,
+        Key::KP_MULTIPLY => b'*' as u16,
+        Key::KP_ADD => b'+' as u16,
+        Key::KP_SUBTRACT => b'-' as u16,
+        Key::KP_PERIOD => b'.' as u16,
+        Key::KP_DIVIDE => b'/' as u16,
+        _ if (Key::F1.ord()..=Key::F35.ord()).contains(&key.ord()) => {
+            (0xF704 + key.ord() - Key::F1.ord()) as u16
+        }
+        _ if (Key::KP_0.ord()..=Key::KP_9.ord()).contains(&key.ord()) => {
+            (i32::from(b'0') + key.ord() - Key::KP_0.ord()) as u16
+        }
+        _ => {
+            let control = get_control_char_code(key);
+            if control != 0 {
+                return control;
+            }
+            let Ok(character) = u16::try_from(key.ord()) else {
+                return 0;
             };
-            host.send_key_event(Some(&key_event));
+            let shift = crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_SHIFT_DOWN);
+            if (u16::from(b'A')..=u16::from(b'Z')).contains(&character) && modifiers & shift == 0 {
+                character + u16::from(b'a' - b'A')
+            } else {
+                character
+            }
         }
     }
 }
@@ -649,6 +737,165 @@ pub fn ime_set_composition(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key_input(keycode: Key, unicode: u32, is_pressed: bool) -> KeyInput {
+        KeyInput {
+            keycode,
+            physical_keycode: keycode,
+            unicode,
+            modifiers: 0,
+            is_pressed,
+            is_echo: false,
+            focus_on_editable_field: false,
+        }
+    }
+
+    #[test]
+    fn macos_zero_unicode_releases_remain_keyup_in_cef() {
+        for (key, character) in [
+            (Key::A, b'a' as u16),
+            (Key::Z, b'z' as u16),
+            (Key::KEY_0, b'0' as u16),
+            (Key::KEY_9, b'9' as u16),
+            (Key::SPACE, b' ' as u16),
+            (Key::QUOTELEFT, b'`' as u16),
+            (Key::APOSTROPHE, b'\'' as u16),
+            (Key::SEMICOLON, b';' as u16),
+            (Key::KP_0, b'0' as u16),
+            (Key::KP_9, b'9' as u16),
+            (Key::KP_ADD, b'+' as u16),
+            (Key::UP, 0xF700),
+            (Key::DOWN, 0xF701),
+            (Key::LEFT, 0xF702),
+            (Key::RIGHT, 0xF703),
+            (Key::HOME, 0xF729),
+            (Key::END, 0xF72B),
+            (Key::PAGEUP, 0xF72C),
+            (Key::PAGEDOWN, 0xF72D),
+            (Key::F1, 0xF704),
+            (Key::F12, 0xF70F),
+        ] {
+            let events = key_events(key_input(key, 0, false), KeyboardPlatform::MacOS);
+            assert_eq!(
+                events[0].as_ref().map(|event| event.type_),
+                Some(KeyEventType::KEYUP),
+                "{key:?}"
+            );
+            // Both fields must identify a non-modifier NSEvent. Merely setting
+            // KEYUP with zero characters makes CEF emit another raw keydown.
+            assert_eq!(
+                events[0]
+                    .as_ref()
+                    .map(|event| (event.character, event.unmodified_character)),
+                Some((character, character)),
+                "{key:?}"
+            );
+            assert!(events[1].is_none());
+        }
+    }
+
+    #[test]
+    fn macos_function_and_navigation_presses_do_not_generate_text() {
+        for key in [Key::LEFT, Key::HOME, Key::PAGEUP, Key::F1, Key::F12] {
+            let events = key_events(key_input(key, 0, true), KeyboardPlatform::MacOS);
+            assert_eq!(
+                events[0].as_ref().map(|event| event.type_),
+                Some(KeyEventType::RAWKEYDOWN)
+            );
+            assert!(events[0].as_ref().is_some_and(|event| event.character != 0));
+            assert!(events[1].is_none());
+        }
+    }
+
+    #[test]
+    fn macos_modifier_events_keep_cocoa_flags_changed_semantics() {
+        for key in [Key::SHIFT, Key::CTRL, Key::ALT, Key::META, Key::CAPSLOCK] {
+            for is_pressed in [true, false] {
+                let events = key_events(key_input(key, 0, is_pressed), KeyboardPlatform::MacOS);
+                assert_eq!(
+                    events[0]
+                        .as_ref()
+                        .map(|event| (event.character, event.unmodified_character)),
+                    Some((0, 0))
+                );
+                assert!(events[1].is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn macos_char_events_keep_physical_identity_and_unicode() {
+        // A layout can put logical A at the physical Q position.
+        let mut input = key_input(Key::A, u32::from(b'a'), true);
+        input.physical_keycode = Key::Q;
+        let events = key_events(input, KeyboardPlatform::MacOS);
+        assert_eq!(
+            events[1].as_ref().map(|event| event.type_),
+            Some(KeyEventType::CHAR)
+        );
+        for event in events.into_iter().flatten() {
+            assert_eq!(event.native_key_code, 0x0C);
+            assert_eq!(event.character, u16::from(b'a'));
+        }
+        input.is_pressed = false;
+        input.unicode = 0;
+        let events = key_events(input, KeyboardPlatform::MacOS);
+        assert_eq!(
+            events[0].as_ref().map(|event| event.native_key_code),
+            Some(0x0C)
+        );
+
+        // Shifted punctuation has a different logical key but the same hardware key.
+        input = key_input(Key::EXCLAM, 0, false);
+        input.physical_keycode = Key::KEY_1;
+        input.modifiers =
+            crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_SHIFT_DOWN);
+        let events = key_events(input, KeyboardPlatform::MacOS);
+        assert_eq!(
+            events[0]
+                .as_ref()
+                .map(|event| (event.native_key_code, event.character)),
+            Some((0x12, u16::from(b'!')))
+        );
+    }
+
+    #[test]
+    fn macos_character_fallback_does_not_insert_text_or_replace_real_unicode() {
+        let mut input = key_input(Key::A, 0, true);
+        let events = key_events(input, KeyboardPlatform::MacOS);
+        assert!(events[1].is_none());
+        input.unicode = 'å' as u32;
+        let events = key_events(input, KeyboardPlatform::MacOS);
+        assert_eq!(
+            events[1].as_ref().map(|event| event.character),
+            Some('å' as u16)
+        );
+        input.focus_on_editable_field = true;
+        let events = key_events(input, KeyboardPlatform::MacOS);
+        assert!(events[1].is_none());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn navigation_keyup_is_forwarded_on_other_platforms() {
+        for key in [
+            Key::UP,
+            Key::DOWN,
+            Key::LEFT,
+            Key::RIGHT,
+            Key::HOME,
+            Key::END,
+            Key::PAGEUP,
+            Key::PAGEDOWN,
+        ] {
+            let events = key_events(key_input(key, 0, false), KeyboardPlatform::Other);
+            assert_eq!(
+                events[0].as_ref().map(|event| event.type_),
+                Some(KeyEventType::KEYUP)
+            );
+            assert!(events[1].is_none());
+        }
+    }
 
     #[test]
     fn ime_proxy_receives_text_but_not_browser_navigation_or_shortcuts() {

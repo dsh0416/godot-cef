@@ -6,6 +6,7 @@
 
 mod dialogs;
 mod display;
+mod keyboard;
 mod permissions;
 mod scenarios;
 
@@ -139,6 +140,7 @@ struct Runner {
     draw_frames: usize,
     dialogs: dialogs::DialogState,
     display: display::DisplayState,
+    keyboard: keyboard::KeyboardState,
 }
 
 impl Runner {
@@ -182,6 +184,7 @@ impl Runner {
             draw_frames: 0,
             dialogs: dialogs::DialogState::default(),
             display: display::DisplayState::default(),
+            keyboard: keyboard::KeyboardState::default(),
         };
         if let Err(error) = runner.setup(&env("GDCEF_ITEST_PROFILE")) {
             runner.fail(error);
@@ -211,6 +214,7 @@ impl Runner {
                     | "dialog_reentrant"
                     | "display_events"
                     | "browser_hidden"
+                    | "keyboard_release"
             )
         {
             return Err("Harness supplied an unknown class or case".into());
@@ -334,6 +338,8 @@ impl Runner {
             "display"
         } else if self.case == "js_ipc" {
             "js"
+        } else if self.case == "keyboard_release" {
+            "keyboard"
         } else if self.case == "lifecycle" {
             "lifecycle"
         } else {
@@ -379,7 +385,7 @@ impl Runner {
             let Some(mut root) = scene_tree().and_then(|tree| tree.get_root()) else {
                 return Err("SceneTree root disappeared".into());
             };
-            if self.case.starts_with("dialog_") {
+            if self.case.starts_with("dialog_") || self.case == "keyboard_release" {
                 self.attach_dialog_node(&node)?;
             } else if matches!(self.case.as_str(), "display_events" | "browser_hidden") {
                 self.attach_display_node(&node)?;
@@ -461,6 +467,8 @@ impl Runner {
             self.tick_display_events();
         } else if self.case == "browser_hidden" {
             self.tick_browser_hidden();
+        } else if self.case == "keyboard_release" {
+            self.tick_keyboard_release();
         } else {
             self.tick_lifecycle();
         }
