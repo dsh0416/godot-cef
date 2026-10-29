@@ -1,0 +1,52 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Godot CEF keyboard fixture</title>
+<style>
+  body { margin: 0; }
+  #surface, #editor { position: absolute; left: 16px; width: 300px; height: 40px; }
+  #surface { top: 16px; }
+  #editor { top: 80px; }
+</style>
+<div id="surface" tabindex="0">Keyboard target</div>
+<input id="editor" aria-label="Editable keyboard target">
+<script>
+  const params = new URL(location.href).searchParams;
+  const run = params.get('run');
+  const generation = Number(params.get('generation'));
+  const report = (event) => fetch(`/event?run=${encodeURIComponent(run)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({generation, ...event}), keepalive: true,
+  }).then((response) => {
+    if (!response.ok) throw new Error(`Fixture report failed: ${response.status}`);
+  });
+  const fail = (error) => report({type: 'fixture_error', message: String(error)});
+  let phase = -1;
+  let events = [];
+  for (const [index, id] of ['surface', 'editor'].entries()) {
+    document.getElementById(id).addEventListener('focus', () => {
+      phase = index;
+      events = [];
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        report({type: 'keyboard_focus', phase, target: document.activeElement.id}).catch(fail);
+      }));
+    });
+  }
+  for (const type of ['keydown', 'keyup']) {
+    document.addEventListener(type, (event) => {
+      events.push({
+        type, key: event.key, code: event.code, keyCode: event.keyCode,
+        repeat: event.repeat, trusted: event.isTrusted, target: event.target.id,
+      });
+      // Keep every test key on the same target, including navigation and Enter.
+      event.preventDefault();
+      if (type === 'keyup' && event.key === 'Enter') {
+        report({type: 'keyboard_result', phase, events: [...events]}).catch(fail);
+      }
+    });
+  }
+  window.addEventListener('load', () => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      report({type: 'keyboard_ready'}).catch(fail);
+    }));
+  });
+</script>

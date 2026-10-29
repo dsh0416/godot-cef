@@ -133,8 +133,8 @@ pub fn godot_key_to_native_keycode(key: Key) -> i32 {
 }
 
 /// Converts Godot key codes to macOS native key codes (HIToolbox virtual key codes)
-#[cfg(target_os = "macos")]
-pub fn godot_key_to_native_keycode(key: Key) -> i32 {
+#[cfg(any(target_os = "macos", test))]
+pub fn godot_key_to_macos_keycode(key: Key) -> i32 {
     // macOS virtual key codes from HIToolbox/Events.h
     // These are hardware key codes, not character codes
     match key {
@@ -445,10 +445,10 @@ mod tests {
 
         #[test]
         fn test_macos_native_keys() {
-            assert_eq!(godot_key_to_native_keycode(Key::A), kv::KVK_ANSI_A);
-            assert_eq!(godot_key_to_native_keycode(Key::ENTER), kv::KVK_RETURN);
-            assert_eq!(godot_key_to_native_keycode(Key::ESCAPE), kv::KVK_ESCAPE);
-            assert_eq!(godot_key_to_native_keycode(Key::SPACE), kv::KVK_SPACE);
+            assert_eq!(godot_key_to_macos_keycode(Key::A), kv::KVK_ANSI_A);
+            assert_eq!(godot_key_to_macos_keycode(Key::ENTER), kv::KVK_RETURN);
+            assert_eq!(godot_key_to_macos_keycode(Key::ESCAPE), kv::KVK_ESCAPE);
+            assert_eq!(godot_key_to_macos_keycode(Key::SPACE), kv::KVK_SPACE);
         }
     }
 

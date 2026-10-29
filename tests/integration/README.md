@@ -70,7 +70,7 @@ distributed addons.
 
 ## Cases and assertions
 
-Every case runs separately for `CefTexture` and `CefTexture2D`, giving 36 cases:
+Every case runs separately for `CefTexture` and `CefTexture2D`, giving 38 cases:
 
 | Case | Required behavior |
 | --- | --- |
@@ -92,6 +92,7 @@ Every case runs separately for `CefTexture` and `CefTexture2D`, giving 36 cases:
 | `dialog_reentrant` | A callback immediately invokes the same instance's public JS continuation method during request signal dispatch, and the Unicode response reaches JavaScript without a recursive binding failure. |
 | `display_events` | Real page loading reports bounded progress and completion; replacing `rel=icon` delivers an updated favicon URL list. Browser mouse motion produces the exact Unicode tooltip and link URL, then clears both when leaving the link. A trusted mouse click enters DOM fullscreen and `exitFullscreen()` exits it, with matching CEF signals. |
 | `browser_hidden` | An initially hidden browser loads and reports progress while its animation frames remain paused. Manual hide/show stops/resumes real CEF animation frames while timers and eval continue. `CefTexture` also checks the default automatic-visibility opt-out, opt-in Node hide/show, parent hide/show, removal from and reentry into the SceneTree without recreating the page, and explicit hiding while automatic control is disabled. |
+| `keyboard_release` | Real DOM events pair every keydown with a matching keyup for letters, digits, Space, all navigation keys, F1, Shift and Enter, both on an ordinary target and an editable input. Every synthetic Godot release has zero Unicode, and the page checks trusted events from the public input paths. |
 
 Permission cases use per-instance SIGNAL policy over project DENY_ALL and check
 pending, duplicate, stale-id, and exactly-once completion behavior. Only fake
@@ -126,6 +127,11 @@ interval: JavaScript timers must advance while `requestAnimationFrame` stays
 unchanged. A subsequent animation-frame report proves that showing the
 browser resumes rendering. These checks exercise CEF scheduling and DOM
 visibility; they do not inspect Godot texture pixels or GPU publication.
+
+The keyboard fixture is served from `xtask/src/integration/keyboard.html`.
+It records actual browser events rather than dispatching JavaScript keyboard
+events. This checks the Godot-to-CEF bridge with synthetic Godot input; physical
+macOS key delivery and native IME composition still require a macOS runtime test.
 
 Startup waits for a successful loopback HTTP health handshake before launching
 Godot, with a two-second deadline. Only connection refusal/timeouts are retried;

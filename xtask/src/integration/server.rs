@@ -368,6 +368,16 @@ fn handle_client(mut stream: TcpStream, state: &State, page: &[u8]) {
         return;
     };
     let (status, content_type, body) = match (request.method.as_str(), path) {
+        ("GET", "/keyboard") => {
+            let _ = response(
+                &mut stream,
+                200,
+                "text/html; charset=utf-8",
+                include_bytes!("keyboard.html"),
+                &state.stopping,
+            );
+            return;
+        }
         ("GET", "/display") => {
             let _ = response(
                 &mut stream,
