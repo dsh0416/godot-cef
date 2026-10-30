@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "cef_app"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "cef",
  "ciborium",
@@ -750,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "adblock",
  "ash",
@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef-benches"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "criterion",
  "software_render",
@@ -784,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef_helper"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "cef",
  "cef-dll-sys",
@@ -798,7 +798,7 @@ dependencies = [
 
 [[package]]
 name = "gdcef_itest"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "godot",
  "serde_json",
@@ -2081,7 +2081,7 @@ checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 
 [[package]]
 name = "software_render"
-version = "2.1.1"
+version = "2.1.2"
 
 [[package]]
 name = "spirv"
@@ -2950,7 +2950,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "clap",
  "form_urlencoded",
