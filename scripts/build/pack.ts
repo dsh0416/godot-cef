@@ -34,16 +34,18 @@ export async function pack(artifacts: string, output: string, addon = join(root,
   }
   if (!selected.length) throw new Error("No platform artifacts found");
   const manifest = manifestForVariant(await readFile(join(addon, "godot_cef.gdextension"), "utf8"), variant);
+  const license = await readFile(join(root, "LICENSE"));
   await rm(output, { recursive: true, force: true });
   await mkdir(join(output, "bin"), { recursive: true });
   await writeFile(join(output, "godot_cef.gdextension"), manifest);
+  await writeFile(join(output, "LICENSE"), license);
   if (await exists(join(addon, "icons"))) await copy(join(addon, "icons"), join(output, "icons"));
   for (const { platform, source } of selected) await copy(source, join(output, "bin", platform.target));
   console.error(`Packed ${selected.length} platform(s) into ${output}`);
 }
 
 export async function validate(addon: string, variant?: Variant): Promise<void> {
-  await requirePaths(addon, [], ["bin"]);
+  await requirePaths(addon, variant ? ["LICENSE"] : [], ["bin"]);
   const manifest = variant ? await readFile(join(addon, "godot_cef.gdextension"), "utf8") : "";
   let count = 0;
   for (const platform of platforms) {

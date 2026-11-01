@@ -42,9 +42,11 @@ relative framework symlinks. Linux strips staged CEF libraries without changing
 the cached runtime or Cargo's binaries.
 
 `pack` accepts partial artifact sets, matching the previous xtask behavior.
+Both variants copy the repository's MIT `LICENSE` into the addon's content folder
+alongside `godot_cef.gdextension`.
 Follow it with `validate --variant full|store` to require every target for a
-distribution and reject excluded targets. Store manifests omit Windows/Linux
-ARM64 libraries and their dependency dictionaries. Both variants keep macOS
+distribution and its `LICENSE` file, and reject excluded targets. Store manifests
+omit Windows/Linux ARM64 libraries and their dependency dictionaries. Both variants keep macOS
 universal binaries. The workflow creates the same `dist/addons/godot_cef` ZIP
 layout as before.
 
