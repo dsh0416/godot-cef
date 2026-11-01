@@ -1,0 +1,109 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Godot CEF editing fixture</title>
+<style>
+  body { margin: 0; }
+  #editor { position: absolute; left: 16px; top: 16px; width: 400px; height: 120px; }
+</style>
+<textarea id="editor" aria-label="Keyboard editing target"></textarea>
+<script>
+  const params = new URL(location.href).searchParams;
+  const run = params.get('run');
+  const generation = Number(params.get('generation'));
+  const report = (event) => fetch(`/event?run=${encodeURIComponent(run)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({generation, ...event}), keepalive: true,
+  }).then((response) => {
+    if (!response.ok) throw new Error(`Fixture report failed: ${response.status}`);
+  });
+  const fail = (error) => report({type: 'fixture_error', message: String(error)});
+  const editor = document.getElementById('editor');
+  const clipboardText = 'gdcef-clipboard:✓';
+  // The Rust driver accepts this case only with explicit clipboard-write opt-in.
+  const clipboardCase = params.get('case') === 'keyboard_clipboard';
+  const seeds = {
+    enter: 'alphaomega', keypad_enter: 'alphaomega', select_all: 'select me',
+    custom_select_all: 'custom editor', blocked_paste: 'blocked paste',
+    copy: clipboardText, paste: 'before:after',
+  };
+  const knownValues = new Set([...Object.values(seeds), 'alpha\nomega', `before:${clipboardText}after`]);
+  let phase = -1;
+  let action = '';
+  let events = [];
+  let clipboardEvents = [];
+  let customActions = 0;
+  window.prepareKeyboardEditing = (next, nextAction) => {
+    if (!Object.hasOwn(seeds, nextAction)
+        || (!clipboardCase && (nextAction === 'copy' || nextAction === 'paste'))) {
+      fail(`Editing action not allowed: ${nextAction}`);
+      return;
+    }
+    phase = next;
+    action = nextAction;
+    events = [];
+    clipboardEvents = [];
+    customActions = 0;
+    editor.value = seeds[action];
+    editor.focus();
+    const cursor = action === 'enter' || action === 'keypad_enter' ? 5 : action === 'paste' ? 7 : 0;
+    editor.setSelectionRange(cursor, action === 'copy' ? editor.value.length : cursor);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      report({type: 'editing_focus', phase, target: document.activeElement.id}).catch(fail);
+    }));
+  };
+  for (const type of ['copy', 'paste']) {
+    editor.addEventListener(type, (event) => {
+      clipboardEvents.push({type, trusted: event.isTrusted});
+      // Default editing tests never read or write clipboard payloads. Block an
+      // unexpected event even when testing a broken native shortcut fallback.
+      if (!clipboardCase || action !== type) {
+        event.preventDefault();
+      }
+    });
+  }
+  const completed = () => {
+    if (action === 'enter' || action === 'keypad_enter') return editor.value === 'alpha\nomega';
+    if (action === 'select_all') return editor.selectionStart === 0 && editor.selectionEnd === editor.value.length;
+    if (action === 'copy') return clipboardEvents.some((event) => event.type === 'copy');
+    if (action === 'paste') return editor.value === `before:${clipboardText}after`;
+    return customActions === 1;
+  };
+  for (const type of ['keydown', 'keyup']) {
+    editor.addEventListener(type, (event) => {
+      events.push({type, key: event.key, code: event.code, keyCode: event.keyCode,
+                   repeat: event.repeat, trusted: event.isTrusted,
+                   ctrl: event.ctrlKey, meta: event.metaKey});
+      // Simulate an editor's own shortcut dispatch. A direct Frame.select_all()
+      // or Frame.paste() before DOM handling must fail these phases.
+      if (type === 'keydown' && (event.ctrlKey || event.metaKey)
+          && ((action === 'custom_select_all' && event.code === 'KeyA')
+              || (action === 'blocked_paste' && event.code === 'KeyV'))) {
+        event.preventDefault();
+        customActions++;
+        if (action === 'custom_select_all') editor.setSelectionRange(2, 6);
+      }
+      if (type === 'keyup') {
+        const started = performance.now();
+        const finish = () => {
+          const elapsed = performance.now() - started;
+          if (elapsed < 100 || (!completed() && elapsed < 1000)) {
+            requestAnimationFrame(finish);
+            return;
+          }
+          // Never include unexpected text from a failed clipboard test in logs.
+          const value = knownValues.has(editor.value) ? editor.value : '[unexpected text redacted]';
+          report({type: 'editing_result', phase, value,
+                  start: editor.selectionStart, end: editor.selectionEnd,
+                  events: [...events], clipboardEvents: [...clipboardEvents],
+                  customActions}).catch(fail);
+        };
+        requestAnimationFrame(finish);
+      }
+    });
+  }
+  window.addEventListener('load', () => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      report({type: 'editing_ready'}).catch(fail);
+    }));
+  });
+</script>

@@ -128,9 +128,10 @@ jobs:
           # Keep the instrumented objects for llvm-cov, including libgdcef.so.
           # This job never supplies binaries to the release packaging workflow.
           mise run bundle --target "$target" --target-dir "$CARGO_TARGET_DIR"
+          # Only the fresh Xvfb server's disposable clipboard is overwritten.
           xvfb-run -a -s '-screen 0 1024x768x24' mise exec -- cargo xtask integration \
             --target "$target" --godot "$(mise which godot)" \
-            --output target/coverage/integration
+            --output target/coverage/integration --allow-clipboard-writes
 
           report_args=(--target "$target" --ignore-filename-regex '(gdcef_itest|benches)')
           mise exec -- cargo llvm-cov report "${report_args[@]}" \

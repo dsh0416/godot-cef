@@ -1402,6 +1402,8 @@ impl_build_new!(
 #[derive(Clone)]
 pub(crate) struct ClientHandlers {
     pub render_handler: cef::RenderHandler,
+    #[cfg(target_os = "macos")]
+    pub keyboard_handler: cef::KeyboardHandler,
     pub display_handler: cef::DisplayHandler,
     pub context_menu_handler: cef::ContextMenuHandler,
     pub dialog_handler: cef::DialogHandler,
@@ -1436,6 +1438,11 @@ wrap_client! {
     impl Client {
         fn render_handler(&self) -> Option<cef::RenderHandler> {
             Some(self.handlers.render_handler.clone())
+        }
+
+        #[cfg(target_os = "macos")]
+        fn keyboard_handler(&self) -> Option<cef::KeyboardHandler> {
+            Some(self.handlers.keyboard_handler.clone())
         }
 
         fn display_handler(&self) -> Option<cef::DisplayHandler> {
@@ -1517,6 +1524,8 @@ fn build_client_handlers(
 
     ClientHandlers {
         render_handler,
+        #[cfg(target_os = "macos")]
+        keyboard_handler: crate::keyboard_handler::MacKeyboardHandler::new(),
         display_handler: DisplayHandlerImpl::build(cursor_type, queues.event_queues.clone()),
         context_menu_handler: ContextMenuHandlerImpl::build(),
         dialog_handler: DialogHandlerImpl::build(queues.dialogs.clone()),

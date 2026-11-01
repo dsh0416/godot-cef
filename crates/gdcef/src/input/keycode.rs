@@ -123,13 +123,117 @@ pub fn godot_key_to_windows_keycode(key: Key) -> i32 {
     }
 }
 
-/// Converts Godot key codes to platform-specific native key codes
-/// - On Windows: same as Windows virtual key codes
-/// - On macOS: macOS virtual key codes (from HIToolbox/Events.h)
-/// - On Linux: X11 key codes
-#[cfg(target_os = "windows")]
-pub fn godot_key_to_native_keycode(key: Key) -> i32 {
-    godot_key_to_windows_keycode(key)
+/// Returns the Windows scan code consumed by CEF's NativeKeycodeToDomCode.
+/// Godot's physical keys are layout-independent QWERTY positions, so use their
+/// scan codes rather than mapping logical virtual keys through the active layout.
+/// CEF's Aura input path expects an E0-prefixed scan code here, not WM_KEY* LPARAM.
+/// See CEF 156's browser_platform_delegate_native_win.cc::TranslateUiKeyEvent.
+#[cfg(any(target_os = "windows", test))]
+pub fn godot_key_to_windows_native_keycode(physical_key: Key) -> i32 {
+    match physical_key {
+        Key::ESCAPE => 0x01,
+        Key::KEY_1 => 0x02,
+        Key::KEY_2 => 0x03,
+        Key::KEY_3 => 0x04,
+        Key::KEY_4 => 0x05,
+        Key::KEY_5 => 0x06,
+        Key::KEY_6 => 0x07,
+        Key::KEY_7 => 0x08,
+        Key::KEY_8 => 0x09,
+        Key::KEY_9 => 0x0A,
+        Key::KEY_0 => 0x0B,
+        Key::MINUS => 0x0C,
+        Key::EQUAL => 0x0D,
+        Key::BACKSPACE => 0x0E,
+        Key::TAB => 0x0F,
+        Key::Q => 0x10,
+        Key::W => 0x11,
+        Key::E => 0x12,
+        Key::R => 0x13,
+        Key::T => 0x14,
+        Key::Y => 0x15,
+        Key::U => 0x16,
+        Key::I => 0x17,
+        Key::O => 0x18,
+        Key::P => 0x19,
+        Key::BRACKETLEFT => 0x1A,
+        Key::BRACKETRIGHT => 0x1B,
+        Key::ENTER => 0x1C,
+        Key::CTRL => 0x1D,
+        Key::A => 0x1E,
+        Key::S => 0x1F,
+        Key::D => 0x20,
+        Key::F => 0x21,
+        Key::G => 0x22,
+        Key::H => 0x23,
+        Key::J => 0x24,
+        Key::K => 0x25,
+        Key::L => 0x26,
+        Key::SEMICOLON => 0x27,
+        Key::APOSTROPHE => 0x28,
+        Key::QUOTELEFT => 0x29,
+        Key::SHIFT => 0x2A,
+        Key::BACKSLASH => 0x2B,
+        Key::Z => 0x2C,
+        Key::X => 0x2D,
+        Key::C => 0x2E,
+        Key::V => 0x2F,
+        Key::B => 0x30,
+        Key::N => 0x31,
+        Key::M => 0x32,
+        Key::COMMA => 0x33,
+        Key::PERIOD => 0x34,
+        Key::SLASH => 0x35,
+        Key::KP_MULTIPLY => 0x37,
+        Key::ALT => 0x38,
+        Key::SPACE => 0x39,
+        Key::CAPSLOCK => 0x3A,
+        Key::F1 => 0x3B,
+        Key::F2 => 0x3C,
+        Key::F3 => 0x3D,
+        Key::F4 => 0x3E,
+        Key::F5 => 0x3F,
+        Key::F6 => 0x40,
+        Key::F7 => 0x41,
+        Key::F8 => 0x42,
+        Key::F9 => 0x43,
+        Key::F10 => 0x44,
+        Key::PAUSE => 0x45,
+        Key::NUMLOCK => 0xE045,
+        Key::SCROLLLOCK => 0x46,
+        Key::KP_7 => 0x47,
+        Key::KP_8 => 0x48,
+        Key::KP_9 => 0x49,
+        Key::KP_SUBTRACT => 0x4A,
+        Key::KP_4 => 0x4B,
+        Key::KP_5 => 0x4C,
+        Key::KP_6 => 0x4D,
+        Key::KP_ADD => 0x4E,
+        Key::KP_1 => 0x4F,
+        Key::KP_2 => 0x50,
+        Key::KP_3 => 0x51,
+        Key::KP_0 => 0x52,
+        Key::KP_PERIOD => 0x53,
+        Key::SECTION => 0x56,
+        Key::F11 => 0x57,
+        Key::F12 => 0x58,
+        Key::KP_ENTER => 0xE01C,
+        Key::KP_DIVIDE => 0xE035,
+        Key::PRINT => 0xE037,
+        Key::HOME => 0xE047,
+        Key::UP => 0xE048,
+        Key::PAGEUP => 0xE049,
+        Key::LEFT => 0xE04B,
+        Key::RIGHT => 0xE04D,
+        Key::END => 0xE04F,
+        Key::DOWN => 0xE050,
+        Key::PAGEDOWN => 0xE051,
+        Key::INSERT => 0xE052,
+        Key::DELETE => 0xE053,
+        Key::META => 0xE05B,
+        Key::MENU => 0xE05D,
+        _ => 0,
+    }
 }
 
 /// Converts Godot key codes to macOS native key codes (HIToolbox virtual key codes)
@@ -429,6 +533,32 @@ mod tests {
     fn test_keypad_keys_windows() {
         assert_eq!(godot_key_to_windows_keycode(Key::KP_0), vk::VK_NUMPAD0);
         assert_eq!(godot_key_to_windows_keycode(Key::KP_9), vk::VK_NUMPAD9);
+    }
+
+    #[test]
+    fn windows_native_codes_are_physical_scan_codes() {
+        // Chromium's native-to-DOM table consumes these exact values. Neither
+        // virtual keys nor an LPARAM containing the scan code match that table.
+        assert_eq!(godot_key_to_windows_native_keycode(Key::A), 0x1E);
+        assert_eq!(godot_key_to_windows_native_keycode(Key::Q), 0x10);
+        assert_eq!(godot_key_to_windows_native_keycode(Key::KEY_1), 0x02);
+        assert_eq!(godot_key_to_windows_native_keycode(Key::F1), 0x3B);
+        assert_eq!(godot_key_to_windows_native_keycode(Key::NONE), 0);
+    }
+
+    #[test]
+    fn windows_native_codes_distinguish_keypad_and_navigation() {
+        for (ordinary, extended, scan) in [
+            (Key::ENTER, Key::KP_ENTER, 0x1C),
+            (Key::SLASH, Key::KP_DIVIDE, 0x35),
+            (Key::KP_4, Key::LEFT, 0x4B),
+            (Key::KP_8, Key::UP, 0x48),
+            (Key::KP_7, Key::HOME, 0x47),
+            (Key::KP_PERIOD, Key::DELETE, 0x53),
+        ] {
+            assert_eq!(godot_key_to_windows_native_keycode(ordinary), scan);
+            assert_eq!(godot_key_to_windows_native_keycode(extended), scan | 0xE000);
+        }
     }
 
     #[cfg(target_os = "macos")]

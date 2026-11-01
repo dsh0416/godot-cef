@@ -121,4 +121,150 @@ impl Runner {
             };
         }
     }
+
+    pub(super) fn tick_keyboard_editing(&mut self) {
+        const EDITING_ACTIONS: &[(Key, &str)] = &[
+            (Key::ENTER, "enter"),
+            (Key::KP_ENTER, "keypad_enter"),
+            (Key::A, "select_all"),
+            (Key::A, "custom_select_all"),
+            (Key::V, "blocked_paste"),
+        ];
+        const CLIPBOARD_ACTIONS: &[(Key, &str)] = &[
+            (Key::C, "copy"),
+            (Key::V, "paste"),
+            (Key::V, "blocked_paste"),
+        ];
+        let actions = if self.case == "keyboard_clipboard" {
+            CLIPBOARD_ACTIONS
+        } else {
+            EDITING_ACTIONS
+        };
+        if !self
+            .web_events
+            .iter()
+            .any(|event| event["type"] == "editing_ready")
+        {
+            return;
+        }
+        let phase = self.keyboard.phase;
+        let (key, action) = actions[phase];
+        if !self.keyboard.focus_requested {
+            self.keyboard.focus_requested = true;
+            if phase == 0 {
+                self.dialog_click(Vector2::new(50.0, 34.0));
+            }
+            self.eval(&format!(
+                "window.prepareKeyboardEditing({phase}, '{action}')"
+            ));
+            return;
+        }
+        if self.keyboard_web("editing_focus").is_none() {
+            return;
+        }
+        let shortcut = key != Key::ENTER && key != Key::KP_ENTER;
+        if self.keyboard.sent < 2 {
+            let pressed = self.keyboard.sent == 0;
+            let mut event = InputEventKey::new_gd();
+            event.set_keycode(key);
+            event.set_physical_keycode(key);
+            event.set_pressed(pressed);
+            // Shortcuts and Enter are valid Godot key events without Unicode.
+            event.set_unicode(0);
+            event.set_ctrl_pressed(shortcut && !cfg!(target_os = "macos"));
+            event.set_meta_pressed(shortcut && cfg!(target_os = "macos"));
+            if self.class == "CefTexture2D" {
+                self.call(
+                    "forward_key_event",
+                    &[event.to_variant(), true.to_variant()],
+                );
+            } else if let Some(window) = &mut self.dialogs.window {
+                window.push_input_ex(&event).in_local_coords(true).done();
+            }
+            self.keyboard.sent += 1;
+            return;
+        }
+        let Some(result) = self.keyboard_web("editing_result") else {
+            return;
+        };
+        let expected_code = match key {
+            Key::ENTER => "Enter",
+            Key::KP_ENTER => "NumpadEnter",
+            Key::A => "KeyA",
+            Key::C => "KeyC",
+            Key::V => "KeyV",
+            _ => "",
+        };
+        self.check(
+            result["events"].as_array().is_some_and(|events| {
+                events.len() == 2
+                    && events[0]["type"] == "keydown"
+                    && events[1]["type"] == "keyup"
+                    && events.iter().all(|event| {
+                        event["trusted"] == true
+                            && event["repeat"] == false
+                            && event["code"] == expected_code
+                            && event["ctrl"] == (shortcut && !cfg!(target_os = "macos"))
+                            && event["meta"] == (shortcut && cfg!(target_os = "macos"))
+                    })
+            }),
+            format!("Editing action {action} must deliver one trusted keydown/keyup pair with platform shortcut modifiers: {}", result["events"]),
+        );
+        let expected_clipboard = match action {
+            "copy" => Some("copy"),
+            "paste" => Some("paste"),
+            _ => None,
+        };
+        self.check(
+            result["clipboardEvents"]
+                .as_array()
+                .is_some_and(|events| match expected_clipboard {
+                    Some(kind) => {
+                        events.len() == 1
+                            && events[0]["type"] == kind
+                            && events[0]["trusted"] == true
+                    }
+                    None => events.is_empty(),
+                }),
+            format!(
+                "Editing action {action} must dispatch exactly the expected clipboard event: {}",
+                result["clipboardEvents"]
+            ),
+        );
+        let correct_effect = match action {
+            "enter" | "keypad_enter" => {
+                result["value"] == "alpha\nomega" && result["start"] == 6 && result["end"] == 6
+            }
+            "select_all" => {
+                result["value"] == "select me" && result["start"] == 0 && result["end"] == 9
+            }
+            "copy" => result["value"] == "gdcef-clipboard:✓",
+            "paste" => result["value"] == "before:gdcef-clipboard:✓after",
+            "custom_select_all" => {
+                result["value"] == "custom editor"
+                    && result["start"] == 2
+                    && result["end"] == 6
+                    && result["customActions"] == 1
+            }
+            "blocked_paste" => result["value"] == "blocked paste" && result["customActions"] == 1,
+            _ => false,
+        };
+        self.check(
+            correct_effect,
+            format!(
+                "Editing action {action} must apply exactly its browser/editor action: {result}"
+            ),
+        );
+        // No clipboard snapshot is promised: the separate clipboard case runs
+        // only with explicit opt-in for a disposable clipboard. Stop on the
+        // first failed action so a failed copy cannot lead to a later paste.
+        if !self.failures.is_empty() || phase + 1 == actions.len() {
+            self.stop();
+        } else {
+            self.keyboard = KeyboardState {
+                phase: phase + 1,
+                ..Default::default()
+            };
+        }
+    }
 }

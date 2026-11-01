@@ -215,9 +215,16 @@ impl Runner {
                     | "display_events"
                     | "browser_hidden"
                     | "keyboard_release"
+                    | "keyboard_editing"
+                    | "keyboard_clipboard"
             )
         {
             return Err("Harness supplied an unknown class or case".into());
+        }
+        if self.case == "keyboard_clipboard"
+            && std::env::var("GDCEF_ITEST_ALLOW_CLIPBOARD_WRITES").as_deref() != Ok("1")
+        {
+            return Err("keyboard_clipboard requires explicit clipboard-write opt-in".into());
         }
         let port = self
             .origin
@@ -340,6 +347,11 @@ impl Runner {
             "js"
         } else if self.case == "keyboard_release" {
             "keyboard"
+        } else if matches!(
+            self.case.as_str(),
+            "keyboard_editing" | "keyboard_clipboard"
+        ) {
+            "keyboard-editing"
         } else if self.case == "lifecycle" {
             "lifecycle"
         } else {
@@ -385,7 +397,7 @@ impl Runner {
             let Some(mut root) = scene_tree().and_then(|tree| tree.get_root()) else {
                 return Err("SceneTree root disappeared".into());
             };
-            if self.case.starts_with("dialog_") || self.case == "keyboard_release" {
+            if self.case.starts_with("dialog_") || self.case.starts_with("keyboard_") {
                 self.attach_dialog_node(&node)?;
             } else if matches!(self.case.as_str(), "display_events" | "browser_hidden") {
                 self.attach_display_node(&node)?;
@@ -469,6 +481,11 @@ impl Runner {
             self.tick_browser_hidden();
         } else if self.case == "keyboard_release" {
             self.tick_keyboard_release();
+        } else if matches!(
+            self.case.as_str(),
+            "keyboard_editing" | "keyboard_clipboard"
+        ) {
+            self.tick_keyboard_editing();
         } else {
             self.tick_lifecycle();
         }

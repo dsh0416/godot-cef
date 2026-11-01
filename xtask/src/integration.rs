@@ -30,6 +30,9 @@ pub struct Options {
     /// Run one Class:case instead of the complete suite
     #[arg(long)]
     case: Option<String>,
+    /// Include clipboard-writing tests; use only with an isolated/disposable clipboard
+    #[arg(long)]
+    allow_clipboard_writes: bool,
     /// Parent directory for retained reports, logs, projects and CEF profiles
     #[arg(long)]
     output: Option<PathBuf>,
@@ -42,6 +45,7 @@ pub struct Options {
 }
 
 pub fn run(options: Options) -> Result<()> {
+    let cases = select_cases(options.case.as_deref(), options.allow_clipboard_writes)?;
     let native_target = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("windows", "x86_64") => "x86_64-pc-windows-msvc",
         ("windows", "aarch64") => "aarch64-pc-windows-msvc",
@@ -54,7 +58,6 @@ pub fn run(options: Options) -> Result<()> {
     {
         return Err(format!("cannot run {target} integration tests on {native_target}").into());
     }
-    let cases = select_cases(options.case.as_deref())?;
     let root = workspace_root();
     // Resolve caller-relative paths before spawning Cargo or Godot from the repo.
     let godot = std::path::absolute(options.godot)?;
@@ -89,6 +92,7 @@ pub fn run(options: Options) -> Result<()> {
         cef_software_rendering: true,
         fake_media_devices: true,
         fake_ui: false,
+        allow_clipboard_writes: options.allow_clipboard_writes,
         requested_cases: cases.len(),
         completed_cases: 0,
         fatal_error: None,
@@ -188,15 +192,20 @@ const SCENARIOS: &[&str] = &[
     "display_events",
     "browser_hidden",
     "keyboard_release",
+    "keyboard_editing",
+    "keyboard_clipboard",
 ];
 
-fn select_cases(filter: Option<&str>) -> Result<Vec<Case>> {
+fn select_cases(filter: Option<&str>, allow_clipboard_writes: bool) -> Result<Vec<Case>> {
     let cases: Vec<_> = ["CefTexture", "CefTexture2D"]
         .into_iter()
         .flat_map(|class| SCENARIOS.iter().map(move |&case| Case { class, case }))
         .collect();
     match filter {
-        None => Ok(cases),
+        None => Ok(cases
+            .into_iter()
+            .filter(|case| allow_clipboard_writes || case.case != "keyboard_clipboard")
+            .collect()),
         Some(filter) => {
             let selected: Vec<_> = cases
                 .iter()
@@ -213,6 +222,13 @@ fn select_cases(filter: Option<&str>) -> Result<Vec<Case>> {
                         .join(", ")
                 )
                 .into());
+            }
+            if !allow_clipboard_writes
+                && selected
+                    .iter()
+                    .any(|case| case.case == "keyboard_clipboard")
+            {
+                return Err("keyboard_clipboard overwrites the clipboard and requires --allow-clipboard-writes; use an isolated/disposable clipboard".into());
             }
             Ok(selected)
         }
@@ -241,6 +257,7 @@ struct Suite {
     cef_software_rendering: bool,
     fake_media_devices: bool,
     fake_ui: bool,
+    allow_clipboard_writes: bool,
     requested_cases: usize,
     completed_cases: usize,
     fatal_error: Option<String>,
@@ -341,7 +358,16 @@ impl Suite {
         command
             .current_dir(&self.project)
             .arg("--path")
-            .arg(&self.project);
+            .arg(&self.project)
+            // Override ambient values: only the explicit CLI flag grants access.
+            .env(
+                "GDCEF_ITEST_ALLOW_CLIPBOARD_WRITES",
+                if self.allow_clipboard_writes {
+                    "1"
+                } else {
+                    "0"
+                },
+            );
         command
     }
 
@@ -415,11 +441,50 @@ mod tests {
 
     #[test]
     fn selection_preserves_full_matrix_and_rejects_unknown_cases() -> Result<()> {
-        assert_eq!(select_cases(None)?.len(), SCENARIOS.len() * 2);
-        let selected = select_cases(Some("CefTexture2D:permission_navigation"))?;
+        assert_eq!(select_cases(None, true)?.len(), SCENARIOS.len() * 2);
+        let selected = select_cases(Some("CefTexture2D:permission_navigation"), false)?;
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].class, "CefTexture2D");
-        assert!(select_cases(Some("CefTexture2D:typo")).is_err());
+        assert!(select_cases(Some("CefTexture2D:typo"), false).is_err());
+        assert!(select_cases(Some("CefTexture2D:typo"), true).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn clipboard_cases_require_explicit_opt_in_even_with_a_case_filter() -> Result<()> {
+        let defaults = select_cases(None, false)?;
+        assert_eq!(defaults.len(), (SCENARIOS.len() - 1) * 2);
+        assert!(
+            defaults
+                .iter()
+                .all(|case| case.case != "keyboard_clipboard")
+        );
+        assert_eq!(
+            defaults
+                .iter()
+                .filter(|case| case.case == "keyboard_editing")
+                .count(),
+            2
+        );
+        let opted_in = select_cases(None, true)?;
+        assert_eq!(
+            opted_in
+                .iter()
+                .filter(|case| case.case == "keyboard_clipboard")
+                .count(),
+            2
+        );
+        for class in ["CefTexture", "CefTexture2D"] {
+            let filter = format!("{class}:keyboard_clipboard");
+            let error = select_cases(Some(&filter), false)
+                .err()
+                .ok_or("clipboard case ran without opt-in")?;
+            assert!(error.to_string().contains("--allow-clipboard-writes"));
+            let selected = select_cases(Some(&filter), true)?;
+            assert_eq!(selected.len(), 1);
+            assert_eq!(selected[0].class, class);
+            assert_eq!(selected[0].case, "keyboard_clipboard");
+        }
         Ok(())
     }
 }
