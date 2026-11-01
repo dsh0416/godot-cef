@@ -70,7 +70,8 @@ distributed addons.
 
 ## Cases and assertions
 
-Every case runs separately for `CefTexture` and `CefTexture2D`, giving 40 cases:
+Every case runs separately for `CefTexture` and `CefTexture2D`, giving 40 default
+cases and two additional clipboard cases with `--allow-clipboard-writes`:
 
 | Case | Required behavior |
 | --- | --- |
@@ -93,7 +94,8 @@ Every case runs separately for `CefTexture` and `CefTexture2D`, giving 40 cases:
 | `display_events` | Real page loading reports bounded progress and completion; replacing `rel=icon` delivers an updated favicon URL list. Browser mouse motion produces the exact Unicode tooltip and link URL, then clears both when leaving the link. A trusted mouse click enters DOM fullscreen and `exitFullscreen()` exits it, with matching CEF signals. |
 | `browser_hidden` | An initially hidden browser loads and reports progress while its animation frames remain paused. Manual hide/show stops/resumes real CEF animation frames while timers and eval continue. `CefTexture` also checks the default automatic-visibility opt-out, opt-in Node hide/show, parent hide/show, removal from and reentry into the SceneTree without recreating the page, and explicit hiding while automatic control is disabled. |
 | `keyboard_release` | Real DOM events pair every keydown with a matching keyup for letters, digits, Space, all navigation keys, F1, Shift and Enter, both on an ordinary target and an editable input. Every synthetic Godot release has zero Unicode, and the page checks trusted events from the public input paths. |
-| `keyboard_editing` | Enter and keypad Enter with zero Unicode insert exactly one newline in a textarea. Platform select-all, copy and paste shortcuts preserve trusted DOM key events and produce actual selection/clipboard effects. Editor `keydown` handlers can override select-all and prevent paste. |
+| `keyboard_editing` | Enter and keypad Enter with zero Unicode insert exactly one newline in a textarea. Platform select-all preserves trusted DOM key events and produces actual selection effects. Editor `keydown` handlers can override select-all and prevent paste. This case performs no clipboard writes. |
+| `keyboard_clipboard` | Opt-in only: platform copy/paste shortcuts preserve trusted DOM key events and copy/paste known fixture text. An editor's `keydown` handler can prevent paste. Requires a disposable clipboard and `--allow-clipboard-writes`. |
 
 Permission cases use per-instance SIGNAL policy over project DENY_ALL and check
 pending, duplicate, stale-id, and exactly-once completion behavior. Only fake
@@ -137,11 +139,25 @@ macOS key delivery and native IME composition still require a macOS runtime test
 The editing fixture is served from `xtask/src/integration/keyboard_editing.html`.
 It checks resulting textarea contents and selection, allowing the browser's
 normal default actions except when explicitly exercising an editor's shortcut
-handler. The clipboard round-trip temporarily copies known fixture text. Before
-writing, it captures existing string clipboard formats through a trusted paste
-event, retains them only inside the page, and restores them with a trusted copy
-event before asserting results. A clipboard containing files fails the case
-before any clipboard writes; an interrupted process cannot guarantee restoration.
+handler. Default runs exclude `keyboard_clipboard`, and explicitly selecting it
+without `--allow-clipboard-writes` fails before building or launching Godot.
+The test addon also requires `GDCEF_ITEST_ALLOW_CLIPBOARD_WRITES=1` for that case;
+the runner sets this from the CLI flag, overriding inherited environment values.
+
+The opt-in clipboard case **overwrites the clipboard and does not restore its
+previous contents**. Browser clipboard events cannot snapshot every native
+format, and a failed or timed-out browser cannot reliably restore them. Run it
+only with an isolated/disposable clipboard. Both Linux CI runs opt in inside
+their fresh Xvfb servers, so all 42 cases remain covered. For example:
+
+```sh
+xvfb-run -a cargo xtask integration --godot "$(mise which godot)" \
+  --case CefTexture:keyboard_clipboard --allow-clipboard-writes
+```
+
+The default editing case prevents unexpected clipboard events without reading
+their contents. Clipboard assertions report only known fixture values; unexpected
+pasted text remains redacted.
 The headless runner currently supports Linux and Windows, so macOS shortcut
 behavior still requires a native runtime test.
 
@@ -173,7 +189,8 @@ JUnit and logs as `integration-linux-x64`; it does not upload profiles/binaries.
 The test protocol is `GDCEF_ITEST=1` plus `GDCEF_ITEST_CLASS`, `GDCEF_ITEST_CASE`,
 `GDCEF_ITEST_ORIGIN`, `GDCEF_ITEST_RUN`, `GDCEF_ITEST_PROFILE`,
 `GDCEF_ITEST_DIALOG_FILE`, and `GDCEF_ITEST_DIALOG_FILE_SECOND`. The Rust runner
-supplies these; manual environment configuration is normally unnecessary.
+supplies these and `GDCEF_ITEST_ALLOW_CLIPBOARD_WRITES`; manual environment
+configuration is normally unnecessary.
 
 Run the harness's own failure-path checks with:
 

@@ -123,19 +123,23 @@ impl Runner {
     }
 
     pub(super) fn tick_keyboard_editing(&mut self) {
-        // 0 saves clipboard string formats without exposing them to the harness;
-        // 8 restores them. Defer assertions until restoration has completed.
-        const ACTIONS: &[Key] = &[
-            Key::V,
-            Key::ENTER,
-            Key::KP_ENTER,
-            Key::A,
-            Key::C,
-            Key::V,
-            Key::A,
-            Key::V,
-            Key::C,
+        const EDITING_ACTIONS: &[(Key, &str)] = &[
+            (Key::ENTER, "enter"),
+            (Key::KP_ENTER, "keypad_enter"),
+            (Key::A, "select_all"),
+            (Key::A, "custom_select_all"),
+            (Key::V, "blocked_paste"),
         ];
+        const CLIPBOARD_ACTIONS: &[(Key, &str)] = &[
+            (Key::C, "copy"),
+            (Key::V, "paste"),
+            (Key::V, "blocked_paste"),
+        ];
+        let actions = if self.case == "keyboard_clipboard" {
+            CLIPBOARD_ACTIONS
+        } else {
+            EDITING_ACTIONS
+        };
         if !self
             .web_events
             .iter()
@@ -144,20 +148,22 @@ impl Runner {
             return;
         }
         let phase = self.keyboard.phase;
+        let (key, action) = actions[phase];
         if !self.keyboard.focus_requested {
             self.keyboard.focus_requested = true;
             if phase == 0 {
                 self.dialog_click(Vector2::new(50.0, 34.0));
             }
-            self.eval(&format!("window.prepareKeyboardEditing({phase})"));
+            self.eval(&format!(
+                "window.prepareKeyboardEditing({phase}, '{action}')"
+            ));
             return;
         }
         if self.keyboard_web("editing_focus").is_none() {
             return;
         }
+        let shortcut = key != Key::ENTER && key != Key::KP_ENTER;
         if self.keyboard.sent < 2 {
-            let key = ACTIONS[phase];
-            let shortcut = key != Key::ENTER && key != Key::KP_ENTER;
             let pressed = self.keyboard.sent == 0;
             let mut event = InputEventKey::new_gd();
             event.set_keycode(key);
@@ -181,59 +187,38 @@ impl Runner {
         let Some(result) = self.keyboard_web("editing_result") else {
             return;
         };
-        if phase == 0 && result["clipboardRestorable"] != true {
-            self.fail("Clipboard must deliver a paste event and contain only restorable string formats; no clipboard writes performed");
-            return;
-        }
-        if phase + 1 < ACTIONS.len() {
-            self.keyboard = KeyboardState {
-                phase: phase + 1,
-                ..Default::default()
-            };
-            return;
-        }
-        for (phase, key) in ACTIONS.iter().enumerate() {
-            let Some(result) = self
-                .web_events
-                .iter()
-                .find(|event| event["type"] == "editing_result" && event["phase"] == phase)
-                .cloned()
-            else {
-                self.fail(format!("Editing phase {phase} did not report a result"));
-                return;
-            };
-            let shortcut = *key != Key::ENTER && *key != Key::KP_ENTER;
-            let expected_code = match *key {
-                Key::ENTER => "Enter",
-                Key::KP_ENTER => "NumpadEnter",
-                Key::A => "KeyA",
-                Key::C => "KeyC",
-                Key::V => "KeyV",
-                _ => "",
-            };
-            self.check(
-                result["events"].as_array().is_some_and(|events| {
-                    events.len() == 2
-                        && events[0]["type"] == "keydown"
-                        && events[1]["type"] == "keyup"
-                        && events.iter().all(|event| {
-                            event["trusted"] == true
-                                && event["repeat"] == false
-                                && event["code"] == expected_code
-                                && event["ctrl"] == (shortcut && !cfg!(target_os = "macos"))
-                                && event["meta"] == (shortcut && cfg!(target_os = "macos"))
-                        })
-                }),
-                format!("Editing phase {phase} must deliver one trusted keydown/keyup pair with platform shortcut modifiers: {}", result["events"]),
-            );
-            let clipboard_events = result["clipboardEvents"].as_array();
-            let expected_clipboard = match phase {
-                0 | 5 => Some("paste"),
-                4 | 8 => Some("copy"),
-                _ => None,
-            };
-            self.check(
-                clipboard_events.is_some_and(|events| match expected_clipboard {
+        let expected_code = match key {
+            Key::ENTER => "Enter",
+            Key::KP_ENTER => "NumpadEnter",
+            Key::A => "KeyA",
+            Key::C => "KeyC",
+            Key::V => "KeyV",
+            _ => "",
+        };
+        self.check(
+            result["events"].as_array().is_some_and(|events| {
+                events.len() == 2
+                    && events[0]["type"] == "keydown"
+                    && events[1]["type"] == "keyup"
+                    && events.iter().all(|event| {
+                        event["trusted"] == true
+                            && event["repeat"] == false
+                            && event["code"] == expected_code
+                            && event["ctrl"] == (shortcut && !cfg!(target_os = "macos"))
+                            && event["meta"] == (shortcut && cfg!(target_os = "macos"))
+                    })
+            }),
+            format!("Editing action {action} must deliver one trusted keydown/keyup pair with platform shortcut modifiers: {}", result["events"]),
+        );
+        let expected_clipboard = match action {
+            "copy" => Some("copy"),
+            "paste" => Some("paste"),
+            _ => None,
+        };
+        self.check(
+            result["clipboardEvents"]
+                .as_array()
+                .is_some_and(|events| match expected_clipboard {
                     Some(kind) => {
                         events.len() == 1
                             && events[0]["type"] == kind
@@ -241,36 +226,45 @@ impl Runner {
                     }
                     None => events.is_empty(),
                 }),
-                format!(
-                    "Editing phase {phase} must dispatch exactly the expected clipboard event: {}",
-                    result["clipboardEvents"]
-                ),
-            );
-            let correct_effect = match phase {
-                0 => result["value"] == "",
-                1 | 2 => {
-                    result["value"] == "alpha\nomega" && result["start"] == 6 && result["end"] == 6
-                }
-                3 => result["value"] == "select me" && result["start"] == 0 && result["end"] == 9,
-                4 => result["value"] == "gdcef-clipboard:✓",
-                5 => result["value"] == "before:gdcef-clipboard:✓after",
-                6 => {
-                    result["value"] == "custom editor"
-                        && result["start"] == 2
-                        && result["end"] == 6
-                        && result["customActions"] == 1
-                }
-                7 => result["value"] == "blocked paste" && result["customActions"] == 1,
-                8 => result["clipboardRestorable"] == true,
-                _ => false,
+            format!(
+                "Editing action {action} must dispatch exactly the expected clipboard event: {}",
+                result["clipboardEvents"]
+            ),
+        );
+        let correct_effect = match action {
+            "enter" | "keypad_enter" => {
+                result["value"] == "alpha\nomega" && result["start"] == 6 && result["end"] == 6
+            }
+            "select_all" => {
+                result["value"] == "select me" && result["start"] == 0 && result["end"] == 9
+            }
+            "copy" => result["value"] == "gdcef-clipboard:✓",
+            "paste" => result["value"] == "before:gdcef-clipboard:✓after",
+            "custom_select_all" => {
+                result["value"] == "custom editor"
+                    && result["start"] == 2
+                    && result["end"] == 6
+                    && result["customActions"] == 1
+            }
+            "blocked_paste" => result["value"] == "blocked paste" && result["customActions"] == 1,
+            _ => false,
+        };
+        self.check(
+            correct_effect,
+            format!(
+                "Editing action {action} must apply exactly its browser/editor action: {result}"
+            ),
+        );
+        // No clipboard snapshot is promised: the separate clipboard case runs
+        // only with explicit opt-in for a disposable clipboard. Stop on the
+        // first failed action so a failed copy cannot lead to a later paste.
+        if !self.failures.is_empty() || phase + 1 == actions.len() {
+            self.stop();
+        } else {
+            self.keyboard = KeyboardState {
+                phase: phase + 1,
+                ..Default::default()
             };
-            self.check(
-                correct_effect,
-                format!(
-                    "Editing phase {phase} must apply exactly its browser/editor action: {result}"
-                ),
-            );
         }
-        self.stop();
     }
 }

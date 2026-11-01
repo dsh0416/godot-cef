@@ -216,9 +216,15 @@ impl Runner {
                     | "browser_hidden"
                     | "keyboard_release"
                     | "keyboard_editing"
+                    | "keyboard_clipboard"
             )
         {
             return Err("Harness supplied an unknown class or case".into());
+        }
+        if self.case == "keyboard_clipboard"
+            && std::env::var("GDCEF_ITEST_ALLOW_CLIPBOARD_WRITES").as_deref() != Ok("1")
+        {
+            return Err("keyboard_clipboard requires explicit clipboard-write opt-in".into());
         }
         let port = self
             .origin
@@ -341,7 +347,10 @@ impl Runner {
             "js"
         } else if self.case == "keyboard_release" {
             "keyboard"
-        } else if self.case == "keyboard_editing" {
+        } else if matches!(
+            self.case.as_str(),
+            "keyboard_editing" | "keyboard_clipboard"
+        ) {
             "keyboard-editing"
         } else if self.case == "lifecycle" {
             "lifecycle"
@@ -472,7 +481,10 @@ impl Runner {
             self.tick_browser_hidden();
         } else if self.case == "keyboard_release" {
             self.tick_keyboard_release();
-        } else if self.case == "keyboard_editing" {
+        } else if matches!(
+            self.case.as_str(),
+            "keyboard_editing" | "keyboard_clipboard"
+        ) {
             self.tick_keyboard_editing();
         } else {
             self.tick_lifecycle();

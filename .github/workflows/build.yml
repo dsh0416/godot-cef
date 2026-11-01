@@ -178,8 +178,9 @@ jobs:
         run: |
           # Xvfb supplies CEF's X11 backend; Godot itself uses its dummy renderer.
           # Reuse the complete native bundle above and build only the test addon.
+          # The fresh Xvfb server provides a disposable clipboard for these cases.
           xvfb-run -a -s '-screen 0 1024x768x24' mise exec -- cargo xtask integration \
-            --release --target x86_64-unknown-linux-gnu \
+            --release --target x86_64-unknown-linux-gnu --allow-clipboard-writes \
             --godot "$(mise which godot)"
 
       - name: Upload integration evidence
