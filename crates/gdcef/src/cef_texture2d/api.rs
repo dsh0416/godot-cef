@@ -693,13 +693,7 @@ impl CefTexture2D {
         let Some(host) = self.runtime.app().host() else {
             return;
         };
-        let frame = self
-            .runtime
-            .app()
-            .state
-            .as_ref()
-            .and_then(|state| state.browser.main_frame());
-        input::handle_key_event(&host, frame.as_ref(), &event, focus_on_editable_field);
+        input::handle_key_event(&host, &event, focus_on_editable_field);
     }
 
     #[func]

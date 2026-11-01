@@ -1,11 +1,11 @@
 use cef::sys::cef_event_flags_t;
 use cef::{
-    ImplBrowserHost, ImplFrame, KeyEvent, KeyEventType, MouseButtonType, MouseEvent, PointerType,
-    TouchEvent, TouchEventType,
+    ImplBrowserHost, KeyEvent, KeyEventType, MouseButtonType, MouseEvent, PointerType, TouchEvent,
+    TouchEventType,
 };
 use godot::classes::{
-    InputEvent, InputEventKey, InputEventMagnifyGesture, InputEventMouseButton,
-    InputEventMouseMotion, InputEventPanGesture, InputEventScreenDrag, InputEventScreenTouch,
+    InputEventKey, InputEventMagnifyGesture, InputEventMouseButton, InputEventMouseMotion,
+    InputEventPanGesture, InputEventScreenDrag, InputEventScreenTouch,
 };
 use godot::global::{Key, MouseButton, MouseButtonMask};
 #[cfg(target_os = "macos")]
@@ -18,53 +18,6 @@ mod keycode;
 /// Standard wheel delta for one scroll "notch" (Windows convention used by CEF).
 const WHEEL_DELTA: f32 = 120.0;
 const MAGNIFY_ZOOM_SENSITIVITY: f64 = 0.5;
-
-/// Pre-defined shortcuts for editor commands.
-///
-/// Created on each use rather than cached in `thread_local!` because `Gd<T>`
-/// objects require the Godot engine to be alive during `Drop`. Thread-local
-/// destructors run after Godot has shut down, causing either a panic or leaked
-/// instances. Since keyboard shortcuts are matched at human typing speed (not
-/// per-frame), the allocation cost is negligible.
-struct EditorShortcuts {
-    select_all: Gd<InputEvent>,            // Ctrl/Cmd+A
-    copy: Gd<InputEvent>,                  // Ctrl/Cmd+C
-    cut: Gd<InputEvent>,                   // Ctrl/Cmd+X
-    paste_and_match_style: Gd<InputEvent>, // Ctrl/Cmd+Shift+V
-}
-
-impl EditorShortcuts {
-    fn new() -> Self {
-        Self {
-            select_all: create_shortcut(Key::A, true, false),
-            copy: create_shortcut(Key::C, true, false),
-            cut: create_shortcut(Key::X, true, false),
-            paste_and_match_style: create_shortcut(Key::V, true, true),
-        }
-    }
-}
-
-fn with_shortcuts<F, R>(f: F) -> R
-where
-    F: FnOnce(&EditorShortcuts) -> R,
-{
-    let shortcuts = EditorShortcuts::new();
-    f(&shortcuts)
-}
-fn create_shortcut(key: Key, with_command_or_ctrl: bool, with_shift: bool) -> Gd<InputEvent> {
-    let mut key_event = InputEventKey::new_gd();
-    key_event.set_keycode(key);
-
-    if with_command_or_ctrl {
-        key_event.set_command_or_control_autoremap(true);
-    }
-
-    if with_shift {
-        key_event.set_shift_pressed(true);
-    }
-
-    key_event.to_variant().to()
-}
 
 /// Macro to extract keyboard modifier flags from any event with modifier methods
 macro_rules! keyboard_modifiers {
@@ -387,16 +340,10 @@ pub(crate) fn should_deliver_key_to_ime_proxy(
 /// Handles keyboard events and sends them to CEF browser host.
 pub fn handle_key_event(
     host: &impl ImplBrowserHost,
-    frame: Option<&impl ImplFrame>,
     event: &Gd<InputEventKey>,
     focus_on_editable_field: bool,
 ) {
-    let mut modifiers = keyboard_modifiers!(event);
-
-    // Check if it's from the keypad
-    if is_keypad_key(event.get_physical_keycode()) {
-        modifiers |= crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_IS_KEY_PAD);
-    }
+    let modifiers = keyboard_modifiers!(event);
 
     let is_pressed = event.is_pressed();
     let is_echo = event.is_echo();
@@ -407,43 +354,18 @@ pub fn handle_key_event(
         return;
     }
 
-    // Handle shortcuts using pre-cached Shortcut objects
-    if is_pressed
-        && !is_echo
-        && let Some(frame) = frame
-    {
-        let input_event: Gd<InputEvent> = event.to_variant().to();
-        let handled = with_shortcuts(|shortcuts| {
-            if shortcuts.select_all.is_match(&input_event) {
-                frame.select_all();
-                return true;
-            } else if shortcuts.copy.is_match(&input_event) {
-                frame.copy();
-                return true;
-            } else if shortcuts.cut.is_match(&input_event) {
-                frame.cut();
-                return true;
-            } else if shortcuts.paste_and_match_style.is_match(&input_event) {
-                frame.paste_and_match_style();
-                return true;
-            }
-            // The normal paste shortcut is handled by the browser host itself,
-            // which is why we don't need to handle it here.
-            false
-        });
-        if handled {
-            return;
-        }
-    }
-
+    // Always let the page handle keydown first (e.g. Monaco's select-all).
+    // Native macOS editing commands are supplied by the CEF keyboard handler
+    // only after the renderer has declined the event.
     #[cfg(target_os = "macos")]
     let platform = KeyboardPlatform::MacOS;
-    #[cfg(not(target_os = "macos"))]
-    let platform = KeyboardPlatform::Other;
+    #[cfg(target_os = "windows")]
+    let platform = KeyboardPlatform::Windows;
+    #[cfg(target_os = "linux")]
+    let platform = KeyboardPlatform::Linux;
 
     let input = KeyInput {
         keycode,
-        #[cfg(any(target_os = "macos", test))]
         physical_keycode: event.get_physical_keycode(),
         unicode: event.get_unicode(),
         modifiers,
@@ -459,7 +381,6 @@ pub fn handle_key_event(
 #[derive(Clone, Copy)]
 struct KeyInput {
     keycode: Key,
-    #[cfg(any(target_os = "macos", test))]
     physical_keycode: Key,
     unicode: u32,
     modifiers: u32,
@@ -472,47 +393,72 @@ struct KeyInput {
 enum KeyboardPlatform {
     #[cfg(any(target_os = "macos", test))]
     MacOS,
-    #[cfg(not(target_os = "macos"))]
-    Other,
+    #[cfg(any(target_os = "windows", test))]
+    Windows,
+    #[cfg(target_os = "linux")]
+    Linux,
 }
 
 /// Builds the events forwarded to CEF without requiring a running Godot instance.
 fn key_events(input: KeyInput, platform: KeyboardPlatform) -> [Option<KeyEvent>; 2] {
     let windows_key_code = keycode::godot_key_to_windows_keycode(input.keycode);
+    let physical_keycode = if input.physical_keycode == Key::NONE {
+        input.keycode
+    } else {
+        input.physical_keycode
+    };
+    let mut modifiers = input.modifiers;
+    if is_keypad_key(physical_keycode) {
+        modifiers |= crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_IS_KEY_PAD);
+    }
+    if input.is_echo && input.is_pressed {
+        modifiers |= crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_IS_REPEAT);
+    }
+    let character = if is_browser_control_character(input.keycode) {
+        // Godot may supply zero or LF for Enter; CEF expects CR. These keys
+        // cannot be committed by the single-line IME proxy.
+        get_control_char_code(input.keycode)
+    } else if input.unicode != 0 {
+        input.unicode as u16
+    } else {
+        get_control_char_code(input.keycode)
+    };
     let (native_key_code, character) = match platform {
         #[cfg(any(target_os = "macos", test))]
         KeyboardPlatform::MacOS => {
             // Cocoa key codes describe physical positions, even when the layout
             // or Shift changes Godot's logical key code (e.g. 1 becomes !).
-            let physical_keycode = if input.physical_keycode == Key::NONE {
-                input.keycode
-            } else {
-                input.physical_keycode
-            };
             (
                 keycode::godot_key_to_macos_keycode(physical_keycode),
-                macos_key_character(input.keycode, input.unicode, input.modifiers),
+                macos_key_character(
+                    input.keycode,
+                    if is_browser_control_character(input.keycode) {
+                        u32::from(character)
+                    } else {
+                        input.unicode
+                    },
+                    modifiers,
+                ),
             )
         }
-        #[cfg(not(target_os = "macos"))]
-        KeyboardPlatform::Other => (
-            keycode::godot_key_to_native_keycode(input.keycode),
-            if input.unicode != 0 {
-                input.unicode as u16
-            } else {
-                get_control_char_code(input.keycode)
-            },
+        #[cfg(any(target_os = "windows", test))]
+        KeyboardPlatform::Windows => (
+            keycode::godot_key_to_windows_native_keycode(physical_keycode),
+            character,
+        ),
+        #[cfg(target_os = "linux")]
+        KeyboardPlatform::Linux => (
+            keycode::godot_key_to_native_keycode(physical_keycode),
+            character,
         ),
     };
     let key_event = KeyEvent {
         type_: if !input.is_pressed {
             KeyEventType::KEYUP
-        } else if input.is_echo {
-            KeyEventType::KEYDOWN
         } else {
             KeyEventType::RAWKEYDOWN
         },
-        modifiers: input.modifiers,
+        modifiers,
         windows_key_code,
         native_key_code,
         character,
@@ -521,11 +467,13 @@ fn key_events(input: KeyInput, platform: KeyboardPlatform) -> [Option<KeyEvent>;
         ..Default::default()
     };
 
-    // Reconstructed characters identify the key to Cocoa; they must not turn a
-    // zero-Unicode event into text input. The IME proxy owns editable text input.
+    // The proxy owns printable text in editable fields, but cannot produce
+    // Enter/Tab. Keep those in CEF's normal keydown/CHAR path so preventDefault
+    // and browser default editing both work. Shortcuts must never insert text.
     let char_event = if input.is_pressed
         && should_send_char_event(input.keycode, input.unicode)
-        && !input.focus_on_editable_field
+        && (!input.focus_on_editable_field || is_browser_control_character(input.keycode))
+        && !is_text_shortcut(modifiers)
     {
         let mut char_event = key_event.clone();
         char_event.type_ = KeyEventType::CHAR;
@@ -535,10 +483,13 @@ fn key_events(input: KeyInput, platform: KeyboardPlatform) -> [Option<KeyEvent>;
                 // CEF constructs an NSEvent for CHAR too, so keep its hardware
                 // key code instead of replacing it with the character value.
             }
-            #[cfg(not(target_os = "macos"))]
-            KeyboardPlatform::Other => {
+            #[cfg(any(target_os = "windows", test))]
+            KeyboardPlatform::Windows => {
                 char_event.windows_key_code = character as i32;
-                char_event.native_key_code = character as i32;
+            }
+            #[cfg(target_os = "linux")]
+            KeyboardPlatform::Linux => {
+                char_event.windows_key_code = character as i32;
             }
         }
         Some(char_event)
@@ -546,6 +497,18 @@ fn key_events(input: KeyInput, platform: KeyboardPlatform) -> [Option<KeyEvent>;
         None
     };
     [Some(key_event), char_event]
+}
+
+fn is_browser_control_character(key: Key) -> bool {
+    matches!(key, Key::ENTER | Key::KP_ENTER | Key::TAB)
+}
+
+fn is_text_shortcut(modifiers: u32) -> bool {
+    let command = crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_COMMAND_DOWN);
+    let control = crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_CONTROL_DOWN);
+    let alt = crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_ALT_DOWN);
+    // Ctrl+Alt may be AltGr, which must retain layout-generated characters.
+    modifiers & command != 0 || (modifiers & control != 0 && modifiers & alt == 0)
 }
 
 /// Supplies Cocoa's character identity when Godot omits Unicode, notably on keyup.
@@ -620,12 +583,7 @@ fn should_send_char_event(key: Key, unicode: u32) -> bool {
         return false;
     }
 
-    // Send CHAR for printable characters
-    if unicode != 0 {
-        return true;
-    }
-
-    false
+    unicode != 0 || is_browser_control_character(key)
 }
 
 /// Checks if a key is a navigation key (arrows, home, end, page up/down)
@@ -772,6 +730,8 @@ mod tests {
             (Key::END, 0xF72B),
             (Key::PAGEUP, 0xF72C),
             (Key::PAGEDOWN, 0xF72D),
+            (Key::INSERT, 0xF727),
+            (Key::DELETE, 0xF728),
             (Key::F1, 0xF704),
             (Key::F12, 0xF70F),
         ] {
@@ -875,7 +835,6 @@ mod tests {
         assert!(events[1].is_none());
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test]
     fn navigation_keyup_is_forwarded_on_other_platforms() {
         for key in [
@@ -888,13 +847,128 @@ mod tests {
             Key::PAGEUP,
             Key::PAGEDOWN,
         ] {
-            let events = key_events(key_input(key, 0, false), KeyboardPlatform::Other);
+            let events = key_events(key_input(key, 0, false), KeyboardPlatform::Windows);
             assert_eq!(
                 events[0].as_ref().map(|event| event.type_),
                 Some(KeyEventType::KEYUP)
             );
             assert!(events[1].is_none());
         }
+    }
+
+    fn keyboard_platforms() -> Vec<KeyboardPlatform> {
+        vec![
+            KeyboardPlatform::MacOS,
+            KeyboardPlatform::Windows,
+            #[cfg(target_os = "linux")]
+            KeyboardPlatform::Linux,
+        ]
+    }
+
+    #[test]
+    fn enter_generates_one_carriage_return_with_or_without_an_ime_proxy() {
+        for platform in keyboard_platforms() {
+            for key in [Key::ENTER, Key::KP_ENTER] {
+                for unicode in [0, 10, 13] {
+                    for editable in [false, true] {
+                        let mut input = key_input(key, unicode, true);
+                        input.focus_on_editable_field = editable;
+                        let events = key_events(input, platform);
+                        assert_eq!(
+                            events[0].as_ref().map(|e| e.type_),
+                            Some(KeyEventType::RAWKEYDOWN)
+                        );
+                        assert_eq!(
+                            events[1].as_ref().map(|e| (e.type_, e.character)),
+                            Some((KeyEventType::CHAR, 13))
+                        );
+                        input.is_pressed = false;
+                        input.unicode = 0;
+                        assert!(key_events(input, platform)[1].is_none());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shortcuts_deliver_keydown_and_keyup_without_character_insertion() {
+        for platform in keyboard_platforms() {
+            for modifier in [
+                cef_event_flags_t::EVENTFLAG_COMMAND_DOWN,
+                cef_event_flags_t::EVENTFLAG_CONTROL_DOWN,
+            ] {
+                for key in [Key::A, Key::C, Key::X, Key::V, Key::Z, Key::ENTER] {
+                    let mut input = key_input(key, key.ord() as u32, true);
+                    input.modifiers = crate::compat::event_flags_to_u32(modifier);
+                    for pressed in [true, false] {
+                        input.is_pressed = pressed;
+                        let events = key_events(input, platform);
+                        assert_eq!(
+                            events[0].as_ref().map(|e| e.type_),
+                            Some(if pressed {
+                                KeyEventType::RAWKEYDOWN
+                            } else {
+                                KeyEventType::KEYUP
+                            })
+                        );
+                        assert!(events[1].is_none());
+                    }
+                }
+            }
+            let mut altgr = key_input(Key::E, '€' as u32, true);
+            altgr.modifiers = crate::compat::event_flags_to_u32(
+                cef_event_flags_t::EVENTFLAG_CONTROL_DOWN | cef_event_flags_t::EVENTFLAG_ALT_DOWN,
+            );
+            assert_eq!(
+                key_events(altgr, platform)[1].as_ref().map(|e| e.character),
+                Some('€' as u16)
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_keys_remain_raw_keydown_with_one_separate_character() {
+        for platform in keyboard_platforms() {
+            let mut input = key_input(Key::A, u32::from(b'a'), true);
+            input.is_echo = true;
+            let events = key_events(input, platform);
+            let repeat = crate::compat::event_flags_to_u32(cef_event_flags_t::EVENTFLAG_IS_REPEAT);
+            assert_eq!(
+                events[0].as_ref().map(|e| (e.type_, e.modifiers & repeat)),
+                Some((KeyEventType::RAWKEYDOWN, repeat))
+            );
+            assert_eq!(
+                events[1].as_ref().map(|e| e.type_),
+                Some(KeyEventType::CHAR)
+            );
+        }
+    }
+
+    #[test]
+    fn windows_char_events_preserve_physical_scan_code() {
+        let mut input = key_input(Key::A, u32::from(b'a'), true);
+        input.physical_keycode = Key::Q;
+        let events = key_events(input, KeyboardPlatform::Windows);
+        assert_eq!(
+            events[0]
+                .as_ref()
+                .map(|e| (e.windows_key_code, e.native_key_code)),
+            Some((0x41, 0x0010))
+        );
+        assert_eq!(
+            events[1]
+                .as_ref()
+                .map(|e| (e.windows_key_code, e.native_key_code)),
+            Some((0x61, 0x0010))
+        );
+        input.physical_keycode = Key::NONE;
+        assert_eq!(
+            key_events(input, KeyboardPlatform::Windows)[0]
+                .as_ref()
+                .map(|e| e.native_key_code),
+            Some(0x001e)
+        );
     }
 
     #[test]

@@ -70,7 +70,7 @@ distributed addons.
 
 ## Cases and assertions
 
-Every case runs separately for `CefTexture` and `CefTexture2D`, giving 38 cases:
+Every case runs separately for `CefTexture` and `CefTexture2D`, giving 40 cases:
 
 | Case | Required behavior |
 | --- | --- |
@@ -93,6 +93,7 @@ Every case runs separately for `CefTexture` and `CefTexture2D`, giving 38 cases:
 | `display_events` | Real page loading reports bounded progress and completion; replacing `rel=icon` delivers an updated favicon URL list. Browser mouse motion produces the exact Unicode tooltip and link URL, then clears both when leaving the link. A trusted mouse click enters DOM fullscreen and `exitFullscreen()` exits it, with matching CEF signals. |
 | `browser_hidden` | An initially hidden browser loads and reports progress while its animation frames remain paused. Manual hide/show stops/resumes real CEF animation frames while timers and eval continue. `CefTexture` also checks the default automatic-visibility opt-out, opt-in Node hide/show, parent hide/show, removal from and reentry into the SceneTree without recreating the page, and explicit hiding while automatic control is disabled. |
 | `keyboard_release` | Real DOM events pair every keydown with a matching keyup for letters, digits, Space, all navigation keys, F1, Shift and Enter, both on an ordinary target and an editable input. Every synthetic Godot release has zero Unicode, and the page checks trusted events from the public input paths. |
+| `keyboard_editing` | Enter and keypad Enter with zero Unicode insert exactly one newline in a textarea. Platform select-all, copy and paste shortcuts preserve trusted DOM key events and produce actual selection/clipboard effects. Editor `keydown` handlers can override select-all and prevent paste. |
 
 Permission cases use per-instance SIGNAL policy over project DENY_ALL and check
 pending, duplicate, stale-id, and exactly-once completion behavior. Only fake
@@ -132,6 +133,17 @@ The keyboard fixture is served from `xtask/src/integration/keyboard.html`.
 It records actual browser events rather than dispatching JavaScript keyboard
 events. This checks the Godot-to-CEF bridge with synthetic Godot input; physical
 macOS key delivery and native IME composition still require a macOS runtime test.
+
+The editing fixture is served from `xtask/src/integration/keyboard_editing.html`.
+It checks resulting textarea contents and selection, allowing the browser's
+normal default actions except when explicitly exercising an editor's shortcut
+handler. The clipboard round-trip temporarily copies known fixture text. Before
+writing, it captures existing string clipboard formats through a trusted paste
+event, retains them only inside the page, and restores them with a trusted copy
+event before asserting results. A clipboard containing files fails the case
+before any clipboard writes; an interrupted process cannot guarantee restoration.
+The headless runner currently supports Linux and Windows, so macOS shortcut
+behavior still requires a native runtime test.
 
 Startup waits for a successful loopback HTTP health handshake before launching
 Godot, with a two-second deadline. Only connection refusal/timeouts are retried;

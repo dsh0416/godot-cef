@@ -215,6 +215,7 @@ impl Runner {
                     | "display_events"
                     | "browser_hidden"
                     | "keyboard_release"
+                    | "keyboard_editing"
             )
         {
             return Err("Harness supplied an unknown class or case".into());
@@ -340,6 +341,8 @@ impl Runner {
             "js"
         } else if self.case == "keyboard_release" {
             "keyboard"
+        } else if self.case == "keyboard_editing" {
+            "keyboard-editing"
         } else if self.case == "lifecycle" {
             "lifecycle"
         } else {
@@ -385,7 +388,7 @@ impl Runner {
             let Some(mut root) = scene_tree().and_then(|tree| tree.get_root()) else {
                 return Err("SceneTree root disappeared".into());
             };
-            if self.case.starts_with("dialog_") || self.case == "keyboard_release" {
+            if self.case.starts_with("dialog_") || self.case.starts_with("keyboard_") {
                 self.attach_dialog_node(&node)?;
             } else if matches!(self.case.as_str(), "display_events" | "browser_hidden") {
                 self.attach_display_node(&node)?;
@@ -469,6 +472,8 @@ impl Runner {
             self.tick_browser_hidden();
         } else if self.case == "keyboard_release" {
             self.tick_keyboard_release();
+        } else if self.case == "keyboard_editing" {
+            self.tick_keyboard_editing();
         } else {
             self.tick_lifecycle();
         }

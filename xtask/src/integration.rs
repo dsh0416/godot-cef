@@ -188,6 +188,7 @@ const SCENARIOS: &[&str] = &[
     "display_events",
     "browser_hidden",
     "keyboard_release",
+    "keyboard_editing",
 ];
 
 fn select_cases(filter: Option<&str>) -> Result<Vec<Case>> {

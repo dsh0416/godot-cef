@@ -16,6 +16,8 @@ mod error;
 mod godot_protocol;
 mod input;
 mod ipc_data;
+#[cfg(any(target_os = "macos", test))]
+mod keyboard_handler;
 mod permission_query;
 mod permissions;
 mod profile_dir;
