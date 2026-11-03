@@ -17,9 +17,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  preflight:
+    name: Preflight
+    # Tag pushes package only; manual runs still run all checks.
+    if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) }}
+    uses: ./.github/workflows/preflight.yml
+
   test:
     name: Test
-    # Tag pushes historically package only; manual runs still run all checks.
+    needs: [preflight]
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) }}
     permissions:
       contents: read
@@ -29,17 +35,21 @@ jobs:
 
   build:
     name: Build
+    needs: [preflight]
+    # Tag pushes intentionally skip preflight but still need full packages.
+    if: ${{ !cancelled() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || needs.preflight.result == 'success') }}
     uses: ./.github/workflows/build.yml
 
   docs:
     name: Documentation
+    needs: [preflight]
     if: ${{ !(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) }}
     uses: ./.github/workflows/deploy-docs.yml
 
   gate:
     name: Gate
     if: ${{ always() }}
-    needs: [test, build, docs]
+    needs: [preflight, test, build, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -47,9 +57,12 @@ jobs:
         shell: bash
         env:
           TAG_PUSH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+          PULL_REQUEST: ${{ github.event_name == 'pull_request' }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
           TEST_RESULT: ${{ needs.test.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
+          PREFLIGHT_JOBS: ${{ needs.preflight.outputs.required-results }}
           TEST_JOBS: ${{ needs.test.outputs.required-results }}
           BUILD_JOBS: ${{ needs.build.outputs.required-results }}
           DOCS_JOBS: ${{ needs.docs.outputs.required-results }}
@@ -57,18 +70,36 @@ jobs:
           # Explicit job results also reject an unexpected skip inside a reusable
           # workflow, even if its overall result is reported as success.
           require_jobs() {
-            if ! jq -e --argjson required "$3" \
-              '. as $jobs | all($required[]; $jobs[.].result == "success")' <<< "$2" >/dev/null; then
-              echo "::error::$1 contains failed, cancelled, skipped, or missing required work: $2"
+            if ! jq -e --argjson required "$3" --arg expected "${4:-success}" \
+              '. as $jobs | all($required[]; $jobs[.].result == $expected)' <<< "$2" >/dev/null; then
+              echo "::error::$1 contains work that did not have the expected result (${4:-success}): $2"
               exit 1
             fi
           }
 
+          if [[ "$TAG_PUSH" == "true" ]]; then
+            if [[ "$PREFLIGHT_RESULT" != "skipped" ]]; then
+              echo "::error::Tag pushes must skip preflight (Preflight: $PREFLIGHT_RESULT)."
+              exit 1
+            fi
+          else
+            if [[ "$PREFLIGHT_RESULT" != "success" ]]; then
+              echo "::error::Preflight checks did not succeed (Preflight: $PREFLIGHT_RESULT)."
+              exit 1
+            fi
+            require_jobs Preflight "$PREFLIGHT_JOBS" '["fmt","validate-versions"]'
+          fi
+
           if [[ "$BUILD_RESULT" != "success" ]]; then
-            echo "::error::Required builds/Full and Store packages did not succeed (Build: $BUILD_RESULT)."
+            echo "::error::Required build work did not succeed (Build: $BUILD_RESULT)."
             exit 1
           fi
-          require_jobs Build "$BUILD_JOBS" '["build-macos","build-windows","build-linux","pack"]'
+          if [[ "$PULL_REQUEST" == "true" ]]; then
+            require_jobs Build "$BUILD_JOBS" '["build-linux"]'
+            require_jobs Build "$BUILD_JOBS" '["build-macos","build-windows","pack"]' skipped
+          else
+            require_jobs Build "$BUILD_JOBS" '["build-macos","build-windows","build-linux","pack"]'
+          fi
 
           if [[ "$TAG_PUSH" == "true" ]]; then
             if [[ "$TEST_RESULT" != "skipped" || "$DOCS_RESULT" != "skipped" ]]; then
@@ -80,7 +111,7 @@ jobs:
               echo "::error::Required checks did not succeed (Test: $TEST_RESULT; Documentation: $DOCS_RESULT)."
               exit 1
             fi
-            require_jobs Test "$TEST_JOBS" '["test","clippy","fmt","validate-versions"]'
+            require_jobs Test "$TEST_JOBS" '["test","clippy"]'
             require_jobs Documentation "$DOCS_JOBS" '["build"]'
           fi
 

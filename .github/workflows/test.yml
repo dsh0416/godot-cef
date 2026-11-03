@@ -3,7 +3,7 @@ on:
   workflow_call:
     outputs:
       required-results:
-        description: Results of required jobs (test, clippy, fmt, validate-versions).
+        description: Results of required jobs (test, clippy).
         value: ${{ toJSON(jobs) }}
 
 permissions:
@@ -39,10 +39,6 @@ jobs:
             coverage_flag: windows
             coverage_name: windows-x64-unit
             coverage_artifact: coverage-windows-x64
-          - target: aarch64-pc-windows-msvc
-            os: windows-latest
-            can_run_tests: false
-            msvc_arch: amd64_arm64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             can_run_tests: true
@@ -53,9 +49,6 @@ jobs:
             coverage_flag: linux
             coverage_name: linux-unit-and-headless
             coverage_artifact: coverage-linux-x64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            can_run_tests: false
 
     runs-on: ${{ matrix.os }}
     name: Test (${{ matrix.target }})
@@ -204,16 +197,6 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-      - name: Check cross target (Linux/macOS)
-        shell: bash
-        if: ${{ !matrix.can_run_tests && runner.os != 'Windows' }}
-        env:
-          RUSTC_WRAPPER: sccache
-        run: |
-          export LD_LIBRARY_PATH="${CEF_PATH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          export DYLD_LIBRARY_PATH="${CEF_PATH}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-          mise exec -- cargo check --workspace --all-features --target "${{ matrix.target }}"
-      
       - name: Run tests (Windows)
         shell: pwsh
         if: matrix.can_run_tests && runner.os == 'Windows' && !matrix.coverage
@@ -222,15 +205,6 @@ jobs:
         run: |
           $env:PATH = "${{ env.CEF_PATH }};$env:PATH"
           mise exec -- cargo test --workspace --all-features --target "${{ matrix.target }}"
-
-      - name: Check cross target (Windows)
-        shell: pwsh
-        if: ${{ !matrix.can_run_tests && runner.os == 'Windows' }}
-        env:
-          RUSTC_WRAPPER: sccache
-        run: |
-          $env:PATH = "${{ env.CEF_PATH }};$env:PATH"
-          mise exec -- cargo check --workspace --all-features --target "${{ matrix.target }}"
 
   clippy:
     strategy:
@@ -277,40 +251,3 @@ jobs:
         env:
           RUSTC_WRAPPER: sccache
         run: mise exec -- cargo clippy --workspace --all-features --target ${{ matrix.target }} -- -D warnings
-
-  fmt:
-    runs-on: ubuntu-latest
-    name: Format
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Setup mise toolchain
-        uses: ./.github/actions/setup-toolchain
-        with:
-          tools: rust
-
-      - name: Install Rustfmt component
-        run: mise exec -- rustup component add rustfmt
-
-      - name: Check formatting
-        run: mise exec -- cargo fmt --all -- --check
-
-  validate-versions:
-    runs-on: ubuntu-latest
-    name: Validate Versions
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Setup build scripts
-        uses: ./.github/actions/setup-build-scripts
-
-      - name: Validate version pins
-        run: mise run validate-versions

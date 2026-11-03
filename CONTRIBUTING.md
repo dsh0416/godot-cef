@@ -269,21 +269,25 @@ cargo clippy --workspace --all-features -- -D warnings
 
 ### CI gates and caches
 
-`CI` is the only automatic entry workflow. It calls reusable Test, Build,
-and Documentation workflows and finishes with one stable **Gate** check that
+`CI` is the only automatic entry workflow. It calls reusable Preflight, Test,
+Build, and Documentation workflows and finishes with one stable **Gate** check that
 maintainers can require in branch protection. There are no workflow path
 filters, so every PR produces Gate. Gate runs with `always()` and checks both
 the reusable workflow results and their explicitly exported required job
 results. Failed, cancelled, or unexpectedly skipped required work cannot pass.
 
-On PRs, main pushes, and manual runs, Gate requires both five-target Test/Clippy
-matrices, formatting, version validation, macOS universal plus Windows/Linux x64
-and ARM64 packaging, Linux x64 Godot headless integration tests, packing/validating
-Full and Store addons, the docs build, and instrumented unit coverage from the
-macOS ARM64, Windows x64, and Linux x64 Test jobs (Linux also covers the Godot
-headless suite) uploaded to Codecov.
-On `v*` tag pushes, Test and Documentation are intentionally skipped;
-Gate still requires all platform builds and both packages. Tag pushes and manual
+On PRs, main pushes, and manual runs, formatting and version validation run
+before the expensive checks. Gate requires three native Test targets, five
+Clippy targets, the Linux x64 release build and Godot headless integration
+tests, the docs build, and instrumented unit coverage from the macOS ARM64,
+Windows x64, and Linux x64 Test jobs (Linux also covers the Godot headless
+suite) uploaded to Codecov. The ARM64 Windows/Linux targets are checked by
+Clippy instead of separate cross-target Test jobs.
+
+PRs do not build the macOS universal, Windows, or Linux ARM64 release bundles
+or pack the Full and Store addons; those checks run on main pushes and manual
+runs. On `v*` tag pushes, Preflight, Test, and Documentation are intentionally
+skipped; Gate still requires all platform builds and both packages. Tag pushes and manual
 tag runs create draft releases with both archives after Gate. Main pushes and
 manual runs deploy Pages after Gate. Publication/deployment are downstream and
 are not PR requirements. This workflow change does not configure branch
@@ -484,7 +488,7 @@ The Store packer derives its descriptor from the full source manifest by removin
 Windows/Linux ARM64 entries; do not install both descriptors in one Godot project.
 See [Distribution variants](docs/api/distribution-variants.md) for archive layout,
 architecture coverage, and manual ARM64 builds. CI builds all architectures and
-publishes both package artifacts; this PR does not itself publish a release.
+publishes both package artifacts on main, tags, and manual runs.
 
 ### Lifecycle Cleanup Checklist
 
