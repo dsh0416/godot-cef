@@ -1,0 +1,48 @@
+name: Preflight
+on:
+  workflow_call:
+    outputs:
+      required-results:
+        description: Results of required jobs (fmt, validate-versions).
+        value: ${{ toJSON(jobs) }}
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    name: Format
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup mise toolchain
+        uses: ./.github/actions/setup-toolchain
+        with:
+          tools: rust
+
+      - name: Install Rustfmt component
+        run: mise exec -- rustup component add rustfmt
+
+      - name: Check formatting
+        run: mise exec -- cargo fmt --all -- --check
+
+  validate-versions:
+    runs-on: ubuntu-latest
+    name: Validate Versions
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup build scripts
+        uses: ./.github/actions/setup-build-scripts
+
+      - name: Validate version pins
+        run: mise run validate-versions

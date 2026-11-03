@@ -17,6 +17,7 @@ env:
 
 jobs:
   build-macos:
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-latest
     name: macOS
 
@@ -86,6 +87,7 @@ jobs:
           retention-days: 30
 
   build-windows:
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: windows-latest
     name: Windows (${{ matrix.target }})
     strategy:
@@ -133,9 +135,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-          - target: aarch64-unknown-linux-gnu
+        # PRs still build the native release bundle and run integration tests.
+        # Full cross-platform packaging runs on main, tags, and manual runs.
+        target: ${{ fromJSON(github.event_name == 'pull_request' && '["x86_64-unknown-linux-gnu"]' || '["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu"]') }}
 
     steps:
       - name: Checkout repository
@@ -209,6 +211,7 @@ jobs:
           retention-days: 30
 
   pack:
+    if: ${{ github.event_name != 'pull_request' }}
     needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     name: Pack Addon
