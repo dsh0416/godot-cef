@@ -18,6 +18,7 @@ use crate::accelerated_osr::vulkan_common::{
 use crate::accelerated_osr::{NativeCaptureTarget, SnapshotFormat};
 
 const DRM_FORMAT_MOD_INVALID: u64 = 0x00ffffffffffffff;
+const DRM_FORMAT_MOD_LINEAR: u64 = 0x0;
 
 struct DmaBufImportParams {
     fds: Vec<RawFd>,
@@ -516,7 +517,8 @@ impl VulkanTextureImporter {
         }
 
         // Set up DRM format modifier info if we have a valid modifier
-        let use_drm_modifier = params.modifier != DRM_FORMAT_MOD_INVALID;
+        let use_drm_modifier =
+            params.modifier != DRM_FORMAT_MOD_INVALID && params.modifier != DRM_FORMAT_MOD_LINEAR;
 
         let mut drm_modifier_info = vk::ImageDrmFormatModifierExplicitCreateInfoEXT::default()
             .drm_format_modifier(params.modifier)
@@ -545,7 +547,7 @@ impl VulkanTextureImporter {
             .tiling(tiling)
             .usage(vk::ImageUsageFlags::TRANSFER_SRC)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .initial_layout(vk::ImageLayout::UNDEFINED);
+            .initial_layout(vk::ImageLayout::GENERAL);
 
         // Only add DRM modifier info if we're using DRM tiling
         if use_drm_modifier {
