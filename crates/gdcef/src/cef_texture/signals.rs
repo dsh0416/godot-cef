@@ -7,7 +7,7 @@ use godot::prelude::*;
 
 use std::collections::VecDeque;
 
-use crate::browser::{DebugIpcEvent, DragEvent, LoadingStateEvent};
+use crate::browser::{DebugIpcEvent, DragEvent, ImeEnableEvent, LoadingStateEvent};
 use crate::drag::DragDataInfo;
 
 macro_rules! emit_signal_variants {
@@ -247,6 +247,9 @@ impl CefTexture {
 
     fn emit_loading_state_signals(&mut self, events: &VecDeque<LoadingStateEvent>) {
         for event in events {
+            if matches!(event, LoadingStateEvent::Started { .. }) {
+                self.focus_state.clear_editable();
+            }
             // Main-frame navigation can replace Chromium's focused render
             // widget without changing Godot's focus owner. A cached `true`
             // would then suppress SetFocus and native select popups never open.
@@ -449,12 +452,25 @@ impl CefTexture {
         }
     }
 
-    fn process_ime_enable_events(&mut self, events: &VecDeque<bool>) {
-        // Take the last event (latest wins)
-        if let Some(&enable) = events.back() {
-            self.focus_state.editable = enable;
-            self.reconcile_browser_focus();
+    fn process_ime_enable_events(&mut self, events: &VecDeque<ImeEnableEvent>) {
+        if events.is_empty() {
+            return;
         }
+        let used_key_events = self.focus_state.requires_key_event_commit();
+        for event in events {
+            self.focus_state.update_editable(event);
+        }
+        if self.ime_active
+            && !used_key_events
+            && self.focus_state.requires_key_event_commit()
+            && let Some(host) = self.with_app(|app| app.host())
+        {
+            // Stop any root-widget composition before switching to the
+            // subframe commit fallback. Both frames may stay editable.
+            use cef::ImplBrowserHost;
+            host.ime_cancel_composition();
+        }
+        self.reconcile_browser_focus();
     }
 
     fn process_ime_composition_event(&mut self, range: crate::browser::ImeCompositionRange) {

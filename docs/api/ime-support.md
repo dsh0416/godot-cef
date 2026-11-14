@@ -30,9 +30,19 @@ Clicking another Godot control relinquishes browser focus; a delayed IME event
 cannot take it back. An unfinished composition is cancelled when browser focus
 is lost, the window loses focus, or the control is hidden or paused.
 
+Cross-site and sandboxed iframes can run in a separate renderer widget. With
+the bundled CEF 156 runtime, these frames receive committed text through
+character events because CEF's IME API targets the main widget. The system IME
+proxy remains active, but inline composition text and underlines are unavailable
+inside those frames. Frames sharing the main widget retain native composition.
+Focus changes between frames preserve the newly focused field's IME state even
+if the previous frame's blur notification arrives later.
+
 Pointer events follow Godot's normal GUI hit testing, `mouse_filter`, transforms,
 and capture. A press inside the browser continues to receive motion and release
-outside it. Keyboard events go only to the browser that owns focus. Incoming
+outside it. An inactive window can still receive hover, mouse-wheel and pan
+events delivered by Godot; clicks, touch and keyboard input require window focus.
+Keyboard events go only to the browser that owns focus. Incoming
 Godot events are not modified, so multiple browser controls can coexist with
 native controls. `CefTexture2D` consumers that forward events manually remain
 responsible for their own focus and pointer routing.

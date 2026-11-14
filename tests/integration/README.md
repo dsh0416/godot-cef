@@ -70,7 +70,8 @@ distributed addons.
 
 ## Cases and assertions
 
-Every case runs separately for `CefTexture` and `CefTexture2D`, giving 40 default
+Shared browser cases run separately for `CefTexture` and `CefTexture2D`. Window
+focus and native IME proxy cases run only for `CefTexture`, giving 42 default
 cases and two additional clipboard cases with `--allow-clipboard-writes`:
 
 | Case | Required behavior |
@@ -96,6 +97,9 @@ cases and two additional clipboard cases with `--allow-clipboard-writes`:
 | `keyboard_release` | Real DOM events pair every keydown with a matching keyup for letters, digits, Space, all navigation keys, F1, Shift and Enter, both on an ordinary target and an editable input. Every synthetic Godot release has zero Unicode, and the page checks trusted events from the public input paths. |
 | `keyboard_editing` | Enter and keypad Enter with zero Unicode insert exactly one newline in a textarea. Platform select-all preserves trusted DOM key events and produces actual selection effects. Editor `keydown` handlers can override select-all and prevent paste. This case performs no clipboard writes. |
 | `keyboard_clipboard` | Opt-in only: platform copy/paste shortcuts preserve trusted DOM key events and copy/paste known fixture text. An editor's `keydown` handler can prevent paste. Requires a disposable clipboard and `--allow-clipboard-writes`. |
+| `inactive_pointer` | `CefTexture` in an unfocusable embedded Window receives trusted mouse motion, vertical/horizontal wheel scrolling and pan gestures. Hover survives multiple Godot process frames; clicks, touches and keys remain blocked and the Window remains unfocused. |
+| `iframe_ime` | `CefTexture` inserts ordinary typed ASCII and committed CJK/supplementary Unicode exactly once in root, same-site, cross-site and sandboxed frames, including refocus and return to the root. Arrow and Backspace editing remain functional. Moving from an editable root into plain cross-site content releases the IME proxy. |
+| `iframe_scroll` | Explicit diagnostic only, excluded from the default suite: same-site and cross-site iframe scrollers should retain native wheel scrolling after repeated hide/show. Reproduces the upstream CEF 156 failure; see the [#286 investigation](iframe-scroll-investigation.md). A cancelled wheel event must leave the scroller unchanged. |
 
 Permission cases use per-instance SIGNAL policy over project DENY_ALL and check
 pending, duplicate, stale-id, and exactly-once completion behavior. Only fake
@@ -148,7 +152,7 @@ The opt-in clipboard case **overwrites the clipboard and does not restore its
 previous contents**. Browser clipboard events cannot snapshot every native
 format, and a failed or timed-out browser cannot reliably restore them. Run it
 only with an isolated/disposable clipboard. Both Linux CI runs opt in inside
-their fresh Xvfb servers, so all 42 cases remain covered. For example:
+their fresh Xvfb servers, so all 44 default and clipboard cases remain covered. For example:
 
 ```sh
 xvfb-run -a cargo xtask integration --godot "$(mise which godot)" \
@@ -160,6 +164,22 @@ their contents. Clipboard assertions report only known fixture values; unexpecte
 pasted text remains redacted.
 The headless runner currently supports Linux and Windows, so macOS shortcut
 behavior still requires a native runtime test.
+
+The iframe fixtures use `127.0.0.1` and `localhost` on the loopback fixture's
+port for different sites, retaining CEF's default site isolation. The IME case
+also embeds an `allow-scripts` sandbox with an opaque origin. Ordinary ASCII
+travels through Godot's key and hidden LineEdit handling; composed Unicode is
+delivered through the proxy's real `text_changed` signal. This validates CEF
+commit routing and DOM results, but does not simulate an OS candidate window
+or validate native composition presentation. The inactive-pointer case uses
+synthetic Godot input and logical Window focus, not native Windows messages.
+
+Run the upstream scrolling diagnostic explicitly with
+`--case CefTexture:iframe_scroll` or `--case CefTexture2D:iframe_scroll`.
+The current CEF 156 runtime fails at the first cross-site hide/show phase;
+these cases remain selectable for testing future CEF runtimes.
+The [runtime investigation](iframe-scroll-investigation.md) records matching
+native input paths and the CEF 156/158 comparison.
 
 Startup waits for a successful loopback HTTP health handshake before launching
 Godot, with a two-second deadline. Only connection refusal/timeouts are retried;

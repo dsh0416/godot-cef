@@ -1,0 +1,105 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Godot CEF iframe IME fixture</title>
+<style>
+  body { margin: 0; }
+  textarea { position: absolute; left: 16px; top: 16px; width: 400px; height: 60px; }
+  iframe { position: absolute; left: 0; top: 100px; width: 620px; height: 240px; border: 0; }
+</style>
+<textarea id="editor" aria-label="IME target"></textarea>
+<script>
+  const params = new URL(location.href).searchParams;
+  const run = params.get('run');
+  const generation = Number(params.get('generation'));
+  const child = params.get('child');
+  const editor = document.getElementById('editor');
+  let phase = -1, inputs = 0, trusted = true;
+  const send = event => {
+    if (child) {
+      parent.postMessage({fixture: 'iframe-ime', event: {generation, phase, ...event}}, '*');
+      return Promise.resolve();
+    }
+    return fetch(`/event?run=${encodeURIComponent(run)}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({generation, phase, ...event}), keepalive: true,
+    }).then(response => { if (!response.ok) throw new Error(`Report failed: ${response.status}`); });
+  };
+  const fail = error => send({type: 'fixture_error', message: String(error)});
+  const prepare = next => {
+    phase = next;
+    editor.blur();
+    editor.value = '';
+    inputs = 0;
+    trusted = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => send({type: 'ime_prepared'}).catch(fail)));
+  };
+  const snapshot = kind => {
+    const expected = {ascii: 'a', unicode: 'a雪😀', editing: 'a😀'}[kind];
+    const started = performance.now();
+    const finish = () => {
+      const elapsed = performance.now() - started;
+      if (elapsed < 100 || (editor.value !== expected && elapsed < 1000)) {
+        requestAnimationFrame(finish);
+        return;
+      }
+      send({type: `ime_${kind}`, value: editor.value, inputs, trusted,
+        focused: document.activeElement === editor}).catch(fail);
+    };
+    requestAnimationFrame(finish);
+  };
+  editor.addEventListener('input', event => { inputs++; trusted &&= event.isTrusted; });
+  editor.addEventListener('focus', () => send({type: 'ime_focus'}).catch(fail));
+  document.addEventListener('pointerdown', event => {
+    if (event.target === editor) return;
+    requestAnimationFrame(() => send({type: 'ime_noneditable',
+      editableActive: document.activeElement === editor,
+      activeTag: document.activeElement?.tagName, trusted: event.isTrusted}).catch(fail));
+  });
+  if (child) {
+    addEventListener('message', event => {
+      if (event.source !== parent || event.data?.fixture !== 'iframe-ime-command') return;
+      if (event.data.command === 'prepare') prepare(event.data.phase);
+      if (event.data.command === 'snapshot') snapshot(event.data.kind);
+    });
+    addEventListener('load', () => requestAnimationFrame(() => requestAnimationFrame(() => send({type: 'ime_child_ready', child}).catch(fail))));
+  } else {
+    const frames = new Map();
+    const ready = new Set();
+    let selected = 'root';
+    const command = (target, data) => frames.get(target).contentWindow.postMessage({fixture: 'iframe-ime-command', ...data}, '*');
+    addEventListener('message', event => {
+      if (event.data?.fixture !== 'iframe-ime'
+          || ![...frames.values()].some(frame => frame.contentWindow === event.source)) return;
+      if (event.data.event.type === 'ime_child_ready') {
+        ready.add(event.data.event.child);
+        if (ready.size === 3) send({type: 'ime_ready'}).catch(fail);
+      } else {
+        send(event.data.event).catch(fail);
+      }
+    });
+    for (const target of ['same', 'cross', 'sandbox']) {
+      const frame = document.createElement('iframe');
+      const url = new URL(location.href);
+      url.searchParams.set('child', target);
+      if (target === 'cross') url.hostname = 'localhost';
+      if (target === 'sandbox') frame.sandbox = 'allow-scripts';
+      frame.src = url.href;
+      // Keep every frame rendering until its load/animation-frame handshake.
+      frames.set(target, frame);
+      document.body.appendChild(frame);
+    }
+    window.prepareIme = (next, target) => {
+      selected = target;
+      phase = next;
+      editor.blur();
+      for (const [name, frame] of frames) frame.style.visibility = name === target ? 'visible' : 'hidden';
+      if (target === 'root') prepare(next);
+      else command(target, {command: 'prepare', phase: next});
+    };
+    window.imeSnapshot = (next, kind) => {
+      if (next !== phase) return;
+      if (selected === 'root') snapshot(kind);
+      else command(selected, {command: 'snapshot', kind});
+    };
+  }
+</script>

@@ -178,6 +178,11 @@ impl ITextureRect for CefTexture {
                 self.refresh_browser_drag();
                 if self.browser_input_available() {
                     self.reconcile_browser_focus();
+                } else if self.browser_pointer_available() {
+                    // Inactive windows still receive hover and scrolling. Focus
+                    // loss releases capture once; subsequent frames must retain
+                    // pointer state while keeping keyboard/IME focus suspended.
+                    self.suspend_browser_focus();
                 } else {
                     self.suspend_browser_input();
                 }
