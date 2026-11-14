@@ -638,8 +638,28 @@ fn is_keypad_key(key: Key) -> bool {
     )
 }
 
-/// Commits IME text to the CEF browser
-/// Call this when an IME composition is finalized
+/// CEF 156 sends OSR IME commands to the root widget, which cannot insert text
+/// into an out-of-process iframe. Key events are routed to the focused widget.
+/// Keep native composition for frames sharing the root widget; OOPIFs use CHAR
+/// events until CEF's focused-widget IME fix is available in the bundled runtime.
+pub fn commit_text_to_focused_frame(host: &impl ImplBrowserHost, text: &str) {
+    for event in committed_text_events(text) {
+        host.send_key_event(Some(&event));
+    }
+}
+
+fn committed_text_events(text: &str) -> impl Iterator<Item = KeyEvent> + '_ {
+    text.encode_utf16().map(|character| KeyEvent {
+        type_: KeyEventType::CHAR,
+        windows_key_code: i32::from(character),
+        character,
+        unmodified_character: character,
+        focus_on_editable_field: 1,
+        ..Default::default()
+    })
+}
+
+/// Commits finalized IME text to the CEF browser's root widget.
 pub fn ime_commit_text(host: &impl ImplBrowserHost, text: &str) {
     let cef_text: cef::CefString = text.into();
     let invalid_range = cef::Range {
@@ -695,6 +715,27 @@ pub fn ime_set_composition(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn iframe_commits_preserve_utf16_and_do_not_synthesize_key_presses() {
+        let text = "a中é𝄞🙂";
+        let events: Vec<_> = committed_text_events(text).collect();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.character)
+                .collect::<Vec<_>>(),
+            text.encode_utf16().collect::<Vec<_>>()
+        );
+        assert!(events.iter().all(|event| {
+            event.type_ == KeyEventType::CHAR
+                && event.windows_key_code == i32::from(event.character)
+                && event.unmodified_character == event.character
+                && event.modifiers == 0
+                && event.focus_on_editable_field == 1
+        }));
+        assert_eq!(committed_text_events("").count(), 0);
+    }
 
     fn key_input(keycode: Key, unicode: u32, is_pressed: bool) -> KeyInput {
         KeyInput {
