@@ -182,8 +182,11 @@ jobs:
           name: ${{ matrix.coverage_name }}
           fail_ci_if_error: true
 
+      # Retention-only evidence. Codecov above is the required coverage upload;
+      # GitHub artifact API outages must not fail Test/Gate after tests pass.
       - name: Upload coverage and integration evidence
         if: always() && matrix.coverage
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.coverage_artifact }}
