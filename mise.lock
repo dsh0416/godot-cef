@@ -56,9 +56,9 @@ url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/5
 provenance = "github-attestations"
 
 [[tools."cargo:export-cef-dir"]]
-version = "156.4.0"
+version = "156.5.0"
 backend = "cargo:export-cef-dir"
-specifiers = ["156.4.0"]
+specifiers = ["156.5.0"]
 
 [[tools.godot]]
 version = "4.6-stable"
