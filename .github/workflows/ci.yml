@@ -154,7 +154,7 @@ jobs:
             godot_cef-store-${{ github.ref_name }}.zip
 
   deploy-docs:
-    if: ${{ !cancelled() && needs.gate.result == 'success' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+    if: ${{ !cancelled() && needs.gate.result == 'success' && github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') }}
     name: Deploy documentation
     environment:
       name: github-pages

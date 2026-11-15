@@ -62,6 +62,7 @@ impl FixtureServer {
         };
         // Verify a real loopback HTTP handshake before launching the browser.
         wait_until_reachable(address)?;
+        println!("Loopback fixture listening at {}", server.origin);
         Ok(server)
     }
 
@@ -71,6 +72,17 @@ impl FixtureServer {
 
     pub(super) fn register(&self, id: &str) {
         lock(&self.state.runs).insert(id.to_owned(), Vec::new());
+    }
+
+    pub(super) fn check_health(&self) -> io::Result<()> {
+        let address = self
+            .origin
+            .trim_start_matches("http://")
+            .parse()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        // One handshake, with no retries, isolates fixture availability from
+        // the browser/Godot HTTP client's later assertion results.
+        health_check(address, Duration::from_secs(2))
     }
 
     pub(super) fn events(&self, id: &str) -> Vec<Value> {
@@ -103,8 +115,13 @@ fn serve(listener: TcpListener, state: Arc<State>, page: Arc<Vec<u8>>) {
             }
         }
         match listener.accept() {
-            Ok((stream, _)) => {
+            Ok((stream, peer)) => {
                 if state.stopping.load(Ordering::Acquire) || workers.len() >= CLIENT_LIMIT {
+                    eprintln!(
+                        "Loopback fixture refused {peer}: {} active clients, stopping={}",
+                        workers.len(),
+                        state.stopping.load(Ordering::Acquire)
+                    );
                     let _ = stream.shutdown(Shutdown::Both);
                     continue;
                 }
@@ -299,7 +316,12 @@ fn response(
     );
     let deadline = Instant::now() + WRITE_TIMEOUT;
     for bytes in [headers.as_bytes(), body] {
-        timed_write(stream, bytes, deadline, Some(stopping))?;
+        timed_write(stream, bytes, deadline, Some(stopping)).inspect_err(|error| {
+            eprintln!(
+                "Loopback fixture response {status} to {:?} failed: {error}",
+                stream.peer_addr()
+            );
+        })?;
     }
     Ok(())
 }
@@ -337,6 +359,10 @@ fn handle_client(mut stream: TcpStream, state: &State, page: &[u8]) {
     let request = match read_request(&mut stream, &state.stopping) {
         Ok(request) => request,
         Err((status, message)) => {
+            eprintln!(
+                "Loopback fixture request from {:?} failed with {status}: {message}",
+                stream.peer_addr()
+            );
             let _ = response(
                 &mut stream,
                 status,
@@ -724,6 +750,21 @@ mod tests {
                 )),
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn idle_preconnect_does_not_delay_a_complete_request() -> Result<(), Box<dyn Error>> {
+        let server = FixtureServer::start(Vec::new())?;
+        let address: SocketAddr = server.origin().trim_start_matches("http://").parse()?;
+        // Chromium can open speculative sockets without sending HTTP headers.
+        let _idle = TcpStream::connect_timeout(&address, Duration::from_secs(1))?;
+        let started = Instant::now();
+        server.check_health()?;
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "An idle connection must not consume the next request's deadline"
+        );
         Ok(())
     }
 
