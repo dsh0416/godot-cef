@@ -81,7 +81,11 @@ impl CefTexture {
             && self.browser_focus_owner() == FocusOwner::Proxy
             && let Some(host) = self.with_app(|app| app.host())
         {
-            input::ime_commit_text(&host, &new_text.to_string());
+            if self.focus_state.requires_key_event_commit() {
+                input::commit_text_to_focused_frame(&host, &new_text.to_string());
+            } else {
+                input::ime_commit_text(&host, &new_text.to_string());
+            }
         }
 
         if let Some(proxy) = self.ime_proxy.as_mut() {
@@ -131,16 +135,20 @@ impl CefTexture {
         FocusOwner::Outside
     }
 
-    pub(super) fn browser_input_available(&self) -> bool {
+    pub(super) fn browser_pointer_available(&self) -> bool {
         self.base().is_inside_tree()
             && self.base().is_visible_in_tree()
             && self.base().can_process()
             && self.base().is_processing()
+            && self.with_app(|app| app.state.is_some())
+    }
+
+    pub(super) fn browser_input_available(&self) -> bool {
+        self.browser_pointer_available()
             && self
                 .base()
                 .get_window()
                 .is_some_and(|window| window.has_focus())
-            && self.with_app(|app| app.state.is_some())
     }
 
     pub(super) fn reconcile_browser_focus(&mut self) {
@@ -193,7 +201,12 @@ impl CefTexture {
     }
 
     pub(super) fn handle_os_ime_update(&mut self) {
+        // CEF 156 targets the root widget for composition. OOPIFs retain
+        // the OS candidate UI, then insert only the committed text via CHAR.
+        // Inline composition can return when the bundled CEF routes IME to
+        // the focused widget (upstream a145f2b8c798).
         if !self.ime_active
+            || self.focus_state.requires_key_event_commit()
             || !self.browser_input_available()
             || self.browser_focus_owner() != FocusOwner::Proxy
         {

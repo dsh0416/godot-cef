@@ -360,6 +360,15 @@ mod ipc_debug_tests {
         }
     }
 }
+/// Renderer editability notification with the identity of its sending frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImeEnableEvent {
+    pub enabled: bool,
+    pub requires_key_event_commit: bool,
+    pub focused_node: bool,
+    pub frame_id: String,
+}
+
 /// Consolidated event queues for browser-to-Godot communication.
 ///
 /// All UI-thread callbacks write to this single structure, which is then
@@ -385,7 +394,7 @@ pub struct EventQueues {
     /// Loading state events.
     pub loading_states: VecDeque<LoadingStateEvent>,
     /// IME enable/disable requests.
-    pub ime_enables: VecDeque<bool>,
+    pub ime_enables: VecDeque<ImeEnableEvent>,
     /// IME composition range (latest value wins).
     pub ime_composition_range: Option<ImeCompositionRange>,
     /// Console messages.

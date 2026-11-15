@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Godot CEF inactive pointer fixture</title>
+<style>
+  body { margin: 0; }
+  #surface { position: fixed; inset: 0; overflow: auto; }
+  #content { width: 6000px; height: 6000px; }
+</style>
+<div id="surface" tabindex="0"><div id="content"></div></div>
+<script>
+  const params = new URL(location.href).searchParams;
+  const run = params.get('run');
+  const generation = Number(params.get('generation'));
+  const report = event => fetch(`/event?run=${encodeURIComponent(run)}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({generation, phase: 0, ...event}), keepalive: true,
+  }).then(response => { if (!response.ok) throw new Error(`Report failed: ${response.status}`); });
+  const fail = error => report({type: 'fixture_error', message: String(error)});
+  const surface = document.getElementById('surface');
+  let moves = 0, wheels = 0, clicks = 0, keys = 0, touches = 0, trusted = true;
+  for (const type of ['mousemove', 'wheel', 'click', 'keydown', 'touchstart']) {
+    surface.addEventListener(type, event => {
+      trusted &&= event.isTrusted;
+      if (type === 'mousemove') moves++;
+      if (type === 'wheel') wheels++;
+      if (type === 'click') clicks++;
+      if (type === 'keydown') keys++;
+      if (type === 'touchstart') touches++;
+    });
+  }
+  window.pointerSnapshot = kind => {
+    setTimeout(() => report({type: `pointer_${kind}`, moves, wheels, clicks, keys, touches,
+      trusted, hover: surface.matches(':hover'), scrollTop: surface.scrollTop,
+      scrollLeft: surface.scrollLeft}).catch(fail), 300);
+  };
+  window.addEventListener('load', () => {
+    // Start away from either horizontal edge: this case checks inactive-window
+    // delivery, independently of the existing platform wheel-direction mapping.
+    surface.scrollLeft = 500;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      surface.focus();
+      report({type: 'pointer_ready'}).catch(fail);
+    }));
+  });
+</script>

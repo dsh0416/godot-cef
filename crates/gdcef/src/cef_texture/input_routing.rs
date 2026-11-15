@@ -46,7 +46,19 @@ impl CefTexture {
     }
 
     pub(super) fn handle_gui_input_event(&mut self, event: Gd<InputEvent>) {
-        if !self.browser_input_available() {
+        if !self.browser_pointer_available() {
+            return;
+        }
+        let focused = self.browser_input_available();
+        // Godot may deliver hover/scroll to an inactive OS window. Only these
+        // passive pointer events are allowed without keyboard/activation focus.
+        let passive = event.is_class("InputEventMouseMotion")
+            || event.is_class("InputEventPanGesture")
+            || event
+                .clone()
+                .try_cast::<InputEventMouseButton>()
+                .is_ok_and(|button| is_wheel_button(button.get_button_index()));
+        if !focused && !passive {
             return;
         }
         let pixel_scale = self.get_pixel_scale_factor();
@@ -63,10 +75,20 @@ impl CefTexture {
                 MouseButton::MIDDLE => 4,
                 _ => 0,
             };
-            let leave = self.pointer_state.button(mask, button.is_pressed());
+            let leave = if is_wheel_button(button.get_button_index()) {
+                // Scrolling never changes capture. Inactive/embedded windows
+                // can deliver GUI input without a fresh mouse-enter notice;
+                // treating a wheel as a zero-button release would clear hover.
+                self.pointer_state.motion();
+                false
+            } else {
+                self.pointer_state.button(mask, button.is_pressed())
+            };
             // Godot focuses the control before delivering a click. Apply CEF
             // focus before forwarding it without publishing an internal blur.
-            self.reconcile_browser_focus();
+            if focused {
+                self.reconcile_browser_focus();
+            }
             self.texture2d_helper.bind().forward_mouse_button_event(
                 button,
                 pixel_scale,
@@ -145,6 +167,16 @@ impl CefTexture {
         }
         self.cancel_browser_drag();
     }
+}
+
+fn is_wheel_button(button: MouseButton) -> bool {
+    matches!(
+        button,
+        MouseButton::WHEEL_UP
+            | MouseButton::WHEEL_DOWN
+            | MouseButton::WHEEL_LEFT
+            | MouseButton::WHEEL_RIGHT
+    )
 }
 
 #[cfg(test)]

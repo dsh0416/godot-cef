@@ -1,0 +1,100 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Godot CEF iframe wheel fixture</title>
+<style>
+  html, body { margin: 0; overflow: hidden; }
+  iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+  #scroller { position: fixed; inset: 0; overflow: auto; }
+  #content { height: 6000px; background: linear-gradient(#eee, #999); }
+</style>
+<script>
+(() => {
+  const params = new URL(location.href).searchParams;
+  const run = params.get('run');
+  const generation = Number(params.get('generation'));
+  const child = params.get('child') === '1';
+  const report = (event) => {
+    if (child) {
+      parent.postMessage({fixture: 'iframe-scroll', ...event}, '*');
+      return Promise.resolve();
+    }
+    return fetch(`/event?run=${encodeURIComponent(run)}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({generation, ...event}), keepalive: true,
+    }).then(response => {
+      if (!response.ok) throw new Error(`Fixture report failed: ${response.status}`);
+    });
+  };
+  const fail = error => report({type: 'fixture_error', message: String(error)});
+  window.addEventListener('load', () => {
+    if (!child) {
+      const frame = document.createElement('iframe');
+      document.body.appendChild(frame);
+      let command;
+      let loadedSite;
+      window.prepareIframeScroll = (phase, crossSite, action) => {
+        command = {fixture: 'iframe-scroll', phase, crossSite, action};
+        if (loadedSite === crossSite) {
+          frame.contentWindow.postMessage(command, '*');
+        } else {
+          loadedSite = crossSite;
+          const url = new URL(location.href);
+          url.hostname = crossSite ? 'localhost' : '127.0.0.1';
+          url.searchParams.set('child', '1');
+          frame.src = url.href;
+        }
+      };
+      window.addEventListener('message', event => {
+        if (event.source !== frame.contentWindow || event.data?.fixture !== 'iframe-scroll') return;
+        if (event.data.type === 'iframe_scroll_child_ready') {
+          frame.contentWindow.postMessage(command, '*');
+        } else {
+          report(event.data).catch(fail);
+        }
+      });
+      report({type: 'iframe_scroll_ready'}).catch(fail);
+      return;
+    }
+    const scroller = document.createElement('div');
+    scroller.id = 'scroller';
+    const content = document.createElement('div');
+    content.id = 'content';
+    scroller.appendChild(content);
+    document.body.appendChild(scroller);
+    let command;
+    let wheels = 0;
+    const cancel = event => event.preventDefault();
+    window.addEventListener('message', event => {
+      if (event.source !== parent || event.data?.fixture !== 'iframe-scroll') return;
+      command = event.data;
+      wheels = 0;
+      scroller.removeEventListener('wheel', cancel);
+      scroller.scrollTop = 0;
+      if (command.action !== 'baseline') {
+        scroller.style.display = 'none';
+        void scroller.offsetHeight;
+        scroller.style.display = '';
+      }
+      if (command.action === 'cancelled') scroller.addEventListener('wheel', cancel, {passive: false});
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        report({type: 'iframe_scroll_prepared', phase: command.phase,
+                crossSite: location.hostname === 'localhost', scrollTop: scroller.scrollTop});
+      }));
+    });
+    scroller.addEventListener('wheel', event => {
+      wheels++;
+      const phase = command.phase;
+      // Observe native wheel animation/default handling without script scrolling.
+      setTimeout(() => {
+        report({type: 'iframe_scroll_result', phase, wheels,
+                trusted: event.isTrusted, target: event.target.id,
+                prevented: event.defaultPrevented, scrollTop: scroller.scrollTop,
+                deltaY: event.deltaY, deltaMode: event.deltaMode});
+      }, 600);
+    }, {passive: true});
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      report({type: 'iframe_scroll_child_ready'});
+    }));
+  });
+})();
+</script>

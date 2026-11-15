@@ -194,16 +194,27 @@ const SCENARIOS: &[&str] = &[
     "keyboard_release",
     "keyboard_editing",
     "keyboard_clipboard",
+    "iframe_scroll",
 ];
+
+// These exercise CefTexture's embedded Window and hidden native LineEdit.
+const NODE_SCENARIOS: &[&str] = &["inactive_pointer", "iframe_ime"];
 
 fn select_cases(filter: Option<&str>, allow_clipboard_writes: bool) -> Result<Vec<Case>> {
     let cases: Vec<_> = ["CefTexture", "CefTexture2D"]
         .into_iter()
         .flat_map(|class| SCENARIOS.iter().map(move |&case| Case { class, case }))
+        .chain(NODE_SCENARIOS.iter().map(|&case| Case {
+            class: "CefTexture",
+            case,
+        }))
         .collect();
     match filter {
         None => Ok(cases
             .into_iter()
+            // Known upstream CEF 156 regression: retain the reproducer for
+            // explicit diagnostics until a compatible runtime fixes it.
+            .filter(|case| case.case != "iframe_scroll")
             .filter(|case| allow_clipboard_writes || case.case != "keyboard_clipboard")
             .collect()),
         Some(filter) => {
@@ -441,19 +452,41 @@ mod tests {
 
     #[test]
     fn selection_preserves_full_matrix_and_rejects_unknown_cases() -> Result<()> {
-        assert_eq!(select_cases(None, true)?.len(), SCENARIOS.len() * 2);
+        assert_eq!(
+            select_cases(None, true)?.len(),
+            (SCENARIOS.len() - 1) * 2 + NODE_SCENARIOS.len()
+        );
         let selected = select_cases(Some("CefTexture2D:permission_navigation"), false)?;
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].class, "CefTexture2D");
         assert!(select_cases(Some("CefTexture2D:typo"), false).is_err());
         assert!(select_cases(Some("CefTexture2D:typo"), true).is_err());
+        assert!(select_cases(Some("CefTexture2D:iframe_ime"), false).is_err());
+        assert_eq!(
+            select_cases(Some("CefTexture:inactive_pointer"), false)?.len(),
+            1
+        );
+        assert!(
+            select_cases(None, true)?
+                .iter()
+                .all(|case| case.case != "iframe_scroll")
+        );
+        for class in ["CefTexture", "CefTexture2D"] {
+            assert_eq!(
+                select_cases(Some(&format!("{class}:iframe_scroll")), false)?.len(),
+                1
+            );
+        }
         Ok(())
     }
 
     #[test]
     fn clipboard_cases_require_explicit_opt_in_even_with_a_case_filter() -> Result<()> {
         let defaults = select_cases(None, false)?;
-        assert_eq!(defaults.len(), (SCENARIOS.len() - 1) * 2);
+        assert_eq!(
+            defaults.len(),
+            (SCENARIOS.len() - 2) * 2 + NODE_SCENARIOS.len()
+        );
         assert!(
             defaults
                 .iter()

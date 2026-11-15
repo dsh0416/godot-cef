@@ -1496,11 +1496,11 @@ wrap_client! {
         fn on_process_message_received(
             &self,
             _browser: Option<&mut cef::Browser>,
-            _frame: Option<&mut cef::Frame>,
+            frame: Option<&mut cef::Frame>,
             _source_process: ProcessId,
             message: Option<&mut ProcessMessage>,
         ) -> i32 {
-            crate::webrender_ipc::on_process_message_received(message, &self.ipc)
+            crate::webrender_ipc::on_process_message_received(frame, message, &self.ipc)
         }
     }
 }

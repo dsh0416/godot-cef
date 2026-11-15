@@ -1,14 +1,18 @@
 use crate::utils::should_enable_ipc_inspector;
-use cef::{CefStringUtf16, ImplBinaryValue, ImplListValue, ImplProcessMessage, ProcessMessage};
+use cef::{
+    CefStringUtf16, Frame, ImplBinaryValue, ImplFrame, ImplListValue, ImplProcessMessage,
+    ProcessMessage,
+};
 use cef_app::ipc_contract::{
     ROUTE_IME_CARET_POSITION, ROUTE_IPC_BINARY_RENDERER_TO_GODOT, ROUTE_IPC_DATA_RENDERER_TO_GODOT,
     ROUTE_IPC_RENDERER_TO_GODOT, ROUTE_TRIGGER_IME,
 };
 
-use crate::browser::ImeCompositionRange;
+use crate::browser::{ImeCompositionRange, ImeEnableEvent};
 use crate::webrender::ClientIpcQueues;
 
 pub(crate) fn on_process_message_received(
+    frame: Option<&mut Frame>,
     message: Option<&mut ProcessMessage>,
     ipc: &ClientIpcQueues,
 ) -> i32 {
@@ -97,11 +101,17 @@ pub(crate) fn on_process_message_received(
             }
         }
         ROUTE_TRIGGER_IME => {
-            if let Some(args) = message.argument_list() {
-                let arg = args.bool(0);
-                let enabled = arg != 0;
+            if let Some(args) = message.argument_list()
+                && let Some(frame) = frame
+            {
+                let event = ImeEnableEvent {
+                    enabled: args.bool(0) != 0,
+                    focused_node: args.bool(1) != 0,
+                    requires_key_event_commit: frame.is_main() == 0 && args.bool(2) != 0,
+                    frame_id: CefStringUtf16::from(&frame.identifier()).to_string(),
+                };
                 if let Ok(mut queues) = ipc.event_queues.lock() {
-                    queues.ime_enables.push_back(enabled);
+                    queues.ime_enables.push_back(event);
                 }
             }
         }

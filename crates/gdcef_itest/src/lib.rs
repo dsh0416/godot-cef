@@ -6,6 +6,8 @@
 
 mod dialogs;
 mod display;
+mod iframe_scroll;
+mod input_regressions;
 mod keyboard;
 mod permissions;
 mod scenarios;
@@ -141,6 +143,8 @@ struct Runner {
     dialogs: dialogs::DialogState,
     display: display::DisplayState,
     keyboard: keyboard::KeyboardState,
+    input_regressions: input_regressions::InputRegressionState,
+    scroll: iframe_scroll::ScrollState,
 }
 
 impl Runner {
@@ -185,6 +189,8 @@ impl Runner {
             dialogs: dialogs::DialogState::default(),
             display: display::DisplayState::default(),
             keyboard: keyboard::KeyboardState::default(),
+            input_regressions: input_regressions::InputRegressionState::default(),
+            scroll: iframe_scroll::ScrollState::default(),
         };
         if let Err(error) = runner.setup(&env("GDCEF_ITEST_PROFILE")) {
             runner.fail(error);
@@ -217,9 +223,17 @@ impl Runner {
                     | "keyboard_release"
                     | "keyboard_editing"
                     | "keyboard_clipboard"
+                    | "inactive_pointer"
+                    | "iframe_ime"
+                    | "iframe_scroll"
             )
         {
             return Err("Harness supplied an unknown class or case".into());
+        }
+        if self.class != "CefTexture"
+            && matches!(self.case.as_str(), "inactive_pointer" | "iframe_ime")
+        {
+            return Err("Window focus and native IME proxy scenarios require CefTexture".into());
         }
         if self.case == "keyboard_clipboard"
             && std::env::var("GDCEF_ITEST_ALLOW_CLIPBOARD_WRITES").as_deref() != Ok("1")
@@ -339,7 +353,13 @@ impl Runner {
             "preload_script",
             &"window.__gdcef_preload = true;".to_variant(),
         );
-        let path = if self.case.starts_with("dialog_") {
+        let path = if self.case == "inactive_pointer" {
+            "inactive-pointer"
+        } else if self.case == "iframe_ime" {
+            "iframe-ime"
+        } else if self.case == "iframe_scroll" {
+            "iframe-scroll"
+        } else if self.case.starts_with("dialog_") {
             "dialogs"
         } else if matches!(self.case.as_str(), "display_events" | "browser_hidden") {
             "display"
@@ -397,7 +417,12 @@ impl Runner {
             let Some(mut root) = scene_tree().and_then(|tree| tree.get_root()) else {
                 return Err("SceneTree root disappeared".into());
             };
-            if self.case.starts_with("dialog_") || self.case.starts_with("keyboard_") {
+            if matches!(self.case.as_str(), "inactive_pointer" | "iframe_ime") {
+                self.attach_input_regression_node(&node)?;
+            } else if self.case.starts_with("dialog_")
+                || self.case.starts_with("keyboard_")
+                || self.case == "iframe_scroll"
+            {
                 self.attach_dialog_node(&node)?;
             } else if matches!(self.case.as_str(), "display_events" | "browser_hidden") {
                 self.attach_display_node(&node)?;
@@ -469,7 +494,13 @@ impl Runner {
             self.fail(format!("Browser fixture failed: {event}"));
             return;
         }
-        if self.case.starts_with("permission_") {
+        if self.case == "inactive_pointer" {
+            self.tick_inactive_pointer();
+        } else if self.case == "iframe_ime" {
+            self.tick_iframe_ime();
+        } else if self.case == "iframe_scroll" {
+            self.tick_iframe_scroll();
+        } else if self.case.starts_with("permission_") {
             self.tick_permissions();
         } else if self.case == "js_ipc" {
             self.tick_ipc();
@@ -689,6 +720,7 @@ impl Runner {
                 "dialog_finished": self.dialogs.finished,
                 "display_signals": self.display.signals,
                 "display_stage": self.display.stage,
+                "input_stage": self.input_regressions.stage,
                 "elapsed_ms": self.started.elapsed().as_millis(),
             })
         );

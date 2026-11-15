@@ -1,5 +1,7 @@
 //! Pure focus transitions: the browser control and its IME proxy share one owner.
 
+use crate::browser::ImeEnableEvent;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FocusOwner {
     Browser,
@@ -16,11 +18,41 @@ pub(super) struct FocusUpdate {
 
 #[derive(Default)]
 pub(super) struct FocusState {
-    pub editable: bool,
+    editable: bool,
     cef_focused: Option<bool>,
+    editable_frame: Option<String>,
+    key_event_commit: bool,
 }
 
 impl FocusState {
+    pub fn update_editable(&mut self, event: &ImeEnableEvent, focused_frame: Option<&str>) {
+        // Different renderer processes have independent IPC channels. Losing
+        // focus in the old frame can arrive after the new frame enabled IME.
+        // A null node can also mean that the newly focused frame has no
+        // editable element. Use the browser's current focus at drain time,
+        // rather than the sender's focus when its notification was queued.
+        if !event.enabled
+            && !event.focused_node
+            && self.editable_frame.as_deref() != Some(event.frame_id.as_str())
+            && focused_frame != Some(event.frame_id.as_str())
+        {
+            return;
+        }
+        self.editable = event.enabled;
+        self.key_event_commit = event.enabled && event.requires_key_event_commit;
+        self.editable_frame = event.enabled.then(|| event.frame_id.clone());
+    }
+
+    pub fn requires_key_event_commit(&self) -> bool {
+        self.key_event_commit
+    }
+
+    pub fn clear_editable(&mut self) {
+        self.editable = false;
+        self.editable_frame = None;
+        self.key_event_commit = false;
+    }
+
     pub fn invalidate_host_focus(&mut self) {
         self.cef_focused = None;
     }
@@ -47,6 +79,139 @@ impl FocusState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ime_event(frame: &str, enabled: bool, focused_node: bool) -> ImeEnableEvent {
+        ImeEnableEvent {
+            enabled,
+            focused_node,
+            requires_key_event_commit: frame != "main",
+            frame_id: frame.into(),
+        }
+    }
+
+    #[test]
+    fn late_blur_from_a_different_renderer_does_not_disable_ime() {
+        for (old, new) in [("main", "child"), ("child", "main"), ("child", "other")] {
+            let mut focus = FocusState::default();
+            focus.update_editable(&ime_event(old, true, true), Some(old));
+            focus.update_editable(&ime_event(new, true, true), Some(new));
+            focus.update_editable(&ime_event(old, false, false), Some(new));
+            assert!(focus.reconcile(FocusOwner::Proxy, true).ime_active);
+            assert_eq!(focus.editable_frame.as_deref(), Some(new));
+            assert_eq!(focus.requires_key_event_commit(), new != "main");
+        }
+    }
+
+    #[test]
+    fn newly_focused_empty_frame_disables_the_previous_frames_ime() {
+        for (old, current) in [("main", "child"), ("child", "main"), ("child", "other")] {
+            let mut focus = FocusState::default();
+            focus.update_editable(&ime_event(old, true, true), Some(old));
+            assert!(focus.reconcile(FocusOwner::Proxy, true).ime_active);
+
+            // The parent iframe notification is suppressed, so no blur from
+            // the previous owner is required to end IME in plain child content.
+            focus.update_editable(&ime_event(current, false, false), Some(current));
+            let update = focus.reconcile(FocusOwner::Proxy, true);
+            assert!(!update.ime_active);
+            assert_eq!(update.transfer, Some(FocusOwner::Browser));
+            assert!(focus.editable_frame.is_none());
+            assert!(!focus.requires_key_event_commit());
+        }
+    }
+
+    #[test]
+    fn empty_frame_focus_and_previous_frame_blur_work_in_either_ipc_order() {
+        for old_blur_first in [true, false] {
+            let mut focus = FocusState::default();
+            focus.update_editable(&ime_event("main", true, true), Some("main"));
+            let old_blur = ime_event("main", false, false);
+            let empty_child = ime_event("child", false, false);
+            let events = if old_blur_first {
+                [&old_blur, &empty_child]
+            } else {
+                [&empty_child, &old_blur]
+            };
+            for event in events {
+                focus.update_editable(event, Some("child"));
+            }
+            assert!(!focus.reconcile(FocusOwner::Proxy, true).ime_active);
+            // A subsequent editable focus survives another old-frame blur.
+            focus.update_editable(&ime_event("child", true, true), Some("child"));
+            focus.update_editable(&old_blur, Some("child"));
+            assert!(focus.reconcile(FocusOwner::Proxy, true).ime_active);
+        }
+    }
+
+    #[test]
+    fn missing_browser_focus_keeps_owner_checks_and_accepts_early_enables() {
+        let mut focus = FocusState::default();
+        focus.update_editable(&ime_event("child", true, true), None);
+        assert!(focus.reconcile(FocusOwner::Proxy, true).ime_active);
+        focus.update_editable(&ime_event("main", false, false), None);
+        assert!(focus.reconcile(FocusOwner::Proxy, true).ime_active);
+        focus.update_editable(&ime_event("child", false, false), None);
+        assert!(!focus.reconcile(FocusOwner::Proxy, true).ime_active);
+
+        // Editability can arrive before the browser's focus state catches up.
+        // Do not discard an enabled notification based on a different snapshot.
+        focus.update_editable(&ime_event("child", true, true), Some("main"));
+        assert!(focus.reconcile(FocusOwner::Proxy, true).ime_active);
+    }
+
+    #[test]
+    fn active_frame_blur_and_focus_on_noneditable_content_disable_ime() {
+        for event in [
+            ime_event("child", false, false),
+            ime_event("child", false, true),
+            ime_event("main", false, true),
+            ime_event("other", false, true),
+        ] {
+            let mut focus = FocusState::default();
+            focus.update_editable(&ime_event("child", true, true), Some("child"));
+            focus.update_editable(&event, Some(event.frame_id.as_str()));
+            let update = focus.reconcile(FocusOwner::Proxy, true);
+            assert!(!update.ime_active);
+            assert_eq!(update.transfer, Some(FocusOwner::Browser));
+            assert!(!focus.requires_key_event_commit());
+            assert!(focus.editable_frame.is_none());
+            focus.update_editable(&ime_event("child", true, true), Some("child"));
+            assert!(focus.reconcile(FocusOwner::Browser, true).ime_active);
+        }
+    }
+
+    #[test]
+    fn navigation_clears_subframe_text_routing_without_changing_focus_owner() {
+        let mut focus = FocusState::default();
+        focus.update_editable(&ime_event("child", true, true), Some("child"));
+        focus.reconcile(FocusOwner::Proxy, true);
+        focus.clear_editable();
+        assert!(!focus.requires_key_event_commit());
+        assert!(focus.editable_frame.is_none());
+        let update = focus.reconcile(FocusOwner::Proxy, true);
+        assert!(!update.ime_active);
+        assert_eq!(update.cef_focus, None);
+        assert_eq!(update.transfer, Some(FocusOwner::Browser));
+        focus.update_editable(&ime_event("main", true, true), Some("main"));
+        assert!(focus.reconcile(FocusOwner::Browser, true).ime_active);
+        assert!(!focus.requires_key_event_commit());
+    }
+
+    #[test]
+    fn same_site_frames_keep_native_ime_unless_nested_below_a_remote_parent() {
+        let mut focus = FocusState::default();
+        let mut event = ime_event("same-site-child", true, true);
+        event.requires_key_event_commit = false;
+        focus.update_editable(&event, Some(event.frame_id.as_str()));
+        assert!(focus.reconcile(FocusOwner::Browser, true).ime_active);
+        assert!(!focus.requires_key_event_commit());
+        // The renderer reports its local ancestry, not URL equality. A
+        // same-site descendant of an OOPIF can still use a separate widget.
+        event.frame_id = "same-site-child-below-oopif".into();
+        event.requires_key_event_commit = true;
+        focus.update_editable(&event, Some(event.frame_id.as_str()));
+        assert!(focus.requires_key_event_commit());
+    }
 
     #[test]
     fn new_and_recreated_hosts_receive_an_explicit_focus_state() {

@@ -368,6 +368,15 @@ fn handle_client(mut stream: TcpStream, state: &State, page: &[u8]) {
         return;
     };
     let (status, content_type, body) = match (request.method.as_str(), path) {
+        ("GET", "/inactive-pointer" | "/iframe-ime" | "/iframe-scroll") => {
+            let page: &[u8] = match path {
+                "/inactive-pointer" => include_bytes!("inactive_pointer.html"),
+                "/iframe-ime" => include_bytes!("iframe_ime.html"),
+                _ => include_bytes!("iframe_scroll.html"),
+            };
+            let _ = response(&mut stream, 200, "text/html; charset=utf-8", page, &state.stopping);
+            return;
+        }
         ("GET", "/keyboard-editing") => {
             let _ = response(
                 &mut stream,

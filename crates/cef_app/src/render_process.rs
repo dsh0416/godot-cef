@@ -21,18 +21,29 @@ use crate::v8_handlers::{
     build_ipc_listener_object, cbor_bytes_to_v8_value, emit_ipc_listener, v8_prop_default,
 };
 
-fn send_browser_bool_message(frame: Option<&mut Frame>, route: &str, value: bool) {
-    let Some(frame) = frame else {
-        return;
-    };
-    let route = cef::CefStringUtf16::from(route);
+fn send_ime_state(frame: &mut Frame, enabled: bool, focused_node: bool) {
+    let route = cef::CefStringUtf16::from(ROUTE_TRIGGER_IME);
     let Some(mut process_message) = process_message_create(Some(&route)) else {
         return;
     };
     if let Some(argument_list) = process_message.argument_list() {
-        argument_list.set_bool(0, value as _);
+        argument_list.set_bool(0, enabled as _);
+        argument_list.set_bool(1, focused_node as _);
+        argument_list.set_bool(2, requires_key_event_commit(frame) as _);
     }
     frame.send_process_message(ProcessId::BROWSER, Some(&mut process_message));
+}
+
+fn requires_key_event_commit(frame: &Frame) -> bool {
+    // Renderer-side GetParent only returns local frames. A local ancestry
+    // ending before the main frame belongs to another render widget, even
+    // when this frame itself is same-origin with the main document. Walking
+    // the ancestry preserves native composition for ordinary same-site frames.
+    let mut local_root = frame.clone();
+    while let Some(parent) = local_root.parent() {
+        local_root = parent;
+    }
+    local_root.is_main() == 0
 }
 
 // `extra_info` is only available in `on_browser_created`, while preload runs
@@ -185,23 +196,24 @@ wrap_render_process_handler! {
         }
 
         fn on_focused_node_changed(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, node: Option<&mut Domnode>) {
-            if let Some(node) = node
-                && node.is_editable() == 1 {
-                    if let Some(frame) = frame {
-                        // send to the browser process to activate IME
-                        send_browser_bool_message(Some(frame), ROUTE_TRIGGER_IME, true);
-                        let report_script: cef::CefStringUtf16 = "if(window.__activateImeTracking)window.__activateImeTracking();".into();
-                        frame.execute_java_script(Some(&report_script), None, 0);
-                    }
-                    return;
-                }
-
-            if let Some(frame) = frame {
-                // send to the browser process to deactivate IME
-                send_browser_bool_message(Some(frame), ROUTE_TRIGGER_IME, false);
-                let deactivate_script: cef::CefStringUtf16 = "if(window.__deactivateImeTracking)window.__deactivateImeTracking();".into();
-                frame.execute_java_script(Some(&deactivate_script), None, 0);
+            let Some(frame) = frame else { return };
+            let editable = node.as_ref().is_some_and(|node| node.is_editable() != 0);
+            let frame_element = node.as_ref().is_some_and(|node| {
+                let tag = CefStringUtf16::from(&node.element_tag_name()).to_string();
+                tag.eq_ignore_ascii_case("iframe") || tag.eq_ignore_ascii_case("frame")
+            });
+            // Focusing a child leaves its embedding element focused in the
+            // parent. The child reports its own editability; a parent false
+            // can arrive later over a different renderer's IPC channel.
+            if !frame_element {
+                send_ime_state(frame, editable, node.is_some());
             }
+            let script: CefStringUtf16 = if editable {
+                "if(window.__activateImeTracking)window.__activateImeTracking();"
+            } else {
+                "if(window.__deactivateImeTracking)window.__deactivateImeTracking();"
+            }.into();
+            frame.execute_java_script(Some(&script), None, 0);
         }
 
         fn on_process_message_received(
