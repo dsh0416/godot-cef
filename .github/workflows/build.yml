@@ -81,8 +81,10 @@ jobs:
       - name: Test native editor installation lifecycle
         timeout-minutes: 20
         run: |
+          godot="$(mise where godot)/Godot.app/Contents/MacOS/Godot"
+          test -x "$godot"
           mise exec -- node tests/bootstrap/run.ts --addon addons/godot_cef \
-            --godot "$(mise which godot)" --cef-source "$CEF_PATH_ARM64" \
+            --godot "$godot" --cef-source "$CEF_PATH_ARM64" \
             --cef-source-x64 "$CEF_PATH_X64" --output target/bootstrap-tests
 
       - name: Upload installer evidence
@@ -149,9 +151,11 @@ jobs:
         timeout-minutes: 20
         shell: pwsh
         run: |
-          $godot = mise which godot
+          $godotInstall = mise where godot
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          mise exec -- node tests/bootstrap/run.ts --addon addons/godot_cef --godot "$godot" --cef-source "$env:CEF_PATH" --output target/bootstrap-tests
+          $godot = @(Get-ChildItem -LiteralPath $godotInstall -Filter 'Godot_v*_console.exe' -File)
+          if ($godot.Count -ne 1) { throw "Expected one Godot console executable in $godotInstall" }
+          mise exec -- node tests/bootstrap/run.ts --addon addons/godot_cef --godot "$($godot[0].FullName)" --cef-source "$env:CEF_PATH" --output target/bootstrap-tests
 
       - name: Upload installer evidence
         if: always() && matrix.target == 'x86_64-pc-windows-msvc'
