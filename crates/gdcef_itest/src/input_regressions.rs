@@ -236,12 +236,38 @@ impl Runner {
                 self.input_next();
             }
             1 if self.input_web("ime_prepared").is_some() => {
-                self.dialog_click(if target == "blank" {
-                    Vector2::new(500.0, 280.0)
-                } else {
-                    Vector2::new(50.0, if target == "root" { 34.0 } else { 134.0 })
-                });
+                if target == "blank" {
+                    self.eval(&format!("window.reportImeRootFocus({phase})"));
+                    self.input_regressions.stage = 6;
+                    return;
+                }
+                self.dialog_click(Vector2::new(
+                    50.0,
+                    if target == "root" { 34.0 } else { 134.0 },
+                ));
                 self.input_next();
+            }
+            6 => {
+                let Some(before) = self.input_web("ime_before_plain_click") else {
+                    return;
+                };
+                let proxy_focused = self
+                    .dialogs
+                    .window
+                    .as_ref()
+                    .and_then(|window| window.gui_get_focus_owner())
+                    .is_some_and(|control| control.try_cast::<LineEdit>().is_ok());
+                self.check(before["rootEditableFocused"] == true && before["rootDocumentFocused"] == true,
+                    format!("Root DOM editor must remain focused until the real plain-child click: {before}"));
+                self.check(proxy_focused,
+                    "Root IME proxy must still own native focus immediately before the plain-child click");
+                if !self.failures.is_empty() {
+                    return;
+                }
+                self.dialog_click(Vector2::new(500.0, 280.0));
+                self.input_regressions.stage = 2;
+                self.input_regressions.frame = self.process_frames;
+                self.input_regressions.stage_at = Some(Instant::now());
             }
             2 => {
                 if self.process_frames < self.input_regressions.frame + 12 {
@@ -257,8 +283,8 @@ impl Runner {
                     if let Some(result) = self.input_web("ime_noneditable")
                         && proxy.is_none()
                     {
-                        self.check(result["editableActive"] == false,
-                            "Clicking a plain cross-site frame must leave its editable node unfocused");
+                        self.check(result["editableActive"] == false && result["trusted"] == true,
+                            "A trusted click in a plain cross-site frame must leave its editable node unfocused");
                         self.check(
                             true,
                             "Plain cross-site frame focus must release the old root IME proxy",

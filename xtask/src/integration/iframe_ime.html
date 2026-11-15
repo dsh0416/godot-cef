@@ -91,10 +91,17 @@
     window.prepareIme = (next, target) => {
       selected = target;
       phase = next;
-      editor.blur();
+      // Preserve the root's editable focus until the real child-frame click.
+      // Pre-blurring it would hide a stale IME owner during that transition.
       for (const [name, frame] of frames) frame.style.visibility = name === target ? 'visible' : 'hidden';
       if (target === 'root') prepare(next);
       else command(target, {command: 'prepare', phase: next});
+    };
+    window.reportImeRootFocus = next => {
+      if (next !== phase) return;
+      send({type: 'ime_before_plain_click',
+        rootEditableFocused: document.activeElement === editor,
+        rootDocumentFocused: document.hasFocus()}).catch(fail);
     };
     window.imeSnapshot = (next, kind) => {
       if (next !== phase) return;

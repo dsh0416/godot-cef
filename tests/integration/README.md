@@ -174,6 +174,11 @@ commit routing and DOM results, but does not simulate an OS candidate window
 or validate native composition presentation. The inactive-pointer case uses
 synthetic Godot input and logical Window focus, not native Windows messages.
 
+Before the IME case clicks plain cross-site content, it separately asserts that
+the root DOM editor and document remain focused and that the native LineEdit
+proxy still owns focus. The trusted child click must then release the proxy;
+fixture preparation does not blur the root on the test's behalf.
+
 Run the upstream scrolling diagnostic explicitly with
 `--case CefTexture:iframe_scroll` or `--case CefTexture2D:iframe_scroll`.
 The current CEF 156 runtime fails at the first cross-site hide/show phase;

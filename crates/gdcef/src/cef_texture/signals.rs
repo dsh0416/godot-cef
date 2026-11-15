@@ -453,12 +453,22 @@ impl CefTexture {
     }
 
     fn process_ime_enable_events(&mut self, events: &VecDeque<ImeEnableEvent>) {
+        use cef::{CefStringUtf16, ImplBrowser, ImplBrowserHost, ImplFrame};
+
         if events.is_empty() {
             return;
         }
+        // Sample after IPC has reached Godot, not inside the renderer callback:
+        // frame focus and editability notifications can cross in transit.
+        let focused_frame = self.with_app(|app| {
+            app.browser()
+                .and_then(|browser| browser.focused_frame())
+                .map(|frame| CefStringUtf16::from(&frame.identifier()).to_string())
+        });
         let used_key_events = self.focus_state.requires_key_event_commit();
         for event in events {
-            self.focus_state.update_editable(event);
+            self.focus_state
+                .update_editable(event, focused_frame.as_deref());
         }
         if self.ime_active
             && !used_key_events
@@ -467,7 +477,6 @@ impl CefTexture {
         {
             // Stop any root-widget composition before switching to the
             // subframe commit fallback. Both frames may stay editable.
-            use cef::ImplBrowserHost;
             host.ime_cancel_composition();
         }
         self.reconcile_browser_focus();
