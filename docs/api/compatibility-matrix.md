@@ -2,9 +2,9 @@
 
 This matrix lists supported platform/backend combinations for GPU-accelerated OSR.
 
-This page covers architectures in the full GitHub Release addon. The smaller
-Asset Store addon omits Windows/Linux ARM64; use the full package for those
-targets. See [Distribution variants](./distribution-variants).
+Both the full and Asset Store packages cover these architectures. The Store
+package installs CEF through the native editor setup window; the full package
+includes it for offline use. See [Distribution variants](./distribution-variants).
 
 ## Version Baseline
 

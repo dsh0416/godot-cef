@@ -260,6 +260,28 @@ impl ITextureRect for CefTexture {
 
 #[godot_api]
 impl CefTexture {
+    /// The active native library, or an empty path if an editor restart is required.
+    /// The setup extension uses this to reject a stale or late-loaded core.
+    #[func]
+    pub fn get_runtime_library_path() -> GString {
+        if !crate::runtime_ready() {
+            return GString::new();
+        }
+        // Godot may map an editor copy such as ~gdcef.dll. Ask its loader for
+        // the configured library path so the installer can identify this build.
+        use godot::sys::GodotFfi;
+        // SAFETY: a registered static method runs after binding initialization.
+        // get_library_path constructs the String in the uninitialized output.
+        unsafe {
+            GString::new_with_uninit(|output| {
+                godot::sys::interface_fn!(get_library_path)(
+                    godot::sys::get_library(),
+                    output.cast(),
+                )
+            })
+        }
+    }
+
     #[signal]
     fn tooltip_changed(text: GString);
 

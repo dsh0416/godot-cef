@@ -55,6 +55,7 @@ export default withMermaid(defineConfig({
                 { text: '下载', link: '/zh_CN/api/downloads' },
                 { text: 'Vulkan 支持', link: '/zh_CN/api/vulkan-support' },
                 { text: '加速帧交接', link: '/zh_CN/api/accelerated-handoff' },
+                { text: '运行库安装', link: '/zh_CN/api/runtime-installation' },
                 { text: '分发版本与源码构建', link: '/zh_CN/api/distribution-variants' },
                 { text: 'GPU 设备绑定', link: '/zh_CN/api/gpu-device-pinning' }
               ]
@@ -108,6 +109,7 @@ export default withMermaid(defineConfig({
             { text: 'Downloads', link: '/api/downloads' },
             { text: 'Vulkan Support', link: '/api/vulkan-support' },
             { text: 'Accelerated Frame Handoff', link: '/api/accelerated-handoff' },
+            { text: 'Runtime Installation', link: '/api/runtime-installation' },
             { text: 'Distribution Variants', link: '/api/distribution-variants' },
             { text: 'GPU Device Pinning', link: '/api/gpu-device-pinning' }
           ]

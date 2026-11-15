@@ -60,10 +60,18 @@ fn lock_cef_state() -> MutexGuard<'static, CefState> {
 }
 
 pub fn cef_retain() -> CefResult<()> {
+    if !crate::runtime_ready() {
+        return Err(CefError::InitializationFailed(
+            "The browser runtime was loaded after rendering startup. Restart the editor before using CEF."
+                .to_owned(),
+        ));
+    }
     crate::cef_pump::ensure_installed().map_err(CefError::InitializationFailed)?;
     let mut state = lock_cef_state();
 
     if state.needs_initialize() {
+        crate::embedded_helper::ensure_available()?;
+        crate::utils::ensure_executable_permissions()?;
         load_cef_framework()?;
         cef::api_hash(cef::sys::CEF_API_VERSION_LAST, 0);
         initialize_cef()?;

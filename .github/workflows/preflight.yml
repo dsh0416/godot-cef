@@ -49,3 +49,6 @@ jobs:
 
       - name: Test version validation
         run: mise exec -- node --test scripts/build/versions.test.ts
+
+      - name: Test installer and offline packaging
+        run: mise exec -- node --test scripts/build/pack.test.ts

@@ -2,9 +2,9 @@
 
 This page documents how Godot CEF enables GPU-accelerated rendering on Vulkan backends through runtime function hooking, and the limitations of this approach.
 
-This page covers architectures in the full GitHub Release addon. The smaller
-Asset Store addon omits Windows/Linux ARM64; use the full package for those
-targets. See [Distribution variants](./distribution-variants).
+Both the full and Asset Store packages cover these architectures. The Store
+package installs CEF through the native editor setup window; the full package
+includes it for offline use. See [Distribution variants](./distribution-variants).
 
 ## Background
 

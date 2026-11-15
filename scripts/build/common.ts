@@ -7,7 +7,7 @@ export const root = fileURLToPath(new URL("../../", import.meta.url));
 
 export function run(command: string, args: string[], env = process.env): void {
   console.error(`Running: ${command} ${args.join(" ")}`);
-  const result = spawnSync(command, args, { cwd: root, env, stdio: "inherit" });
+  const result = spawnSync(command, args, { cwd: root, env, stdio: "inherit", windowsHide: true });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`${command} failed (${result.signal ?? result.status})`);

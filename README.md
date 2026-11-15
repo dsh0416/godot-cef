@@ -37,7 +37,15 @@ A high-performance Chromium Embedded Framework (CEF) integration for Godot Engin
 
 ### Installation
 
-Download the latest pre-built binaries from the [Releases](https://github.com/dsh0416/godot-cef/releases) page, extract the addon to your Godot project's `addons/` folder, and you're ready to go!
+Download a pre-built addon from the [Releases](https://github.com/dsh0416/godot-cef/releases) page and extract it to your Godot project's `addons/` folder.
+
+The **Asset Store package** includes a native Rust setup plugin. Open the project,
+select your platform in **Godot CEF Setup**, install the browser components, then
+save and restart the editor. The setup window is also available under
+**Project > Tools > Godot CEF Setup**. No GDScript plugin or external Rust toolchain
+is required. The **full package** includes the browser components for offline use.
+See [runtime installation](https://godotcef.org/api/runtime-installation.html) for
+additional export platforms, offline installation, and CI commands.
 
 > [!NOTE]
 > During export/package builds, Godot may convert some imported assets into other formats. If your frontend is built with Vite and needs specific source files to remain as-is, you can use [`vite-plugin-godot-keep-import`](https://github.com/LemonNekoGH/vite-plugin-keep-import-for-godot) to keep imports for selected file types.
@@ -93,11 +101,10 @@ For comprehensive API documentation, examples, and guides, visit the [full docum
 
 ## Platform Support
 
-The default/full GitHub Release addon includes Windows x86_64/ARM64, Linux
-x86_64/ARM64, and macOS universal (x86_64/ARM64). A separate **Asset Store** addon
-includes Windows x86_64, Linux x86_64, and the same macOS universal framework to
-reduce download size. Both packages install as `addons/godot_cef`; choose one.
-ARM64 Windows/Linux users should use the full package. See
+Both the full GitHub Release addon and the smaller **Asset Store** addon support
+Windows x86_64/ARM64, Linux x86_64/ARM64, and macOS universal (x86_64/ARM64).
+The Store addon downloads CEF through its native editor setup plugin; the full
+addon includes it. Both packages install as `addons/godot_cef`; choose one. See
 [Distribution variants](https://godotcef.org/api/distribution-variants.html) for
 package names, local packaging commands and source-build instructions.
 
@@ -214,7 +221,7 @@ existing binaries without invoking Cargo. Rust outputs use `target/<triple>/<pro
 (or `--target-dir` / `CARGO_TARGET_DIR`); the macOS universal framework also lives
 in `target/<profile>/Godot CEF.framework`.
 
-See the `addons/godot_cef/godot_cef.gdextension` file for the complete list of required files per platform.
+The generated `addons/godot_cef/runtime-install.json` lists the required files for each platform.
 
 ### Validate Packaged Addon
 
