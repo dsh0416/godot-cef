@@ -47,7 +47,12 @@ async function verifyExecutableModes(directory: string, record: InstalledPlatfor
   }
 }
 
-export async function pack(artifacts: string, output: string, addon = join(root, "addons/godot_cef"), variant: Variant = "full"): Promise<void> {
+export interface PackOptions {
+  /** Local development/test bundles only; published packages require every target. */
+  allowPartial?: boolean;
+}
+
+export async function pack(artifacts: string, output: string, addon = join(root, "addons/godot_cef"), variant: Variant = "full", options: PackOptions = {}): Promise<void> {
   artifacts = resolve(artifacts); output = resolve(output); addon = resolve(addon);
   assertSeparate(output, [artifacts, addon]);
   const manifest = await installManifest();
@@ -69,6 +74,10 @@ export async function pack(artifacts: string, output: string, addon = join(root,
     }
   }
   if (!selected.length) throw new Error("No platform artifacts found");
+  const missing = platforms.filter(platform => !manifest.platforms.some(record => record.target === platform.target));
+  if (missing.length && !options.allowPartial) {
+    throw new Error(`Published ${variant} packages require all five platforms. Missing artifacts: ${missing.map(platform => platform.target).join(", ")}. Use --allow-partial only for local development or tests.`);
+  }
   const license = await readFile(join(root, "LICENSE"));
   await rm(output, { recursive: true, force: true });
   await mkdir(join(output, "bin"), { recursive: true });

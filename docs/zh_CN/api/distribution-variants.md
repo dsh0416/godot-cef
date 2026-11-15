@@ -59,6 +59,8 @@ mise run validate --addon staging/store/dist/addons/godot_cef --variant store
 
 输入目标为 `universal-apple-darwin`、`x86_64-pc-windows-msvc`、`aarch64-pc-windows-msvc`、
 `x86_64-unknown-linux-gnu` 和 `aarch64-unknown-linux-gnu`。
+无论在什么系统上打包，都必须提供全部五个目标；缺少构件时会在修改输出目录前报错。
+仅本地开发可以显式传入 `pack --allow-partial` 打包部分平台；这类开发包只提供所含平台，不能作为正式分发包。
 使用 `validate --variant full|store` 时，必须包含全部五个目标，并验证最终原生库中的
 内嵌 payload 校验和、清单以及运行时布局。Store 验证还会拒绝额外文件，包括展开的可执行组件。
 不传 `--variant` 时可以验证只包含部分平台的插件。

@@ -75,7 +75,7 @@ test("Store ships both native libraries and embedded helpers, while Full remains
   t.after(() => rm(item.directory, { recursive: true, force: true }));
   for (const variant of ["store", "full"] as const) {
     const output = join(item.directory, variant);
-    await pack(item.artifacts, output, item.addon, variant);
+    await pack(item.artifacts, output, item.addon, variant, { allowPartial: true });
     await validate(output);
     assert.deepEqual(await readdir(join(output, "icons")), ["webview.png"]);
     const names = await readdir(output);
@@ -95,7 +95,7 @@ test("Store validation rejects leaked standalone files and corrupt embedded help
   const item = await fixture(["x86_64-pc-windows-msvc"]);
   t.after(() => rm(item.directory, { recursive: true, force: true }));
   const output = join(item.directory, "store");
-  await pack(item.artifacts, output, item.addon, "store");
+  await pack(item.artifacts, output, item.addon, "store", { allowPartial: true });
   const leaked = join(output, "unexpected.exe");
   await writeFile(leaked, "executable");
   await assert.rejects(validate(output), /Unexpected Store file/);
@@ -112,7 +112,7 @@ test("macOS Store preserves the core framework shell without nested executable a
   const item = await fixture(["universal-apple-darwin"]);
   t.after(() => rm(item.directory, { recursive: true, force: true }));
   const output = join(item.directory, "store");
-  await pack(item.artifacts, output, item.addon, "store");
+  await pack(item.artifacts, output, item.addon, "store", { allowPartial: true });
   await validate(output);
   const record = item.manifest.platforms[0];
   assert.deepEqual((await readdir(join(output, record.directory))).sort(), ["Godot CEF.framework", "libgdcef_bootstrap.dylib"]);
@@ -131,11 +131,11 @@ test("artifact version/path failures preserve an existing output", async t => {
   const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
   metadata.cef_version = "0.0.0";
   await writeFile(metadataPath, JSON.stringify(metadata));
-  await assert.rejects(pack(item.artifacts, output, item.addon, "store"), /Artifact version mismatch/);
+  await assert.rejects(pack(item.artifacts, output, item.addon, "store", { allowPartial: true }), /Artifact version mismatch/);
   metadata.cef_version = item.manifest.cef_version;
   metadata.platforms[0].files.push("../../escape.exe");
   await writeFile(metadataPath, JSON.stringify(metadata));
-  await assert.rejects(pack(item.artifacts, output, item.addon, "store"), /Unsafe runtime path/);
+  await assert.rejects(pack(item.artifacts, output, item.addon, "store", { allowPartial: true }), /Unsafe runtime path/);
   assert.equal(await readFile(join(output, "keep.txt"), "utf8"), "existing output");
 });
 
@@ -143,5 +143,34 @@ test("offline packaging rejects a helper whose executable mode was lost", { skip
   const item = await fixture(["x86_64-unknown-linux-gnu"]);
   t.after(() => rm(item.directory, { recursive: true, force: true }));
   await chmod(join(item.artifacts, "gdcef-x86_64-unknown-linux-gnu/gdcef_helper"), 0o644);
-  await assert.rejects(pack(item.artifacts, join(item.directory, "full"), item.addon, "full"), /lost its execute permission/);
+  await assert.rejects(pack(item.artifacts, join(item.directory, "full"), item.addon, "full", { allowPartial: true }), /lost its execute permission/);
+});
+
+test("published Store manifest includes every download target regardless of the packaging host", async t => {
+  const item = await fixture(platforms.map(platform => platform.target));
+  t.after(() => rm(item.directory, { recursive: true, force: true }));
+  const output = join(item.directory, "store");
+  await pack(item.artifacts, output, item.addon, "store");
+  await validate(output, "store");
+  const metadata = JSON.parse(await readFile(join(output, "runtime-install.json"), "utf8"));
+  assert.deepEqual(metadata.platforms.map((record: InstalledPlatform) => record.target), platforms.map(platform => platform.target));
+  for (const filename of ["godot_cef_bootstrap.gdextension", "godot_cef.gdextension.in"]) {
+    const descriptor = await readFile(join(output, filename), "utf8");
+    for (const platform of platforms) assert(descriptor.includes(`${platform.feature} = `), `${filename} must include ${platform.target}`);
+  }
+});
+
+test("incomplete publish inputs fail before replacing output; partial bundles require an explicit opt-in", async t => {
+  const item = await fixture(["x86_64-pc-windows-msvc"]);
+  t.after(() => rm(item.directory, { recursive: true, force: true }));
+  for (const variant of ["store", "full"] as const) {
+    const output = join(item.directory, variant);
+    await mkdir(output);
+    await writeFile(join(output, "keep.txt"), "previous package");
+    await assert.rejects(pack(item.artifacts, output, item.addon, variant), /require all five platforms.*universal-apple-darwin.*aarch64-pc-windows-msvc/);
+    assert.equal(await readFile(join(output, "keep.txt"), "utf8"), "previous package");
+    await pack(item.artifacts, output, item.addon, variant, { allowPartial: true });
+    await validate(output);
+    await assert.rejects(validate(output, variant), /Missing or duplicate platform artifacts/);
+  }
 });

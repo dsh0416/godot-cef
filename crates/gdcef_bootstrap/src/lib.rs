@@ -145,7 +145,6 @@ struct CefSetupPlugin {
     startup_popup_frames: u8,
     cli: bool,
     restart_required: bool,
-    host_required: bool,
 }
 
 #[godot_api]
@@ -379,7 +378,7 @@ impl CefSetupPlugin {
         heading.set_autowrap_mode(godot::classes::text_server::AutowrapMode::WORD_SMART);
         column.add_child(&heading);
         let mut description = Label::new_alloc();
-        description.set_text("Install the browser components for this project. Select this computer's platform and any platforms you want to export to. Downloads come from the CEF distribution server.");
+        description.set_text("Download browser components for any supported platform from this computer. Select individual platforms or download them all. Install this computer's platform to use CEF in the editor.");
         description.set_autowrap_mode(godot::classes::text_server::AutowrapMode::WORD_SMART);
         column.add_child(&description);
         for target in platforms {
@@ -473,7 +472,7 @@ impl CefSetupPlugin {
             .iter()
             .any(|target| target == "universal-apple-darwin")
         {
-            self.set_status("macOS needs both ARM64 and x86_64 CEF packages. Use Install selected, or provide both extracted runtime directories with --godot-cef-install=host --godot-cef-source=<directory> on macOS.");
+            self.set_status("macOS needs both ARM64 and x86_64 CEF packages. Use Install selected on any OS, or provide both extracted runtime directories with --godot-cef-install=universal-apple-darwin --godot-cef-source=<directory>. Final signing runs on macOS.");
             return;
         }
         if selected.len() != 1 {
@@ -626,11 +625,32 @@ impl CefSetupPlugin {
 
     fn installation_ready(&mut self) {
         self.set_busy(false);
-        self.set_status(
-            "Installation complete. Save and restart the editor to load the browser extension.",
-        );
+        let statuses = self
+            .addon
+            .as_ref()
+            .zip(self.manifest.as_ref())
+            .map_or_else(Vec::new, |(addon, manifest)| {
+                gdcef_runtime::statuses(addon, manifest)
+            });
+        let host_installed = statuses
+            .iter()
+            .any(|status| status.target == host_target() && status.installed);
+        let mut message = if self.restart_required {
+            "Installation complete. Save and restart the editor to load the browser extension."
+        } else if !host_installed {
+            "Selected platform downloads are complete. Install this computer's platform to use CEF in the editor."
+        } else {
+            "Selected platform components are installed."
+        }
+        .to_owned();
+        if statuses.iter().any(|status| status.needs_signing) {
+            message.push_str(
+                " macOS components are downloaded; open setup on a Mac to finish signing.",
+            );
+        }
+        self.set_status(&message);
         if let Some(button) = self.restart_button.as_mut() {
-            button.set_disabled(false);
+            button.set_disabled(!self.restart_required);
         }
         if let Some(bar) = self.progress_bar.as_mut() {
             bar.set_value(100.0);
@@ -645,9 +665,6 @@ impl CefSetupPlugin {
             return;
         };
         let statuses = gdcef_runtime::statuses(addon, manifest);
-        self.host_required = !statuses
-            .iter()
-            .any(|status| status.target == host_target() && status.installed);
         for (target, checkbox) in &mut self.selections {
             let suffix = statuses
                 .iter()
@@ -662,10 +679,6 @@ impl CefSetupPlugin {
                     }
                 });
             checkbox.set_text(&format!("{} — {}", platform_name(target), suffix));
-            if self.host_required && target == host_target() {
-                checkbox.set_pressed(true);
-                checkbox.set_disabled(true);
-            }
         }
         if self.restart_required {
             self.set_status("The installed runtime is ready. Save and restart the editor to load the browser extension.");
@@ -675,8 +688,8 @@ impl CefSetupPlugin {
     }
 
     fn set_busy(&mut self, busy: bool) {
-        for (target, checkbox) in &mut self.selections {
-            checkbox.set_disabled(busy || self.host_required && target == host_target());
+        for (_, checkbox) in &mut self.selections {
+            checkbox.set_disabled(busy);
         }
         for button in [
             &mut self.select_all_button,

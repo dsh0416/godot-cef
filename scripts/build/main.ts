@@ -32,12 +32,12 @@ async function main(): Promise<void> {
     case "pack": {
       const { values } = parseArgs({ args, options: {
         artifacts: { type: "string", short: "a" }, output: { type: "string", short: "o" },
-        "addon-src": { type: "string" }, variant: { type: "string" },
+        "addon-src": { type: "string" }, variant: { type: "string" }, "allow-partial": { type: "boolean" },
       } });
       if (!values.artifacts || !values.output) throw new Error("pack requires --artifacts and --output");
       const { pack } = await import("./pack.ts");
       const { variant } = await import("./platforms.ts");
-      await pack(values.artifacts, values.output, values["addon-src"], variant(values.variant));
+      await pack(values.artifacts, values.output, values["addon-src"], variant(values.variant), { allowPartial: values["allow-partial"] });
       break;
     }
     case "platform-dir":

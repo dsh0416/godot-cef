@@ -29,7 +29,7 @@ const artifacts = join(output, "artifacts");
 await cp(join(addon, platform.directory), join(artifacts, `gdcef-${target}`), { recursive: true, verbatimSymlinks: true });
 const project = join(output, "project");
 const store = join(project, "addons/godot_cef");
-await pack(artifacts, store, addon, "store");
+await pack(artifacts, store, addon, "store", { allowPartial: true });
 await validate(store);
 assert(!(await readdir(store)).includes("godot_cef.gdextension"), "cold Store addon must not load core");
 await writeFile(join(project, "project.godot"), '[application]\nconfig/name="Godot CEF Setup Test"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n');
@@ -79,6 +79,14 @@ const receiptPath = join(store, platform.directory, ".runtime-installed.json");
 const receipt = await readFile(receiptPath, "utf8");
 await run("repeat-install", ["--", "--godot-cef-install=host", `--godot-cef-source=${source}`], 0, "GODOT_CEF_INSTALL_OK");
 assert.equal(await readFile(receiptPath, "utf8"), receipt, "repeat installation must preserve receipt");
+if (process.platform !== "darwin") {
+  const { unlink } = await import("node:fs/promises");
+  const helper = process.platform === "win32" ? "gdcef_helper.exe" : "gdcef_helper";
+  await unlink(join(store, platform.directory, helper));
+  await run("repair-missing-helper", ["--", "--godot-cef-install=host", `--godot-cef-source=${join(output, "missing-source")}`], 0, "GODOT_CEF_INSTALL_OK");
+  assert((await readFile(join(store, platform.directory, helper))).length > 0, "offline repair must restore the embedded helper");
+  assert.equal(await readFile(receiptPath, "utf8"), receipt, "helper repair must preserve the installed runtime receipt");
+}
 await run("unsupported-preflight", ["--", "--godot-cef-check=wasm32-unknown-unknown"], 1);
 
 // Simulate an installed update while the active descriptor still loads the old

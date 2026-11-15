@@ -62,8 +62,11 @@ before packing. This preserves executable modes, framework symlinks and hidden
 installation receipts across GitHub's artifact transport. Final ZIPs preserve
 relative symlinks as well.
 
-`pack` accepts partial artifact sets. Both variants support Windows/Linux x86_64
-and ARM64 and macOS universal. **Full** includes the complete offline runtime and
+`pack` requires all five platform artifacts by default, before replacing an
+existing output. This keeps every download target available on every host in
+published packages. Use `--allow-partial` only for local development or tests;
+those bundles list only the native targets actually built. Both variants support
+Windows/Linux x86_64 and ARM64 and macOS universal. **Full** includes the complete offline runtime and
 an active core descriptor. **Store** includes only the bootstrap and core native
 libraries (plus the macOS framework plist), icons, license and install metadata;
 the core descriptor remains inactive as `godot_cef.gdextension.in` until the

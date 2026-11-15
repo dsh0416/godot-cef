@@ -13,7 +13,7 @@ Rust; there is no GDScript installer or external command-line tool to install.
 ## First installation
 
 1. Extract the addon into `addons/godot_cef` and open the project in Godot 4.6+.
-2. In **Godot CEF Setup**, select this computer's platform and any export platforms.
+2. In **Godot CEF Setup**, select any platforms or click **Select all platforms**.
 3. Click **Install selected**. The plugin downloads the pinned CEF distribution,
    verifies it, and extracts the helper embedded in the native browser library.
 4. Click **Save and restart editor** after installation finishes.
@@ -21,6 +21,12 @@ Rust; there is no GDScript installer or external command-line tool to install.
 You can reopen setup through **Project > Tools > Godot CEF Setup**. Downloads are
 explicit and run in the background. Cancellation or failure leaves previously
 installed versions intact. Successful installations can be used offline.
+
+All five targets are available on every host: Windows x86_64/ARM64, Linux
+x86_64/ARM64, and universal macOS. The host platform is selected by default, but
+you can deselect it to download only other platforms. The editor needs its own
+platform installed to use CEF. Downloading macOS components on Windows or Linux
+is supported; their final signing must be completed on a Mac.
 
 Restarting is required because the browser extension installs rendering hooks
 before Godot creates its rendering server. Scenes and scripts using CEF types

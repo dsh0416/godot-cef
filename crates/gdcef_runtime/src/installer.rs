@@ -873,14 +873,17 @@ fn install_platform(
             "The platform native libraries are missing from this plugin package",
         ));
     }
+    // Verification requires a matching receipt and can restore missing helper
+    // files from the native library. Run it before the presence-only status
+    // check, which otherwise treats a missing helper as a missing CEF runtime.
+    if crate::manifest::verify_runtime(addon, manifest, platform).is_ok() {
+        report(progress, &platform.target, "Runtime is already installed");
+        return Ok(());
+    }
     let current = crate::statuses(addon, manifest)
         .into_iter()
         .find(|state| state.target == platform.target);
     if current.as_ref().is_some_and(|state| state.installed) {
-        if crate::manifest::verify_runtime(addon, manifest, platform).is_ok() {
-            report(progress, &platform.target, "Runtime is already installed");
-            return Ok(());
-        }
         report(progress, &platform.target, "Repairing runtime helper files");
     }
     let workspace = temporary_path(&destination, "runtime-stage");
@@ -1015,6 +1018,10 @@ pub fn install(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "installer_cross_platform_tests.rs"]
+mod cross_platform_tests;
 
 #[cfg(test)]
 #[allow(clippy::panic_in_result_fn)] // Test assertions deliberately fail the test harness.
@@ -1268,6 +1275,49 @@ mod tests {
         } else {
             assert!(result.is_err());
         }
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn repeat_install_restores_missing_helper_without_cef_source() -> Result<()> {
+        let root = temporary_path(&std::env::temp_dir(), "gdcef-helper-repair-test");
+        let (manifest, mut options) = fixture(&root)?;
+        let platform = &manifest.platforms[0];
+        let targets = [platform.target.clone()];
+        let (sender, _receiver) = std::sync::mpsc::channel();
+        install(
+            &root,
+            &manifest,
+            &targets,
+            &options,
+            Arc::new(AtomicBool::new(false)),
+            sender.clone(),
+        )?;
+        let directory = root.join(&platform.directory);
+        let previous_receipt = fs::read(directory.join(RECEIPT_FILE))?;
+        let previous_cef = fs::read(directory.join("libcef.dll"))?;
+        let helper = directory.join("gdcef_helper.exe");
+        fs::remove_file(&helper)?;
+        assert!(!crate::statuses(&root, &manifest)[0].installed);
+        let unavailable_source = root.join("unavailable-cef");
+        assert!(!unavailable_source.exists());
+        options.source = InstallSource::LocalDirectory(unavailable_source);
+
+        install(
+            &root,
+            &manifest,
+            &targets,
+            &options,
+            Arc::new(AtomicBool::new(false)),
+            sender,
+        )?;
+
+        assert_eq!(fs::read(helper)?, b"helper");
+        assert!(crate::statuses(&root, &manifest)[0].installed);
+        assert_eq!(fs::read(directory.join(RECEIPT_FILE))?, previous_receipt);
+        assert_eq!(fs::read(directory.join("libcef.dll"))?, previous_cef);
+        assert!(!root.join("godot_cef.gdextension").exists());
         fs::remove_dir_all(root)?;
         Ok(())
     }

@@ -69,7 +69,11 @@ mise run validate --addon staging/store/dist/addons/godot_cef --variant store
 
 The input targets are `universal-apple-darwin`, `x86_64-pc-windows-msvc`,
 `aarch64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, and
-`aarch64-unknown-linux-gnu`. `validate --variant full|store` requires all five
+`aarch64-unknown-linux-gnu`. Packing requires all five targets, regardless of the
+computer running the packer. Missing artifacts fail before changing the output.
+For local development only, `pack --allow-partial` permits a subset; these partial
+addons offer only their included targets and are not release distributions.
+`validate --variant full|store` requires all five
 targets, checks payload checksums against the final libraries, and verifies the
 appropriate descriptor and runtime layout. Store validation also rejects
 unexpected files, including expanded runtime executables. Omitting `--variant`

@@ -12,13 +12,18 @@ Godot CEF 包含两个原生扩展。安装器扩展无需 CEF 即可加载，�
 ## 首次安装
 
 1. 将插件解压到 `addons/godot_cef`，使用 Godot 4.6+ 打开项目。
-2. 在 **Godot CEF Setup** 中选择本机平台和需要导出的平台。
+2. 在 **Godot CEF Setup** 中选择任意目标平台，或点击 **Select all platforms** 全选。
 3. 点击 **Install selected**。插件下载固定版本的 CEF，进行校验，并展开浏览器库中内嵌的 helper。
 4. 安装完成后点击 **Save and restart editor**。
 
 可以通过 **Project > Tools > Godot CEF Setup** 重新打开安装界面。
 下载由用户明确触发并在后台执行；取消或安装失败会保留此前安装的版本。
 成功安装的运行时可以离线使用。
+
+在任意宿主系统上都可以下载全部五个目标：Windows x86_64/ARM64、Linux x86_64/ARM64
+以及 universal macOS。本机平台默认选中，也可以取消勾选，仅下载其他平台的组件。
+编辑器使用 CEF 时仍需安装本机组件。Windows 和 Linux 可以下载 macOS 组件，
+最终签名需在 Mac 上完成。
 
 浏览器扩展需要在 Godot 创建渲染服务器之前安装渲染 hook，因此首次安装后必须重启编辑器。
 重启并加载浏览器扩展后，使用 CEF 类型的场景和脚本才能正常解析。
