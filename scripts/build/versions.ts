@@ -36,7 +36,24 @@ export async function validateVersions(base = root): Promise<void> {
   if (typeof pkg.version !== "string" || pkg.version !== cargo.workspace.package.version) {
     throw new Error("package.json version must match Cargo.toml workspace version");
   }
-  const mise = parse(await readFile(join(base, "mise.toml"), "utf8")) as { tools: Record<string, unknown> };
+  const mise = parse(await readFile(join(base, "mise.toml"), "utf8")) as {
+    tools: Record<string, unknown>;
+    tool_alias?: Record<string, unknown>;
+  };
+  const sourceExporter = mise.tools["export-cef-dir"];
+  if (sourceExporter !== undefined) {
+    // A pinned upstream source build can export any explicitly requested runtime.
+    // CI and the documented commands always resolve that version from Cargo.lock.
+    if (mise.tool_alias?.["export-cef-dir"] !== "cargo:tauri-apps/cef-rs"
+      || typeof sourceExporter !== "object" || sourceExporter === null
+      || !("crate" in sourceExporter) || sourceExporter.crate !== "export-cef-dir"
+      || !("version" in sourceExporter) || typeof sourceExporter.version !== "string"
+      || !/^rev:[a-f0-9]{40}$/.test(sourceExporter.version)) {
+      throw new Error("Source export-cef-dir must pin an upstream commit and select the exporter crate");
+    }
+    await lockedCefVersion(base);
+    return;
+  }
   const exporter = mise.tools["cargo:export-cef-dir"];
   const { core, runtime } = await lockedCefVersion(base);
   if (exporter !== core && exporter !== `${core}+${runtime}`) {

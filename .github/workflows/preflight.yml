@@ -46,3 +46,6 @@ jobs:
 
       - name: Validate version pins
         run: mise run validate-versions
+
+      - name: Test version validation
+        run: mise exec -- node --test scripts/build/versions.test.ts

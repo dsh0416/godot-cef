@@ -34,7 +34,7 @@ jobs:
       - name: Setup mise toolchain
         uses: ./.github/actions/setup-toolchain
         with:
-          tools: rust cargo:export-cef-dir
+          tools: rust export-cef-dir
 
       - name: Install Rust targets
         run: mise exec -- rustup target add aarch64-apple-darwin x86_64-apple-darwin
