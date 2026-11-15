@@ -309,6 +309,25 @@ impl Suite {
             .replace("@FEATURE@", &feature)
             .replace("@LIBRARY@", library_name());
         fs::write(test_dir.join("gdcef_itest.gdextension"), descriptor)?;
+        // This suite starts with an installed runtime. Load its extensions before
+        // renderer initialization instead of discovering them in the editor's
+        // first filesystem scan (which races Godot 4.6 shutdown/documentation).
+        // The separate bootstrap suite exercises a genuinely cold Store import.
+        let mut extensions = Vec::new();
+        for relative in [
+            "addons/godot_cef/godot_cef_bootstrap.gdextension",
+            "addons/godot_cef/godot_cef.gdextension",
+            "addons/gdcef_itest/gdcef_itest.gdextension",
+        ] {
+            if self.project.join(relative).is_file() {
+                extensions.push(format!("res://{relative}\n"));
+            }
+        }
+        fs::create_dir_all(self.project.join(".godot"))?;
+        fs::write(
+            self.project.join(".godot/extension_list.cfg"),
+            extensions.concat(),
+        )?;
         Ok(())
     }
 
@@ -335,6 +354,7 @@ impl Suite {
             let name = format!("{}-{}", case.class, case.case);
             let id = format!("{name}-{}", random_id()?);
             server.register(&id);
+            server.check_health()?;
             // Files selected by CEF must be real, retained files, not mocked paths.
             // Keep them outside the profile so browser cleanup cannot remove them.
             let fixture_dir = self.run_root.join("dialog-files").join(&name);

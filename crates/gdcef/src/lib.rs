@@ -12,6 +12,7 @@ mod dialog_info;
 mod dialogs;
 mod display_events;
 mod drag;
+mod embedded_helper;
 mod error;
 mod godot_protocol;
 mod input;
@@ -29,11 +30,26 @@ mod webrender;
 mod webrender_ipc;
 
 use godot::init::*;
+use godot::obj::Singleton;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static RUNTIME_READY: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn runtime_ready() -> bool {
+    RUNTIME_READY.load(Ordering::Relaxed)
+}
 
 struct GodotCef;
 
 #[gdextension]
 unsafe impl ExtensionLibrary for GodotCef {
+    fn min_level() -> InitLevel {
+        // Vulkan extensions must be injected before RenderingServer starts.
+        // Godot honors this limit for reloads. First-time discovery still runs
+        // all stages late, so on_stage_init also checks for an existing server.
+        InitLevel::Core
+    }
+
     fn on_stage_deinit(level: InitStage) {
         if level == InitStage::Scene {
             cef_pump::uninstall();
@@ -50,17 +66,21 @@ unsafe impl ExtensionLibrary for GodotCef {
     fn on_stage_init(level: InitStage) {
         match level {
             InitStage::Core => {
+                // Godot 4.6 initializes every stage when its filesystem scan
+                // discovers a new extension, ignoring min_level on first load.
+                // At that point Vulkan's device already exists, and patching its
+                // loader would leave it without our required device extensions.
+                if godot::classes::Engine::singleton().has_singleton("RenderingServer") {
+                    godot::global::godot_warn!(
+                        "[Godot CEF] Browser runtime discovered after rendering startup. Restart the editor before using CEF."
+                    );
+                    return;
+                }
                 // Install Vulkan hook at the Core stage, BEFORE RenderingServer is created.
                 // This allows us to inject platform-specific external memory extensions
                 // (e.g., VK_KHR_external_memory_win32 and related Win32 external memory extensions) into Godot's Vulkan device.
                 vulkan_hook::install_vulkan_hook();
-
-                if let Err(e) = utils::ensure_executable_permissions() {
-                    godot::global::godot_warn!(
-                        "[GodotCef] Failed to set executable permissions: {}",
-                        e
-                    );
-                }
+                RUNTIME_READY.store(true, Ordering::Relaxed);
             }
             InitStage::Scene => {
                 settings::register_project_settings();

@@ -299,23 +299,32 @@ pub fn ensure_executable_permissions() -> CefResult<()> {
             ))
         })?;
 
-        let mut permissions = metadata.permissions();
-        let current_mode = permissions.mode();
+        let current_mode = metadata.permissions().mode();
         let new_mode = current_mode | ((current_mode & 0o444) >> 2);
 
         if current_mode != new_mode {
-            permissions.set_mode(new_mode);
-            std::fs::set_permissions(&path, permissions).map_err(|e| {
-                CefError::InitializationFailed(format!(
-                    "Failed to set executable permissions for {}: {}",
-                    path.display(),
-                    e
-                ))
-            })?;
-            godot::global::godot_print!(
-                "[CefInit] Set executable permissions for: {}",
+            #[cfg(target_os = "macos")]
+            return Err(CefError::InitializationFailed(format!(
+                "The signed CEF helper is missing executable permissions: {}. Repair or reinstall the runtime and export the project again; signed bundles cannot be changed at game startup.",
                 path.display()
-            );
+            )));
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                let mut permissions = metadata.permissions();
+                permissions.set_mode(new_mode);
+                std::fs::set_permissions(&path, permissions).map_err(|e| {
+                    CefError::InitializationFailed(format!(
+                        "Failed to set executable permissions for {}: {}",
+                        path.display(),
+                        e
+                    ))
+                })?;
+                godot::global::godot_print!(
+                    "[CefInit] Set executable permissions for: {}",
+                    path.display()
+                );
+            }
         }
     }
 

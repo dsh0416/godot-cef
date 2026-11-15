@@ -2,8 +2,8 @@
 
 本页面介绍 Godot CEF 如何通过运行时函数钩子在 Vulkan 后端启用 GPU 加速渲染，以及该方案的限制与注意事项。
 
-本页包含完整 GitHub Release 包支持的架构。精简的 Asset Store 包不含 Windows/Linux ARM64；
-需要这些架构时请选择完整包。详见[分发版本](./distribution-variants)。
+完整包和 Asset Store 包均覆盖本页所列架构。Store 包通过原生编辑器安装窗口下载 CEF，
+完整包则包含离线运行时。详见[分发版本](./distribution-variants)。
 
 ## 背景
 

@@ -1,0 +1,17 @@
+[package]
+name = "gdcef_bootstrap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+godot = { workspace = true }
+process_path = { workspace = true }
+gdcef_runtime = { path = "../gdcef_runtime", features = ["installer"] }

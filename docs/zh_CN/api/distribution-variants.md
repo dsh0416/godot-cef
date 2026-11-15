@@ -1,43 +1,51 @@
 ---
 title: 分发版本与源码构建
-description: 选择完整 GitHub Release 或精简 Asset Store 插件，并构建自定义 ARM64 二进制。
+description: 选择离线完整包或原生运行时安装器，并构建自定义 ARM64 二进制。
 ---
 
 # 分发版本与源码构建
 
-Godot CEF 构建全部受支持的架构，同时生成两个分发包，以应对 Asset Store 的版本大小限制。
-完整包继续提供 Windows/Linux ARM64 二进制。此方案不移除这些平台的支持，也不会改变完整包的默认行为。
-背景讨论见 [#238](https://github.com/dsh0416/godot-cef/issues/238) 和 [#239](https://github.com/dsh0416/godot-cef/pull/239)。
+Godot CEF 提供两种分发包，平台覆盖和浏览器 API 相同。两者的区别是 CEF 和 helper 应用是否已经安装。
 
-| 分发包 | Release 文件名 | 平台目录 |
+| 分发包 | Release 文件名 | 包含的组件 |
 |---|---|---|
-| 完整包（默认） | `godot_cef-v<version>.zip` | Windows x86_64/ARM64、Linux x86_64/ARM64、macOS universal |
-| Asset Store 精简包 | `godot_cef-store-v<version>.zip` | Windows x86_64、Linux x86_64、macOS universal |
+| 完整包（默认） | `godot_cef-v<version>.zip` | 原生安装器和浏览器库、CEF、已展开的 helper，可离线使用 |
+| Asset Store 安装包 | `godot_cef-store-v<version>.zip` | 原生安装器和浏览器库、内嵌 helper 数据；在编辑器中安装 CEF |
 
-macOS universal 始终同时包含 x86_64 和 ARM64。CI 将两个 ZIP 作为独立构件上传，分别命名为
+**两种包都支持 Windows x86_64/ARM64、Linux x86_64/ARM64 和 macOS universal。**
+macOS universal 同时包含 x86_64 和 ARM64。CI 将两个 ZIP 作为独立构件上传，分别命名为
 `godot_cef-addon` 和 `godot_cef-store-addon`。标签的 release 流程会把两者附加到草稿 release；
 构建 PR 不会发布 release。
 
 ## 选择与切换
 
-需要 Windows/Linux ARM64 原生 Godot 编辑器或导出时，请下载**完整包**。
-Store 包不注册这两种架构，原生 ARM64 进程不能从中加载扩展。
-Windows x86_64 模拟运行不是经本次改动验证的替代方案。
+需要离线安装时选择**完整包**。希望减小首次下载体积时选择 **Store 包**，然后在
+**Godot CEF Setup** 中选择本机平台和需要导出的平台。安装器下载与插件匹配的 CEF，
+并展开内嵌的 helper。安装完成后重启编辑器。离线导入和命令行用法见
+[运行时安装](./runtime-installation.md)。
 
 两个 ZIP 都保持原有 `dist/addons/godot_cef/` 布局，并安装为项目中的 `addons/godot_cef/`。
-每个包只有一个名为 `godot_cef.gdextension` 的清单，其注册与包内二进制相符。
-切换版本时先备份本地修改，然后**替换整个插件目录**，不要叠加解压到旧目录。
-不要同时安装两个插件副本或清单，以免重复注册扩展类。
+每个平台有两个原生库：`gdcef_bootstrap` 提供不依赖 CEF 的 Rust 编辑器安装器，
+`gdcef` 提供浏览器 API，不需要 GDScript 安装脚本。
 
-完整清单来自仓库 `addons/godot_cef/godot_cef.gdextension`。
-Store 打包器自动移除其中 Windows/Linux ARM64 库条目和依赖块，也不复制这两种架构的构件。
-两个分发包共享版本和 API；区别在于包含的架构。最终 ZIP 大小以实际构建测量为准，
-更小的目标集合不代表已经确认满足 Asset Store 的精确字节限制。
+两种包都启用 `godot_cef_bootstrap.gdextension`。Store 包以
+`godot_cef.gdextension.in` 保存浏览器清单模板；安装完成后，安装器在编辑器正常退出或重启时
+发布 `godot_cef.gdextension`，其中只包含安装完整的平台。完整包已经包含有效的浏览器清单。
+`runtime-install.json` 记录确切版本、平台路径、必需文件和内嵌 helper 数据的位置。
+
+原生文件保存在 `bin/<target>/<plugin-version>-cef-<cef-version>/`，
+不同运行时版本使用不同目录，避免覆盖正在被编辑器或游戏使用的动态库。
+手动切换版本时先关闭编辑器及运行中的游戏，备份本地修改，再**替换整个插件目录**，不要叠加解压到旧目录。
+不要同时安装两个分发包副本；同一插件内的安装器和浏览器清单则需要共存。
+Store ZIP 不包含独立可执行的 helper 或 CEF 运行时，体积缩小来自安装时下载组件，
+不再通过移除 ARM64 平台减小体积。最终 ZIP 大小以实际构建产物为准。
 
 ## 在本地生成两种分发包
 
-构件输入布局为 `artifacts/gdcef-<target>/`，其中包含该目标的扩展、helper 和 CEF 运行时资源。
-`mise run pack` 默认选择 `full`，保持此前行为；Store 版本需显式指定。
+构件输入布局为 `artifacts/gdcef-<target>/`，其中包含该目标的两个原生库、展开后的 helper、
+CEF 运行时资源，以及组装步骤生成的 `runtime-platform.json`。
+`mise run pack` 默认选择 `full`；Store 版本需显式指定。
+Store 打包器保留原生库和内嵌 helper 数据，省略展开的 helper 和 CEF。
 在仓库根目录运行以下命令（已启用 mise 环境）：
 
 ```bash
@@ -45,21 +53,28 @@ mise run pack --artifacts artifacts --output staging/full/dist/addons/godot_cef 
 mise run validate --addon staging/full/dist/addons/godot_cef --variant full
 mise run pack --artifacts artifacts --output staging/store/dist/addons/godot_cef --variant store
 mise run validate --addon staging/store/dist/addons/godot_cef --variant store
-(cd staging/full && zip -r ../../godot_cef.zip dist)
-(cd staging/store && zip -r ../../godot_cef-store.zip dist)
+(cd staging/full && zip -ry ../../godot_cef.zip dist)
+(cd staging/store && zip -ry ../../godot_cef-store.zip dist)
 ```
 
 输入目标为 `universal-apple-darwin`、`x86_64-pc-windows-msvc`、`aarch64-pc-windows-msvc`、
 `x86_64-unknown-linux-gnu` 和 `aarch64-unknown-linux-gnu`。
-使用 `validate --variant` 时，必须存在所选版本的全部目标，且不得包含被排除的目标目录。
-不传 `--variant` 则保留原有的部分插件验证行为。
+无论在什么系统上打包，都必须提供全部五个目标；缺少构件时会在修改输出目录前报错。
+仅本地开发可以显式传入 `pack --allow-partial` 打包部分平台；这类开发包只提供所含平台，不能作为正式分发包。
+使用 `validate --variant full|store` 时，必须包含全部五个目标，并验证最终原生库中的
+内嵌 payload 校验和、清单以及运行时布局。Store 验证还会拒绝额外文件，包括展开的可执行组件。
+不传 `--variant` 时可以验证只包含部分平台的插件。
 打包输出目录会被重建；请使用独立暂存目录，不要将源码插件目录作为输出。
+
+下载的 CI 构件包含内层 `gdcef-<target>.tar`。打包前将其解压到
+`artifacts/gdcef-<target>/`，并保留 Unix 权限和符号链接。
+上述最终 ZIP 命令也通过 `-y` 保留符号链接。
 
 ## 自定义 ARM64 源码构建
 
-通常直接使用完整的预编译包即可。需要自行维护构建时，可使用以下现有源码入口。
-命令按当前构建输入和资源布局整理；本地验证未执行 ARM64 编译、编辑器启动、渲染或导出，
-完整平台构建由 PR CI 验证。编译器、CEF 可用性和目标系统运行时兼容性仍需自行确认。
+两种预编译包都包含 ARM64 原生库。需要自行维护构建时，可使用以下源码入口，并在目标系统上验证。
+交叉编译成功不代表 ARM64 编辑器、渲染和导出游戏均可正常运行。PR CI 构建 Linux 原生目标，
+完整平台矩阵在 main、tag 和手动工作流运行。编译器、CEF 可用性和目标系统兼容性仍需确认。
 
 ## 通用前提
 
@@ -79,7 +94,7 @@ Linux 构建应在 Linux 上运行。在 macOS 上传入 Windows/Linux 目标并
 
 ```bat
 call "<Visual Studio installation>\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
-pwsh -NoProfile
+pwsh
 ```
 
 安装 CMake 和 PowerShell 7（`pwsh`），确保位于 `PATH`，然后运行：
@@ -87,7 +102,7 @@ pwsh -NoProfile
 ```powershell
 mise trust
 mise install
-mise exec -- pwsh -NoProfile
+mise exec -- pwsh
 # The following commands run inside this mise environment.
 $env:CEF_PATH = "$env:USERPROFILE/.local/share/cef_windows_arm64"
 $env:CEF_VERSION = mise run --quiet cef-version
@@ -97,8 +112,8 @@ rustup target add aarch64-pc-windows-msvc
 mise run bundle --release --target aarch64-pc-windows-msvc
 ```
 
-不要让 `CEF_PATH` 指向 x64 运行时。打包器将扩展、helper、DLL、locales 和 CEF 资源复制到
-`addons/godot_cef/bin/aarch64-pc-windows-msvc/`。
+不要让 `CEF_PATH` 指向 x64 运行时。打包器将两个原生库、helper、DLL、locales 和 CEF 资源复制到
+`addons/godot_cef/bin/aarch64-pc-windows-msvc/<plugin-version>-cef-<cef-version>/`。
 默认 Cargo 产物位于 `target/aarch64-pc-windows-msvc/release/`。
 在 Windows ARM64 原生宿主上构建需要 ARM64 宿主/ARM64 目标的开发环境及对应工具；本页未验证该宿主配置。
 
@@ -132,19 +147,21 @@ mise run bundle --release --target aarch64-unknown-linux-gnu
 或配置兼容的 ARM64 sysroot。核对目标系统是否满足 CEF 的 glibc 和系统库要求。
 
 Linux 打包器使用 `aarch64-linux-gnu-strip`，将运行时资源部署到
-`addons/godot_cef/bin/aarch64-unknown-linux-gnu/`。
+`addons/godot_cef/bin/aarch64-unknown-linux-gnu/<plugin-version>-cef-<cef-version>/`。
 默认 Cargo 产物位于 `target/aarch64-unknown-linux-gnu/release/`。
 打包器也接受 Linux ARM64 原生构建，但当前 linker/strip 配置仍要求上述
 `aarch64-linux-gnu-*` 工具名；发行版命名不同时需自行调整本地工具链。本页未验证原生 ARM64 宿主配置。
 
 ## 安装与验证自编译插件
 
-`mise run bundle` 将完整资源部署到仓库 `addons/godot_cef/bin/<target>/`。
-复制整个 `addons/godot_cef/` 到项目，或将目标目录复制到同一提交的完整插件。
-仓库的完整 `.gdextension` 已注册 Windows/Linux ARM64，无需手工添加清单条目。
-如果项目此前使用 Store 包，应切换为完整包的清单，并确保其引用的目标文件与实际部署相符。
-不要复制缺少依赖的扩展 DLL/SO，也不要同时启用两个 `.gdextension`。
-保留 Linux helper 和 `chrome-sandbox` 的可执行权限。
+`mise run bundle` 将完整资源部署到仓库
+`addons/godot_cef/bin/<target>/<plugin-version>-cef-<cef-version>/`，同时生成安装元数据和两个扩展清单。
+构建流程先编译 helper，再将其压缩并嵌入浏览器库；安装器原生库不链接 CEF。
+需要可分发产物时使用 `mise run bundle`，不要直接复制普通 `cargo build` 的输出。
+
+将组装后的整个 `addons/godot_cef/` 复制到项目。需要合并多个平台时，收集各平台组装构件，
+再运行 `mise run pack`，使元数据与库注册一同生成。不要只复制 DLL/SO，也不要手动混合不同版本的清单。
+保留 Linux helper 和 `chrome-sandbox` 的可执行权限；替换已被加载的插件后重启编辑器。
 
 在目标系统上验证原生 ARM64 Godot 编辑器及导出游戏的扩展加载、helper 启动、网页渲染/输入、
 以及导出资源。Linux 可在 ARM64 目标系统上对 `libgdcef.so`、`gdcef_helper`、`libcef.so` 运行 `ldd`。

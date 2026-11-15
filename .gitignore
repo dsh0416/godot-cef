@@ -3,6 +3,10 @@ target/
 
 node_modules/
 addons/godot_cef/bin/
+addons/godot_cef/godot_cef.gdextension
+addons/godot_cef/godot_cef_bootstrap.gdextension
+addons/godot_cef/*.gdextension.uid
+addons/godot_cef/runtime-install.json
 
 .DS_Store
 .envrc

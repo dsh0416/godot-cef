@@ -274,6 +274,11 @@ impl Runner {
         }
         self.draw_observer = Some(draw_observer);
         let mut poller = HttpRequest::new_alloc();
+        // Browser startup can stall a scene frame after TCP connect but before
+        // the next HTTP poll. Send/read fixture traffic independently so that
+        // stall cannot consume the server's request-header deadline. Godot still
+        // delivers request_completed on the main thread.
+        poller.set_use_threads(true);
         let error = poller.connect("request_completed", &callback("http", 0));
         if error != Error::OK {
             poller.free();
@@ -548,7 +553,18 @@ impl Runner {
                 .get(3)
                 .and_then(|value| value.try_to::<PackedByteArray>().ok());
             if result != Some(0) || status != Some(200) {
-                self.fail(format!("Loopback response failed: {result:?}/{status:?}"));
+                let excerpt = body
+                    .as_ref()
+                    .map(|body| {
+                        String::from_utf8_lossy(&body.to_vec())
+                            .chars()
+                            .take(256)
+                            .collect::<String>()
+                    })
+                    .unwrap_or_default();
+                self.fail(format!(
+                    "Loopback response failed: result={result:?}, status={status:?}, body={excerpt:?}"
+                ));
                 return;
             }
             let parsed = body.and_then(|body| serde_json::from_slice::<Value>(&body.to_vec()).ok());

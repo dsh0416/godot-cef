@@ -1,0 +1,24 @@
+[package]
+name = "gdcef_runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+installer = ["dep:download-cef", "dep:ureq", "dep:sha1_smol", "dep:bzip2"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = "1"
+flate2 = "1"
+tar = "0.4"
+sha2 = "0.11.1"
+download-cef = { version = "=3.0.1", optional = true }
+ureq = { version = "3", optional = true }
+sha1_smol = { version = "1", optional = true }
+bzip2 = { version = "0.6", optional = true }
+
+[lints]
+workspace = true

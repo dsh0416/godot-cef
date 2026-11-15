@@ -13,12 +13,22 @@ mise run validate --addon staging/full/dist/addons/godot_cef --variant full
 
 `bundle` declares a dependency on `build`, forwarding the profile, target and
 target directory before running `assemble`. `assemble` never invokes Cargo;
-`build` builds both `gdcef` and `gdcef_helper` with `--locked`. Cargo handles Rust
+`build` first builds `gdcef_helper`, creates a deterministic helper archive, then
+builds `gdcef` and the CEF-independent `gdcef_bootstrap` with `--locked`. The core
+embeds the archive through `GDCEF_HELPER_ARCHIVE`; packaging verifies those exact
+bytes in the linked library. Cargo handles Rust
 incremental compilation. Both tasks use explicit target triples, including host
 builds, so binaries live in `<target-dir>/<triple>/<debug|release>/`. The output
 root comes from `--target-dir`, then `CARGO_TARGET_DIR`, then the repository's
 `target/`. macOS builds both architectures and additionally stages its universal
 framework in `<target-dir>/<debug|release>/Godot CEF.framework`.
+
+Helper archives and their staging trees live in
+`<target-dir>/gdcef-helper/<target>/<profile>/`. `assemble` requires those inputs
+from a preceding `build`; directly compiling only `gdcef` is not a distributable
+build. The addon's native libraries and installed CEF files live under
+`bin/<target>/<plugin-version>-cef-<cef-version>/`. Upgrades install beside older
+runtimes, avoiding replacement of loaded native libraries.
 
 Set `CEF_PATH` for Linux/Windows, or `CEF_PATH_ARM64` and `CEF_PATH_X64` on macOS.
 Each macOS Cargo invocation receives the corresponding `CEF_PATH`. CI restores
@@ -41,14 +51,41 @@ invokes Cargo and platform tools without a shell. macOS uses its native `plutil`
 relative framework symlinks. Linux strips staged CEF libraries without changing
 the cached runtime or Cargo's binaries.
 
-`pack` accepts partial artifact sets, matching the previous xtask behavior.
-Both variants copy the repository's MIT `LICENSE` into the addon's content folder
-alongside `godot_cef.gdextension`.
-Follow it with `validate --variant full|store` to require every target for a
-distribution and its `LICENSE` file, and reject excluded targets. Store manifests
-omit Windows/Linux ARM64 libraries and their dependency dictionaries. Both variants keep macOS
-universal binaries. The workflow creates the same `dist/addons/godot_cef` ZIP
-layout as before.
+`stage-artifact --target <target> --output artifacts/gdcef-<target>` copies a built
+platform's versioned directory into the flat artifact input expected by `pack`.
+`platform-dir --target <target>` prints that installed platform directory for
+inspection. Each artifact contains `runtime-platform.json` with its exact native
+library paths, required runtime files, and the helper payload's byte range and
+SHA-256 digest. No target code executes while packing cross-platform artifacts.
+CI wraps each platform directory in a tar before uploading, then restores it
+before packing. This preserves executable modes, framework symlinks and hidden
+installation receipts across GitHub's artifact transport. Final ZIPs preserve
+relative symlinks as well.
+
+`pack` requires all five platform artifacts by default, before replacing an
+existing output. This keeps every download target available on every host in
+published packages. Use `--allow-partial` only for local development or tests;
+those bundles list only the native targets actually built. Both variants support
+Windows/Linux x86_64 and ARM64 and macOS universal. **Full** includes the complete offline runtime and
+an active core descriptor. **Store** includes only the bootstrap and core native
+libraries (plus the macOS framework plist), icons, license and install metadata;
+the core descriptor remains inactive as `godot_cef.gdextension.in` until the
+native editor installer has downloaded matching CEF files and extracted helpers,
+then the editor exits or restarts to activate the browser extension.
+The bootstrap descriptor is active in both variants. Store archives contain no
+standalone helpers, upstream CEF executables, or CEF libraries.
+
+`validate --variant full|store` requires every target and checks the appropriate
+distribution contract, including the embedded archive digest and the Store's
+strict file allowlist. Omit `--variant` to validate a partial local bundle.
+Packaging keeps the `dist/addons/godot_cef` ZIP layout. Run
+`node --test scripts/build/pack.test.ts` for archive and distribution regressions.
+
+macOS helper apps are assembled before embedding. The parent app and outer
+framework are signed only after CEF has been added. The editor installer follows
+the same order before activating the core; exported games receive an already
+expanded runtime. Windows/Linux export dependencies and optional upstream license
+files are generated from the installation metadata.
 
 The existing platform CI jobs validate native builds, macOS signing and Full/Store
 packages. The Rust process supervisor and HTTP integration runner remain

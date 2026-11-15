@@ -34,7 +34,7 @@ jobs:
       - name: Setup mise toolchain
         uses: ./.github/actions/setup-toolchain
         with:
-          tools: rust export-cef-dir
+          tools: rust export-cef-dir godot
 
       - name: Install Rust targets
         run: mise exec -- rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -64,7 +64,8 @@ jobs:
 
       - name: Validate macOS bundle
         run: |
-          framework_path="addons/godot_cef/bin/universal-apple-darwin/Godot CEF.framework"
+          platform_path="$(mise exec -- node scripts/build/main.ts platform-dir --target universal-apple-darwin)"
+          framework_path="$platform_path/Godot CEF.framework"
           plist_path="$framework_path/Resources/Info.plist"
           test "$(plutil -extract CFBundleExecutable raw "$plist_path")" = "libgdcef.dylib"
           test "$(plutil -extract CFBundleSupportedPlatforms.0 raw "$plist_path")" = "MacOSX"
@@ -73,17 +74,40 @@ jobs:
           otool -arch x86_64 -D "$framework_path/libgdcef.dylib" | grep -Fxq '@rpath/Godot CEF.framework/libgdcef.dylib'
           find "$framework_path/Helpers" -path '*/Libraries/*.dylib' -exec codesign --verify --strict {} \;
           codesign --verify --deep --strict "$framework_path"
+          codesign --verify --strict "$platform_path/libgdcef_bootstrap.dylib"
+          bootstrap_dependencies="$(otool -L "$platform_path/libgdcef_bootstrap.dylib")"
+          if grep -Ei 'libcef|Chromium Embedded Framework' <<< "$bootstrap_dependencies"; then exit 1; fi
+
+      - name: Test native editor installation lifecycle
+        timeout-minutes: 20
+        run: |
+          godot="$(mise where godot)/Godot.app/Contents/MacOS/Godot"
+          test -x "$godot"
+          mise exec -- node tests/bootstrap/run.ts --addon addons/godot_cef \
+            --godot "$godot" --cef-source "$CEF_PATH_ARM64" \
+            --cef-source-x64 "$CEF_PATH_X64" --output target/bootstrap-tests
+
+      - name: Upload installer evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-macos
+          path: |
+            target/bootstrap-tests/**/summary.json
+            target/bootstrap-tests/**/*.log
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Prepare artifacts
         run: |
-          mkdir -p artifacts/universal-apple-darwin
-          cp -R "target/release/Godot CEF.framework" "artifacts/universal-apple-darwin/"
+          mise exec -- node scripts/build/main.ts stage-artifact --target universal-apple-darwin --output artifacts/universal-apple-darwin
+          COPYFILE_DISABLE=1 tar -cf artifacts/gdcef-universal-apple-darwin.tar -C artifacts/universal-apple-darwin .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: gdcef-universal-apple-darwin
-          path: artifacts/universal-apple-darwin
+          path: artifacts/gdcef-universal-apple-darwin.tar
           retention-days: 30
 
   build-windows:
@@ -116,17 +140,46 @@ jobs:
           RUSTC_WRAPPER: sccache
         run: mise run bundle --release --target ${{ matrix.target }}
 
+      - name: Setup installer test toolchain
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        uses: ./.github/actions/setup-toolchain
+        with:
+          tools: godot
+
+      - name: Test native editor installation lifecycle
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $godotInstall = mise where godot
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $godot = @(Get-ChildItem -LiteralPath $godotInstall -Filter 'Godot_v*_console.exe' -File)
+          if ($godot.Count -ne 1) { throw "Expected one Godot console executable in $godotInstall" }
+          mise exec -- node tests/bootstrap/run.ts --addon addons/godot_cef --godot "$($godot[0].FullName)" --cef-source "$env:CEF_PATH" --output target/bootstrap-tests
+
+      - name: Upload installer evidence
+        if: always() && matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-windows-x64
+          path: |
+            target/bootstrap-tests/**/summary.json
+            target/bootstrap-tests/**/*.log
+          retention-days: 14
+          if-no-files-found: warn
+
       - name: Prepare artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts/${{ matrix.target }}
-          Copy-Item -Recurse addons/godot_cef/bin/${{ matrix.target }}/* artifacts/${{ matrix.target }}/
+          mise exec -- node scripts/build/main.ts stage-artifact --target ${{ matrix.target }} --output artifacts/${{ matrix.target }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tar -cf artifacts/gdcef-${{ matrix.target }}.tar -C artifacts/${{ matrix.target }} .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: gdcef-${{ matrix.target }}
-          path: artifacts/${{ matrix.target }}
+          path: artifacts/gdcef-${{ matrix.target }}.tar
           retention-days: 30
 
   build-linux:
@@ -155,10 +208,34 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: 'mise exec -- cargo test --locked -p xtask integration::'
 
+      - name: Check native installer without CEF
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        env:
+          CEF_PATH: /does-not-exist/godot-cef-bootstrap-check
+          RUSTC_WRAPPER: sccache
+        run: |
+          mise exec -- cargo check --locked -p gdcef_bootstrap --target x86_64-unknown-linux-gnu
+          dependencies="$(mise exec -- cargo tree --locked -p gdcef_bootstrap --prefix none --format '{p}')"
+          if grep -Eq '^(cef|cef-dll-sys|cef_app) ' <<< "$dependencies"; then
+            echo '::error::The installer must not link CEF or the browser core.'
+            exit 1
+          fi
+
       - name: Build and bundle for Linux
         env:
           RUSTC_WRAPPER: sccache
         run: mise run bundle --release --target ${{ matrix.target }}
+
+      - name: Verify installer has no CEF loader dependency
+        shell: bash
+        run: |
+          platform_path="$(mise exec -- node scripts/build/main.ts platform-dir --target '${{ matrix.target }}')"
+          bootstrap_dependencies="$(readelf -d "$platform_path/libgdcef_bootstrap.so")"
+          if grep -E 'NEEDED.*libcef' <<< "$bootstrap_dependencies"; then
+            echo '::error::Native installer unexpectedly depends on libcef.'
+            exit 1
+          fi
 
       - name: Setup integration test toolchain
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -171,6 +248,25 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb xauth
+
+      - name: Test native editor installation lifecycle
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        timeout-minutes: 20
+        run: |
+          xvfb-run -a -s '-screen 0 1024x768x24' mise exec -- node tests/bootstrap/run.ts \
+            --addon addons/godot_cef --godot "$(mise which godot)" \
+            --cef-source "$CEF_PATH" --output target/bootstrap-tests
+
+      - name: Upload installer evidence
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-linux-x64
+          path: |
+            target/bootstrap-tests/**/summary.json
+            target/bootstrap-tests/**/*.log
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Run Godot headless integration tests
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -200,14 +296,14 @@ jobs:
 
       - name: Prepare artifacts
         run: |
-          mkdir -p artifacts/${{ matrix.target }}
-          cp -r addons/godot_cef/bin/${{ matrix.target }}/* artifacts/${{ matrix.target }}/
+          mise exec -- node scripts/build/main.ts stage-artifact --target ${{ matrix.target }} --output artifacts/${{ matrix.target }}
+          tar -cf artifacts/gdcef-${{ matrix.target }}.tar -C artifacts/${{ matrix.target }} .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: gdcef-${{ matrix.target }}
-          path: artifacts/${{ matrix.target }}
+          path: artifacts/gdcef-${{ matrix.target }}.tar
           retention-days: 30
 
   pack:
@@ -229,7 +325,16 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: gdcef-*
-          path: artifacts
+          path: downloaded-artifacts
+
+      - name: Restore native permissions and framework links
+        run: |
+          # GitHub's ZIP transport resets modes; the inner tar preserves modes,
+          # relative framework links, and hidden installation receipts.
+          for target in universal-apple-darwin x86_64-pc-windows-msvc aarch64-pc-windows-msvc x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            mkdir -p "artifacts/gdcef-$target"
+            tar -xf "downloaded-artifacts/gdcef-$target/gdcef-$target.tar" -C "artifacts/gdcef-$target"
+          done
 
       - name: Pack full and Asset Store addons
         run: |
@@ -243,8 +348,8 @@ jobs:
             mise run validate \
               --addon staging/$variant/dist/addons/godot_cef --variant "$variant"
           done
-          (cd staging/full && zip -r ../../godot_cef.zip dist)
-          (cd staging/store && zip -r ../../godot_cef-store.zip dist)
+          (cd staging/full && zip -ry ../../godot_cef.zip dist)
+          (cd staging/store && zip -ry ../../godot_cef-store.zip dist)
 
       - name: Upload full addon
         uses: actions/upload-artifact@v7

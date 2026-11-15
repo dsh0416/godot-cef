@@ -25,19 +25,40 @@ async function main(): Promise<void> {
         target: values.target ?? process.env.usage_target,
         targetDir: values["target-dir"] ?? process.env.usage_target_dir,
       });
-      if (command !== "assemble") build(config);
+      if (command !== "assemble") await build(config);
       if (command !== "build") await assemble(config);
       break;
     }
     case "pack": {
       const { values } = parseArgs({ args, options: {
         artifacts: { type: "string", short: "a" }, output: { type: "string", short: "o" },
-        "addon-src": { type: "string" }, variant: { type: "string" },
+        "addon-src": { type: "string" }, variant: { type: "string" }, "allow-partial": { type: "boolean" },
       } });
       if (!values.artifacts || !values.output) throw new Error("pack requires --artifacts and --output");
       const { pack } = await import("./pack.ts");
       const { variant } = await import("./platforms.ts");
-      await pack(values.artifacts, values.output, values["addon-src"], variant(values.variant));
+      await pack(values.artifacts, values.output, values["addon-src"], variant(values.variant), { allowPartial: values["allow-partial"] });
+      break;
+    }
+    case "platform-dir":
+    case "stage-artifact": {
+      const { values } = parseArgs({ args, options: { target: { type: "string" }, output: { type: "string" } } });
+      if (!values.target) throw new Error(`${command} requires --target`);
+      const { join, resolve } = await import("node:path");
+      const { root, assertSeparate, copy } = await import("./common.ts");
+      const { installManifest, platformDirectory } = await import("./install-manifest.ts");
+      const { platforms } = await import("./platforms.ts");
+      if (!platforms.some(platform => platform.target === values.target)) throw new Error("Unknown platform target");
+      const source = join(root, "addons/godot_cef", platformDirectory(await installManifest(), values.target));
+      if (command === "platform-dir") console.log(source);
+      else {
+        if (!values.output) throw new Error("stage-artifact requires --output");
+        const output = resolve(values.output);
+        assertSeparate(output, [source]);
+        const { rm } = await import("node:fs/promises");
+        await rm(output, { recursive: true, force: true });
+        await copy(source, output);
+      }
       break;
     }
     case "validate": {
@@ -48,7 +69,7 @@ async function main(): Promise<void> {
       await validate(values.addon, values.variant === undefined ? undefined : variant(values.variant));
       break;
     }
-    default: throw new Error("Usage: node scripts/build/main.ts <cef-version|validate-versions|build|assemble|bundle|pack|validate> [options]");
+    default: throw new Error("Usage: node scripts/build/main.ts <cef-version|validate-versions|build|assemble|bundle|pack|validate|platform-dir|stage-artifact> [options]");
   }
 }
 

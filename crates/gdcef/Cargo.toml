@@ -25,6 +25,10 @@ url = { workspace = true }
 percent-encoding = { workspace = true }
 adblock = { workspace = true }
 ciborium = { workspace = true }
+gdcef_runtime = { path = "../gdcef_runtime", default-features = false }
+
+[build-dependencies]
+sha2 = "0.11.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libloading = { workspace = true }
