@@ -55,10 +55,13 @@ url = "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-
 url_api = "https://api.github.com/repos/taiki-e/cargo-llvm-cov/releases/assets/547404213"
 provenance = "github-attestations"
 
-[[tools."cargo:export-cef-dir"]]
-version = "156.5.0"
-backend = "cargo:export-cef-dir"
-specifiers = ["156.5.0"]
+[[tools.export-cef-dir]]
+version = "rev:bacdb41c17f30f4eca4a6f747586fbf7f280ab90"
+backend = "cargo:tauri-apps/cef-rs"
+specifiers = ["rev:bacdb41c17f30f4eca4a6f747586fbf7f280ab90"]
+
+[tools.export-cef-dir.options]
+crate = "export-cef-dir"
 
 [[tools.godot]]
 version = "4.6-stable"

@@ -8,7 +8,10 @@ min_version = '2026.10.0'
 rust = { version = "nightly", components = "rustfmt,clippy" }
 node = "26"
 pnpm = "latest"
-"cargo:export-cef-dir" = "156.5.0"
+# The published exporter locks download-cef 3.0.0, whose 10 MiB index limit is
+# too small. Use the download-cef 3.0.1 source until an exporter includes the fix.
+# https://github.com/tauri-apps/cef-rs/pull/512
+export-cef-dir = { version = "rev:bacdb41c17f30f4eca4a6f747586fbf7f280ab90", crate = "export-cef-dir" }
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 
 [tools.godot]
@@ -23,6 +26,7 @@ macos-x64 = { bin_path = "Godot.app/Contents/MacOS" }
 macos-arm64 = { bin_path = "Godot.app/Contents/MacOS" }
 
 [tool_alias]
+export-cef-dir = "cargo:tauri-apps/cef-rs"
 # mise 2026.10.0's Aqua backend misreads Godot_v filenames as v-prefixed tags.
 godot = "github:godotengine/godot"
 

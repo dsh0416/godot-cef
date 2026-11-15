@@ -53,7 +53,7 @@ runs:
     - name: Setup mise toolchain
       uses: ./.github/actions/setup-toolchain
       with:
-        tools: rust cargo:export-cef-dir
+        tools: rust export-cef-dir
 
     - name: Install Clippy component
       if: ${{ inputs.install-clippy == 'true' }}
