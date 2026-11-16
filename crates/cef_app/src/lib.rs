@@ -33,8 +33,10 @@ fn default_enable_features(
 
     #[cfg(target_os = "linux")]
     {
+        // Not "Vulkan": Skia's Vulkan compositor never writes the exported
+        // DMA-BUF on NVIDIA, so accelerated OSR paints transparent frames (#162).
         if backend == GodotRenderBackend::Vulkan {
-            features.extend(["Vulkan", "VulkanFromANGLE", "DefaultANGLEVulkan"]);
+            features.extend(["VulkanFromANGLE", "DefaultANGLEVulkan"]);
         }
 
         if wayland_session {
@@ -247,7 +249,6 @@ mod tests {
         assert_eq!(
             default_enable_features(GodotRenderBackend::Vulkan, true),
             vec![
-                "Vulkan",
                 "VulkanFromANGLE",
                 "DefaultANGLEVulkan",
                 "WebRTCPipeWireCapturer"
