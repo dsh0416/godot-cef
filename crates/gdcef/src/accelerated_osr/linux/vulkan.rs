@@ -1,7 +1,10 @@
 //! Linux capture of a callback-borrowed DMA-BUF into an owned snapshot slot.
 //!
-//! Imports are deliberately per callback. An inode or duplicated FD identifies
-//! storage, not an immutable frame, and CEF's lease ends when capture returns.
+//! CEF's lease on a frame ends when capture returns, but Chromium paints from
+//! a small pool of buffers, so the Vulkan import of each buffer is kept for
+//! the next paint into it (`ImportCache`). A cached import names storage, not
+//! a frame: every paint still waits on the producer's sync file and copies
+//! synchronously, so no work on a cached import outlives its callback.
 
 use ash::vk::{self, Handle};
 use godot::classes::RenderingServer;
@@ -64,6 +67,7 @@ pub struct VulkanTextureImporter {
         Option<PfnVkGetPhysicalDeviceImageFormatProperties2>,
     fns: VulkanFunctions,
     device_lost: bool,
+    import_cache: ImportCache<ImportedVulkanImage>,
     // Keep the dispatch library alive as long as its function pointers.
     _library: libloading::Library,
 }
@@ -71,6 +75,107 @@ pub struct VulkanTextureImporter {
 struct ImportedVulkanImage {
     image: vk::Image,
     memory: vk::DeviceMemory,
+}
+
+/// Identity of one DMA-BUF import. The inode names the buffer object, and a
+/// cached import holds a descriptor for it, so the number cannot be reused by
+/// another buffer while the entry lives. Any other difference is a new import.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ImportKey {
+    device: libc::dev_t,
+    inode: libc::ino_t,
+    modifier: u64,
+    format: vk::Format,
+    width: u32,
+    height: u32,
+    plane_count: usize,
+    /// Stride and offset per plane, in CEF's plane order; unused planes are 0.
+    planes: [(u32, u64); 4],
+}
+
+/// Chromium painted from 2 to 4 distinct buffers per browser in local runs
+/// (NVIDIA, 1080p and 4K). Twice that leaves headroom while bounding how many
+/// buffers Chromium has released stay alive through their imports.
+const IMPORT_CACHE_CAPACITY: usize = 8;
+
+/// Live imports, least recently used first. Generic over the import so its
+/// policy is testable without a GPU; the owner destroys every value handed back.
+struct ImportCache<V> {
+    entries: Vec<(ImportKey, V)>,
+}
+
+impl<V> Default for ImportCache<V> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl<V> ImportCache<V> {
+    /// One paint into the buffer `key` names: drops the imports of other
+    /// shapes, reuses the import under `key` or makes one, and copies from it.
+    /// The import stays cached only when the copy succeeded. Every import
+    /// leaving the cache goes to `destroy`; `state` is passed to each step.
+    fn paint<S, E>(
+        &mut self,
+        state: &mut S,
+        key: ImportKey,
+        import: impl FnOnce(&mut S) -> Result<V, E>,
+        copy: impl FnOnce(&mut S, &V) -> Result<(), E>,
+        mut destroy: impl FnMut(&mut S, V),
+    ) -> Result<(), E> {
+        for stale in self.evict_other_shapes(&key) {
+            destroy(state, stale);
+        }
+        let value = match self.take(&key) {
+            Some(hit) => hit,
+            None => import(state)?,
+        };
+        let result = copy(state, &value);
+        if result.is_ok() {
+            if let Some(evicted) = self.insert(key, value) {
+                destroy(state, evicted);
+            }
+        } else {
+            // A failed copy fails the browser's handoff; nothing reuses it.
+            destroy(state, value);
+        }
+        result
+    }
+
+    /// Hands a hit to the caller for the duration of its use.
+    fn take(&mut self, key: &ImportKey) -> Option<V> {
+        let index = self.entries.iter().position(|(held, _)| held == key)?;
+        Some(self.entries.remove(index).1)
+    }
+
+    /// Stores `value` as most recently used and returns the import the caller
+    /// must destroy: the least recently used one when full, or a stale import
+    /// under the same key.
+    fn insert(&mut self, key: ImportKey, value: V) -> Option<V> {
+        let stale = self.take(&key);
+        let evicted =
+            (self.entries.len() == IMPORT_CACHE_CAPACITY).then(|| self.entries.remove(0).1);
+        self.entries.push((key, value));
+        stale.or(evicted)
+    }
+
+    /// Removes the imports whose size or format differs from `key`'s. After a
+    /// resize Chromium paints from new buffers, so the old ones would only
+    /// keep released memory alive until evicted.
+    fn evict_other_shapes(&mut self, key: &ImportKey) -> Vec<V> {
+        let shape = |held: &ImportKey| (held.width, held.height, held.format);
+        self.entries
+            .extract_if(.., |(held, _)| shape(held) != shape(key))
+            .map(|(_, value)| value)
+            .collect()
+    }
+
+    /// Empties the cache, returning every import exactly once.
+    fn flush(&mut self) -> Vec<V> {
+        self.entries.drain(..).map(|(_, value)| value).collect()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -210,6 +315,7 @@ impl VulkanTextureImporter {
             ),
             fns,
             device_lost: false,
+            import_cache: ImportCache::default(),
             _library: library,
         })
     }
@@ -237,55 +343,35 @@ impl VulkanTextureImporter {
         if SnapshotFormat::from_cef(info)? != target.format {
             return Err("CEF DMA-BUF format does not match its snapshot slot".into());
         }
-        let plane_count =
-            usize::try_from(info.plane_count).map_err(|_| "Invalid CEF plane count")?;
-        if plane_count == 0 || plane_count > info.planes.len() {
-            return Err("Invalid CEF DMA-BUF plane count".into());
-        }
-        let mut params = DmaBufImportParams {
-            fds: Vec::with_capacity(plane_count),
-            strides: Vec::with_capacity(plane_count),
-            offsets: Vec::with_capacity(plane_count),
-            modifier: info.modifier,
-            format: match target.format {
-                SnapshotFormat::Bgra8 => vk::Format::B8G8R8A8_SRGB,
-                SnapshotFormat::Rgba8 => vk::Format::R8G8B8A8_SRGB,
-            },
-            width: target.width,
-            height: target.height,
-        };
-        let mut identity = None;
-        for plane in &info.planes[..plane_count] {
+        let key = import_key(info, &target, |fd| {
             let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-            if plane.fd < 0 || unsafe { libc::fstat(plane.fd, &mut stat) } != 0 {
-                return Err("Invalid CEF DMA-BUF descriptor".into());
-            }
-            let current = (stat.st_dev, stat.st_ino);
-            if identity.is_some_and(|previous| previous != current) {
-                return Err("Disjoint DMA-BUF memory planes require a separate import path".into());
-            }
-            identity = Some(current);
-            let duplicated = unsafe { libc::fcntl(plane.fd, libc::F_DUPFD_CLOEXEC, 0) };
-            if duplicated < 0 {
-                return Err(format!(
-                    "Failed to duplicate CEF DMA-BUF: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            params.fds.push(duplicated);
-            params.strides.push(plane.stride);
-            params.offsets.push(plane.offset);
-        }
-        // Convert Linux's implicit producer fence into an explicit Vulkan wait.
+            (unsafe { libc::fstat(fd, &mut stat) } == 0).then_some((stat.st_dev, stat.st_ino))
+        })?;
+        // Known limit: while a popup is open, view and popup paints alternate
+        // shapes, so each paint evicts the other's imports and re-imports.
+        let mut cache = std::mem::take(&mut self.import_cache);
+        let result = cache.paint(
+            self,
+            key,
+            |importer| importer.import_dmabuf_to_image(&mut duplicate_planes(info, &key)?),
+            |importer, imported| importer.copy_from(imported, info, &target),
+            |importer, imported| importer.destroy_import(imported),
+        );
+        self.import_cache = cache;
+        result
+    }
+
+    /// Copies the frame in `imported` into `target` and waits for the copy.
+    fn copy_from(
+        &mut self,
+        imported: &ImportedVulkanImage,
+        info: &cef::AcceleratedPaintInfo,
+        target: &NativeCaptureTarget,
+    ) -> Result<(), String> {
+        // Convert Linux's implicit producer fence into an explicit Vulkan wait,
+        // on every paint: a cached import says nothing about the frame in it.
         // CEF keeps the frame leased until the blocking native copy completes.
-        let producer = self.import_producer_semaphore(params.fds[0])?;
-        let imported = match self.import_dmabuf_to_image(&mut params) {
-            Ok(imported) => imported,
-            Err(error) => {
-                unsafe { (self.fns.destroy_semaphore)(self.device, producer, std::ptr::null()) };
-                return Err(error);
-            }
-        };
+        let producer = self.import_producer_semaphore(info.planes[0].fd)?;
         let context = VulkanCopyContext {
             device: self.device,
             queue: self.queue,
@@ -321,12 +407,22 @@ impl VulkanTextureImporter {
         };
         // SUCCESS or terminal device loss is established before returning CEF's
         // borrowed frame. A fence timeout is never treated as completion.
+        unsafe { (self.fns.destroy_semaphore)(self.device, producer, std::ptr::null()) };
+        result
+    }
+
+    /// Capture is synchronous, so no submitted work uses `imported` any more.
+    fn destroy_import(&self, imported: ImportedVulkanImage) {
         unsafe {
             (self.fns.destroy_image)(self.device, imported.image, std::ptr::null());
             (self.fns.free_memory)(self.device, imported.memory, std::ptr::null());
-            (self.fns.destroy_semaphore)(self.device, producer, std::ptr::null());
         }
-        result
+    }
+
+    fn flush_imports(&mut self) {
+        for imported in self.import_cache.flush() {
+            self.destroy_import(imported);
+        }
     }
 
     pub fn prepare_publication(&self) -> Result<(), String> {
@@ -789,8 +885,9 @@ impl VulkanTextureImporter {
 
 impl Drop for VulkanTextureImporter {
     fn drop(&mut self) {
-        // Every successful capture completed synchronously; no pending borrow,
-        // cached import, command buffer, or semaphore can outlive its callback.
+        // Every capture completed synchronously, so no pending borrow, cached
+        // import, command buffer, or semaphore can outlive its callback.
+        self.flush_imports();
         unsafe {
             (self.fns.destroy_fence)(self.device, self.fence, std::ptr::null());
             (self.fns.destroy_command_pool)(self.device, self.command_pool, std::ptr::null());
@@ -833,6 +930,333 @@ fn wait_for_dma_buf_writer(fd: RawFd) -> Result<(), String> {
     }
 }
 
+/// The import parameters for the buffer `key` names, holding the importer's own
+/// duplicate of each plane's descriptor (closed when the parameters drop).
+fn duplicate_planes(
+    info: &cef::AcceleratedPaintInfo,
+    key: &ImportKey,
+) -> Result<DmaBufImportParams, String> {
+    let mut params = DmaBufImportParams {
+        fds: Vec::with_capacity(key.plane_count),
+        strides: Vec::with_capacity(key.plane_count),
+        offsets: Vec::with_capacity(key.plane_count),
+        modifier: key.modifier,
+        format: key.format,
+        width: key.width,
+        height: key.height,
+    };
+    for plane in &info.planes[..key.plane_count] {
+        let duplicated = unsafe { libc::fcntl(plane.fd, libc::F_DUPFD_CLOEXEC, 0) };
+        if duplicated < 0 {
+            return Err(format!(
+                "Failed to duplicate CEF DMA-BUF: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        params.fds.push(duplicated);
+        params.strides.push(plane.stride);
+        params.offsets.push(plane.offset);
+    }
+    Ok(params)
+}
+
+/// Identifies the DMA-BUF behind `info` for `ImportCache`. `identity` returns
+/// a descriptor's (device, inode), as `fstat` does.
+fn import_key(
+    info: &cef::AcceleratedPaintInfo,
+    target: &NativeCaptureTarget,
+    mut identity: impl FnMut(RawFd) -> Option<(libc::dev_t, libc::ino_t)>,
+) -> Result<ImportKey, String> {
+    let plane_count = usize::try_from(info.plane_count).map_err(|_| "Invalid CEF plane count")?;
+    if plane_count == 0 || plane_count > info.planes.len() {
+        return Err("Invalid CEF DMA-BUF plane count".into());
+    }
+    let mut object = None;
+    let mut planes = [(0, 0); 4];
+    for (layout, plane) in planes.iter_mut().zip(&info.planes[..plane_count]) {
+        let current = (plane.fd >= 0)
+            .then(|| identity(plane.fd))
+            .flatten()
+            .ok_or("Invalid CEF DMA-BUF descriptor")?;
+        if object.is_some_and(|previous| previous != current) {
+            return Err("Disjoint DMA-BUF memory planes require a separate import path".into());
+        }
+        object = Some(current);
+        *layout = (plane.stride, plane.offset);
+    }
+    let (device, inode) = object.ok_or("Invalid CEF DMA-BUF plane count")?;
+    Ok(ImportKey {
+        device,
+        inode,
+        modifier: info.modifier,
+        format: match target.format {
+            SnapshotFormat::Bgra8 => vk::Format::B8G8R8A8_SRGB,
+            SnapshotFormat::Rgba8 => vk::Format::R8G8B8A8_SRGB,
+        },
+        width: target.width,
+        height: target.height,
+        plane_count,
+        planes,
+    })
+}
+
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
     get_godot_gpu_device_ids_vulkan("libvulkan.so.1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OBJECT: (libc::dev_t, libc::ino_t) = (1, 7);
+    const MODIFIER: u64 = 0x0300_0000_0606_0014;
+
+    fn target(width: u32) -> NativeCaptureTarget {
+        NativeCaptureTarget {
+            native_handle: 1,
+            width,
+            height: 1080,
+            format: SnapshotFormat::Bgra8,
+        }
+    }
+
+    /// A paint whose planes all have descriptor 3 and the given layouts.
+    fn paint(planes: &[(u32, u64)]) -> cef::AcceleratedPaintInfo {
+        let mut info = cef::AcceleratedPaintInfo {
+            plane_count: planes.len() as i32,
+            modifier: MODIFIER,
+            ..Default::default()
+        };
+        for (plane, &(stride, offset)) in info.planes.iter_mut().zip(planes) {
+            plane.fd = 3;
+            plane.stride = stride;
+            plane.offset = offset;
+        }
+        info
+    }
+
+    /// The key of a one-plane buffer of `OBJECT`, 1080 rows high.
+    fn key(width: u32, stride: u32) -> ImportKey {
+        ImportKey {
+            device: OBJECT.0,
+            inode: OBJECT.1,
+            modifier: MODIFIER,
+            format: vk::Format::B8G8R8A8_SRGB,
+            width,
+            height: 1080,
+            plane_count: 1,
+            planes: [(stride, 0), (0, 0), (0, 0), (0, 0)],
+        }
+    }
+
+    #[test]
+    fn key_names_the_buffer_object_and_every_plane_layout() {
+        let expected = ImportKey {
+            plane_count: 2,
+            planes: [(7680, 0), (512, 8_388_608), (0, 0), (0, 0)],
+            ..key(1920, 7680)
+        };
+        let main_and_aux = paint(&[(7680, 0), (512, 8_388_608)]);
+        assert_eq!(
+            import_key(&main_and_aux, &target(1920), |_| Some(OBJECT)),
+            Ok(expected)
+        );
+        // A different auxiliary plane is a different import of the same object.
+        let moved_aux = paint(&[(7680, 0), (512, 8_392_704)]);
+        assert_ne!(
+            import_key(&moved_aux, &target(1920), |_| Some(OBJECT)),
+            Ok(expected)
+        );
+        // So is the same buffer read as another format.
+        let rgba = NativeCaptureTarget {
+            format: SnapshotFormat::Rgba8,
+            ..target(1920)
+        };
+        assert_eq!(
+            import_key(&main_and_aux, &rgba, |_| Some(OBJECT)),
+            Ok(ImportKey {
+                format: vk::Format::R8G8B8A8_SRGB,
+                ..expected
+            })
+        );
+    }
+
+    #[test]
+    fn key_rejects_planes_of_different_objects_and_bad_descriptors() {
+        let info = paint(&[(7680, 0), (512, 8_388_608)]);
+        let mut next = 0;
+        let disjoint = import_key(&info, &target(1920), |_| {
+            next += 1;
+            Some((1, next))
+        });
+        assert!(disjoint.is_err_and(|error| error.contains("Disjoint")));
+        assert!(import_key(&info, &target(1920), |_| None).is_err());
+        let mut closed = info.clone();
+        closed.planes[1].fd = -1;
+        assert!(import_key(&closed, &target(1920), |_| Some(OBJECT)).is_err());
+        for count in [0, 5, -1] {
+            let invalid = cef::AcceleratedPaintInfo {
+                plane_count: count,
+                ..info.clone()
+            };
+            assert!(import_key(&invalid, &target(1920), |_| Some(OBJECT)).is_err());
+        }
+    }
+
+    #[test]
+    fn a_hit_hands_back_the_same_import_once() {
+        let mut cache = ImportCache::default();
+        assert_eq!(cache.insert(key(1920, 7680), 42), None);
+        assert_eq!(cache.take(&key(1920, 7680)), Some(42));
+        assert_eq!(cache.take(&key(1920, 7680)), None);
+        assert_eq!(cache.take(&key(1920, 7936)), None);
+    }
+
+    #[test]
+    fn a_full_cache_evicts_the_least_recently_used_import() {
+        let mut cache = ImportCache::default();
+        let keys: Vec<_> = (0..=IMPORT_CACHE_CAPACITY as u32)
+            .map(|stride| key(1920, stride))
+            .collect();
+        for (value, key) in keys[..IMPORT_CACHE_CAPACITY].iter().enumerate() {
+            assert_eq!(cache.insert(*key, value), None);
+        }
+        // Reusing import 0 leaves import 1 as the least recently used.
+        assert_eq!(cache.take(&keys[0]), Some(0));
+        assert_eq!(cache.insert(keys[0], 0), None);
+        assert_eq!(cache.insert(keys[IMPORT_CACHE_CAPACITY], 99), Some(1));
+        assert_eq!(cache.take(&keys[1]), None);
+        assert_eq!(cache.take(&keys[0]), Some(0));
+    }
+
+    #[test]
+    fn a_resize_evicts_only_the_imports_of_other_sizes() {
+        let mut cache = ImportCache::default();
+        assert_eq!(cache.insert(key(1920, 7680), 1), None);
+        assert_eq!(cache.insert(key(1280, 5120), 2), None);
+        assert_eq!(cache.insert(key(1280, 5376), 3), None);
+        assert_eq!(cache.evict_other_shapes(&key(1280, 5120)), [1]);
+        assert!(cache.evict_other_shapes(&key(1280, 5120)).is_empty());
+        let mut kept = cache.flush();
+        kept.sort_unstable();
+        assert_eq!(kept, [2, 3]);
+        assert!(cache.flush().is_empty());
+    }
+
+    /// Records what `ImportCache::paint` asked a GPU to do; imports are numbered.
+    #[derive(Default)]
+    struct FakeGpu {
+        imports: u32,
+        copies: Vec<u32>,
+        destroyed: Vec<u32>,
+        fail_import: bool,
+        fail_copy: bool,
+    }
+
+    fn paint_into(cache: &mut ImportCache<u32>, gpu: &mut FakeGpu, key: ImportKey) -> bool {
+        cache
+            .paint(
+                gpu,
+                key,
+                |gpu| {
+                    gpu.imports += 1;
+                    if gpu.fail_import {
+                        Err(())
+                    } else {
+                        Ok(gpu.imports)
+                    }
+                },
+                |gpu, &import| {
+                    gpu.copies.push(import);
+                    if gpu.fail_copy { Err(()) } else { Ok(()) }
+                },
+                |gpu, import| gpu.destroyed.push(import),
+            )
+            .is_ok()
+    }
+
+    #[test]
+    fn a_paint_imports_on_a_miss_and_copies_from_the_cached_import_on_a_hit() {
+        let (mut cache, mut gpu) = (ImportCache::default(), FakeGpu::default());
+        assert!(paint_into(&mut cache, &mut gpu, key(1920, 7680)));
+        assert!(paint_into(&mut cache, &mut gpu, key(1920, 7680)));
+        assert!(paint_into(&mut cache, &mut gpu, key(1920, 7936)));
+        assert_eq!(gpu.imports, 2);
+        assert_eq!(gpu.copies, [1, 1, 2]);
+        assert!(gpu.destroyed.is_empty());
+    }
+
+    #[test]
+    fn a_failed_copy_destroys_its_import_instead_of_caching_it() {
+        let (mut cache, mut gpu) = (ImportCache::default(), FakeGpu::default());
+        assert!(paint_into(&mut cache, &mut gpu, key(1920, 7680)));
+        gpu.fail_copy = true;
+        assert!(!paint_into(&mut cache, &mut gpu, key(1920, 7680)));
+        assert_eq!(gpu.destroyed, [1]);
+        gpu.fail_copy = false;
+        assert!(paint_into(&mut cache, &mut gpu, key(1920, 7680)));
+        assert_eq!(gpu.copies, [1, 1, 2]);
+    }
+
+    #[test]
+    fn a_failed_import_copies_and_caches_nothing() {
+        let (mut cache, mut gpu) = (ImportCache::default(), FakeGpu::default());
+        gpu.fail_import = true;
+        assert!(!paint_into(&mut cache, &mut gpu, key(1920, 7680)));
+        assert!(gpu.copies.is_empty());
+        assert!(cache.flush().is_empty());
+    }
+
+    #[test]
+    fn a_paint_destroys_every_import_it_drops_from_the_cache() {
+        let (mut cache, mut gpu) = (ImportCache::default(), FakeGpu::default());
+        for stride in 0..=IMPORT_CACHE_CAPACITY as u32 {
+            assert!(paint_into(&mut cache, &mut gpu, key(1920, stride)));
+        }
+        // The ninth buffer evicted the least recently used import.
+        assert_eq!(gpu.destroyed, [1]);
+        // A resize drops the eight imports of the old size.
+        assert!(paint_into(&mut cache, &mut gpu, key(1280, 5120)));
+        gpu.destroyed.sort_unstable();
+        assert_eq!(gpu.destroyed, (1..=9).collect::<Vec<_>>());
+        assert_eq!(cache.flush(), [10]);
+    }
+
+    #[test]
+    fn duplicate_planes_hands_the_importer_its_own_descriptors() {
+        let mut pipe = [-1; 2];
+        assert_eq!(unsafe { libc::pipe(pipe.as_mut_ptr()) }, 0);
+        let identity = |fd| {
+            let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
+            (unsafe { libc::fstat(fd, &mut stat) } == 0).then_some((stat.st_dev, stat.st_ino))
+        };
+        let mut info = paint(&[(7680, 0), (512, 8_388_608)]);
+        for plane in &mut info.planes[..2] {
+            plane.fd = pipe[0];
+        }
+        let key = ImportKey {
+            plane_count: 2,
+            ..key(1920, 7680)
+        };
+        let params = duplicate_planes(&info, &key);
+        assert!(params.as_ref().is_ok_and(|params| {
+            params.fds.len() == 2
+                && params.fds.iter().all(|&fd| fd != pipe[0])
+                && params
+                    .fds
+                    .iter()
+                    .all(|&fd| identity(fd) == identity(pipe[0]))
+                && params.strides == [7680, 512]
+                && params.offsets == [0, 8_388_608]
+                && (params.modifier, params.format) == (MODIFIER, vk::Format::B8G8R8A8_SRGB)
+                && (params.width, params.height) == (1920, 1080)
+        }));
+        drop(params);
+        info.planes[1].fd = -1;
+        assert!(duplicate_planes(&info, &key).is_err());
+        unsafe {
+            libc::close(pipe[0]);
+            libc::close(pipe[1]);
+        }
+    }
 }
