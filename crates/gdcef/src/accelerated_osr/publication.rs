@@ -245,8 +245,11 @@ fn create_texture(
     format.set_texture_type(TextureType::TYPE_2D);
     format.set_samples(TextureSamples::SAMPLES_1);
     // Bootstrap uses an initial zero upload, avoiding sRGB RTV/UAV clears.
+    // Godot's texture_create always makes an image view, which Vulkan allows
+    // only on an image with a view-compatible usage (VUID ...-image-04441).
     format.set_usage_bits(
-        TextureUsageBits::CAN_COPY_FROM_BIT
+        TextureUsageBits::SAMPLING_BIT
+            | TextureUsageBits::CAN_COPY_FROM_BIT
             | TextureUsageBits::CAN_COPY_TO_BIT
             | TextureUsageBits::CAN_UPDATE_BIT,
     );
