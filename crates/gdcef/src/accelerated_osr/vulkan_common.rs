@@ -311,7 +311,9 @@ pub(crate) fn submit_vulkan_copy_async(
         "vkEndCommandBuffer",
     )?;
 
-    let wait_stages = [vk::PipelineStageFlags::TRANSFER];
+    // The FOREIGN_EXT/EXTERNAL acquire and its layout transition precede the
+    // first TRANSFER command; the producer wait must gate them too.
+    let wait_stages = [vk::PipelineStageFlags::ALL_COMMANDS];
     let waits = [ctx.wait_semaphore];
     let signals = [ctx.signal_semaphore];
     let mut submit_info =
@@ -424,4 +426,184 @@ pub(crate) fn get_godot_gpu_device_ids_vulkan(vulkan_lib_name: &str) -> Option<(
     );
 
     Some((vendor_id, device_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ash::vk::{self, Handle};
+    use std::cell::RefCell;
+
+    type Barrier = (vk::Image, vk::ImageLayout, vk::ImageLayout, u32, u32);
+
+    #[derive(Default)]
+    struct Recorded {
+        barriers: Vec<Barrier>,
+        wait_stages: Vec<vk::PipelineStageFlags>,
+    }
+
+    thread_local! {
+        static RECORDED: RefCell<Recorded> = RefCell::default();
+    }
+
+    unsafe extern "system" fn ok_reset_fences(
+        _: vk::Device,
+        _: u32,
+        _: *const vk::Fence,
+    ) -> vk::Result {
+        vk::Result::SUCCESS
+    }
+    unsafe extern "system" fn ok_reset_command_buffer(
+        _: vk::CommandBuffer,
+        _: vk::CommandBufferResetFlags,
+    ) -> vk::Result {
+        vk::Result::SUCCESS
+    }
+    unsafe extern "system" fn ok_begin(
+        _: vk::CommandBuffer,
+        _: *const vk::CommandBufferBeginInfo<'_>,
+    ) -> vk::Result {
+        vk::Result::SUCCESS
+    }
+    unsafe extern "system" fn ok_end(_: vk::CommandBuffer) -> vk::Result {
+        vk::Result::SUCCESS
+    }
+    #[allow(clippy::too_many_arguments)]
+    unsafe extern "system" fn record_barrier(
+        _: vk::CommandBuffer,
+        _: vk::PipelineStageFlags,
+        _: vk::PipelineStageFlags,
+        _: vk::DependencyFlags,
+        _: u32,
+        _: *const vk::MemoryBarrier<'_>,
+        _: u32,
+        _: *const vk::BufferMemoryBarrier<'_>,
+        count: u32,
+        barriers: *const vk::ImageMemoryBarrier<'_>,
+    ) {
+        let barriers = unsafe { std::slice::from_raw_parts(barriers, count as usize) };
+        RECORDED.with(|recorded| {
+            recorded
+                .borrow_mut()
+                .barriers
+                .extend(barriers.iter().map(|b| {
+                    (
+                        b.image,
+                        b.old_layout,
+                        b.new_layout,
+                        b.src_queue_family_index,
+                        b.dst_queue_family_index,
+                    )
+                }));
+        });
+    }
+    unsafe extern "system" fn noop_copy(
+        _: vk::CommandBuffer,
+        _: vk::Image,
+        _: vk::ImageLayout,
+        _: vk::Image,
+        _: vk::ImageLayout,
+        _: u32,
+        _: *const vk::ImageCopy,
+    ) {
+    }
+    unsafe extern "system" fn record_submit(
+        _: vk::Queue,
+        count: u32,
+        submits: *const vk::SubmitInfo<'_>,
+        _: vk::Fence,
+    ) -> vk::Result {
+        for submit in unsafe { std::slice::from_raw_parts(submits, count as usize) } {
+            // Without a wait the stage pointer is null: not a valid empty slice.
+            if submit.wait_semaphore_count == 0 {
+                continue;
+            }
+            let stages = unsafe {
+                std::slice::from_raw_parts(
+                    submit.p_wait_dst_stage_mask,
+                    submit.wait_semaphore_count as usize,
+                )
+            };
+            RECORDED.with(|recorded| recorded.borrow_mut().wait_stages.extend_from_slice(stages));
+        }
+        vk::Result::SUCCESS
+    }
+
+    const SRC: u64 = 1;
+    const DST: u64 = 2;
+    const FAMILY: u32 = 3;
+
+    /// Records one capture of a producer-owned image, as Linux submits it.
+    fn record(wait_semaphore: vk::Semaphore) -> Recorded {
+        RECORDED.with(|recorded| *recorded.borrow_mut() = Recorded::default());
+        let ctx = VulkanCopyContext {
+            device: vk::Device::null(),
+            queue: vk::Queue::null(),
+            queue_family_index: FAMILY,
+            src_external_queue_family: vk::QUEUE_FAMILY_FOREIGN_EXT,
+            wait_semaphore,
+            signal_semaphore: vk::Semaphore::null(),
+            reset_fences: ok_reset_fences,
+            reset_command_buffer: ok_reset_command_buffer,
+            begin_command_buffer: ok_begin,
+            end_command_buffer: ok_end,
+            cmd_pipeline_barrier: record_barrier,
+            cmd_copy_image: noop_copy,
+            queue_submit: record_submit,
+        };
+        let submitted = submit_vulkan_copy_async(
+            &ctx,
+            vk::CommandBuffer::null(),
+            vk::Fence::null(),
+            vk::Image::from_raw(SRC),
+            vk::Image::from_raw(DST),
+            4,
+            4,
+        );
+        assert_eq!(submitted, Ok(()));
+        RECORDED.with(|recorded| std::mem::take(&mut *recorded.borrow_mut()))
+    }
+
+    #[test]
+    fn producer_wait_gates_every_command_including_the_acquire() {
+        // The acquire barrier runs before the first TRANSFER-stage command, so
+        // a wait limited to TRANSFER would let it race the producer.
+        let recorded = record(vk::Semaphore::from_raw(7));
+        assert_eq!(recorded.wait_stages, [vk::PipelineStageFlags::ALL_COMMANDS]);
+    }
+
+    #[test]
+    fn no_wait_is_submitted_without_a_producer_semaphore() {
+        assert!(record(vk::Semaphore::null()).wait_stages.is_empty());
+    }
+
+    #[test]
+    fn producer_image_is_acquired_with_its_contents_and_released_again() {
+        let recorded = record(vk::Semaphore::from_raw(7));
+        let source: Vec<_> = recorded
+            .barriers
+            .iter()
+            .filter(|barrier| barrier.0 == vk::Image::from_raw(SRC))
+            .collect();
+        // UNDEFINED as the old layout would let the driver discard the frame.
+        assert_eq!(
+            source,
+            [
+                &(
+                    vk::Image::from_raw(SRC),
+                    vk::ImageLayout::GENERAL,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    vk::QUEUE_FAMILY_FOREIGN_EXT,
+                    FAMILY
+                ),
+                &(
+                    vk::Image::from_raw(SRC),
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    vk::ImageLayout::GENERAL,
+                    FAMILY,
+                    vk::QUEUE_FAMILY_FOREIGN_EXT
+                ),
+            ]
+        );
+    }
 }
