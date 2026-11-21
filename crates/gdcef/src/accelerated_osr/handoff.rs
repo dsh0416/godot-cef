@@ -68,9 +68,16 @@ fn pool_info(pool: &SharedPublication) -> Result<(Rid, (u32, u32, SnapshotFormat
 }
 
 fn create_publication(size: (u32, u32, SnapshotFormat)) -> Result<SharedPublication, String> {
-    let display = render::create_rd_texture_rid(size.0 as i32, size.1 as i32, size.2.rd_format())
-        .map_err(|error| error.to_string())?;
-    match Publication::create(display, size.0, size.1, size.2) {
+    let d3d12_bgra = super::needs_d3d12_bgra_display_workaround(size.2);
+    let display_format = if d3d12_bgra {
+        godot::classes::rendering_device::DataFormat::R8G8B8A8_UNORM
+    } else {
+        size.2.rd_format()
+    };
+    let display =
+        render::create_rd_texture_rid(size.0 as i32, size.1 as i32, display_format, d3d12_bgra)
+            .map_err(|error| error.to_string())?;
+    match Publication::create(display, size.0, size.1, size.2, d3d12_bgra) {
         Ok(pool) => Ok(pool),
         Err(error) => {
             render::free_rd_texture(display);

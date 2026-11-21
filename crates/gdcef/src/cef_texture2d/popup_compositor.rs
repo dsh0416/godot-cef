@@ -26,8 +26,8 @@ struct PopupCanvas {
 }
 
 impl PopupCompositor {
-    pub(super) fn new(view_texture: Rid) -> Self {
-        let proxy = RenderingServer::singleton().texture_proxy_create(view_texture);
+    pub(super) fn new(proxy: Rid, view_texture: Rid) -> Self {
+        RenderingServer::singleton().texture_proxy_update(proxy, view_texture);
         // CanvasItemMaterial applies blend-mode changes during SceneTree's idle
         // flush. Create it with the browser, before any popup can be displayed:
         // creating it lazily in frame_pre_draw uses straight-alpha blending for
@@ -43,10 +43,6 @@ impl PopupCompositor {
             canvas: None,
             compositing: false,
         }
-    }
-
-    pub(super) fn rid(&self) -> Rid {
-        self.proxy
     }
 
     /// Popup dimensions and position are in physical pixels, like the view's
@@ -103,10 +99,13 @@ impl PopupCompositor {
     }
 
     /// Called while RenderingServer is live, before detaching the native view
-    /// and queuing snapshot retirement. No deferred destructor owns these RIDs.
-    pub(super) fn dispose(mut self) {
+    /// and queuing snapshot retirement. Repoints the owner's persistent proxy
+    /// back to the fallback texture; `CefTexture2D` owns and frees `proxy`.
+    pub(super) fn dispose(mut self, fallback_texture: Rid) {
         let mut server = RenderingServer::singleton();
-        server.free_rid(self.proxy);
+        if self.proxy.is_valid() && fallback_texture.is_valid() {
+            server.texture_proxy_update(self.proxy, fallback_texture);
+        }
         if let Some(canvas) = self.canvas.take() {
             if self.compositing {
                 server.viewport_set_active(canvas.viewport, false);

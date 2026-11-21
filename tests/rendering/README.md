@@ -34,6 +34,13 @@ hidden, its last published pixels remain visible on the Godot texture, and
 showing publishes the updated page. The normal matrix also covers rendering
 thread models 0 and 2 and retains viewport PNGs alongside each result.
 
+Use `--scenario mesh3d --class CefTexture2D` to verify standalone `CefTexture2D`
+bound to a 3D `MeshInstance3D` (`StandardMaterial3D.albedo_texture`) before
+browser startup. It checks that `CefTexture2D.get_rid()` stays constant from
+construction through browser creation, JavaScript paints, texture resizes, and
+explicit `shutdown()`, and reads actual rendered 3D viewport pixels on both
+accelerated and software OSR backends.
+
 To check sustained accelerated frame pacing with VSync enabled, run:
 
 ```powershell

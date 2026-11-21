@@ -49,25 +49,10 @@ impl CefTexture2D {
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         let had_pending_copy = false;
 
-        let replacement = self.runtime.update_primary_texture("CefTexture2D");
-        let has_replacement = replacement.is_some();
-
-        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        {
-            if let Some(new_t2d) = replacement
-                && let Some(ref mut stable) = self.stable_texture_2d_rd
-            {
-                let new_rd_rid = new_t2d.get_texture_rd_rid();
-                stable.set_texture_rd_rid(new_rd_rid);
-                if let Some(state) = self.runtime.app_mut().state.as_mut()
-                    && let RenderMode::Accelerated { texture_2d_rd, .. } = &mut state.render_mode
-                {
-                    *texture_2d_rd = stable.clone();
-                }
-            }
-        }
-
-        let _ = replacement;
+        let has_replacement = self
+            .runtime
+            .update_primary_texture("CefTexture2D")
+            .is_some();
         let popup_changed = self.update_popup_composition();
         let should_emit_changed =
             software_had_dirty || has_replacement || had_pending_copy || popup_changed;

@@ -100,9 +100,20 @@ impl CefTexture2D {
                 .ok()
                 .map(|rs| rs.dst_rd_rid)
                 .unwrap_or(Rid::Invalid);
-            stable.set_texture_rd_rid(dst_rd_rid);
-            *texture_2d_rd = stable.clone();
-            self.popup_compositor = Some(popup_compositor::PopupCompositor::new(stable.get_rid()));
+            if dst_rd_rid.is_valid() {
+                // Allocate Texture2DRD's RenderingServer RID on the main thread
+                // before queuing `_set_texture_rd_rid` on the render thread so
+                // `texture_replace` updates our persistent proxy without racing.
+                let view_rid = stable.get_rid();
+                stable.set_texture_rd_rid(dst_rd_rid);
+                *texture_2d_rd = stable.clone();
+                if self.texture_proxy.is_valid() {
+                    self.popup_compositor = Some(popup_compositor::PopupCompositor::new(
+                        self.texture_proxy,
+                        view_rid,
+                    ));
+                }
+            }
         }
         self.base_mut().emit_changed();
     }
@@ -114,13 +125,20 @@ impl CefTexture2D {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             if let Some(compositor) = self.popup_compositor.take() {
-                compositor.dispose();
+                compositor.dispose(self.fallback_texture.get_rid());
             }
             if let Some(ref mut stable) = self.stable_texture_2d_rd {
                 stable.set_texture_rd_rid(Rid::Invalid);
             }
         }
         self.runtime.cleanup_runtime(None);
+    }
+
+    pub(super) fn free_texture_proxy(&mut self) {
+        if self.texture_proxy.is_valid() {
+            RenderingServer::singleton().free_rid(self.texture_proxy);
+            self.texture_proxy = Rid::Invalid;
+        }
     }
 
     pub(super) fn drain_event_queues(&mut self) {
@@ -200,5 +218,6 @@ impl CefTexture2D {
 impl Drop for CefTexture2D {
     fn drop(&mut self) {
         self.cleanup_instance();
+        self.free_texture_proxy();
     }
 }

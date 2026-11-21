@@ -123,6 +123,7 @@ struct Runner {
     reported: bool,
     generation: u32,
     previous_id: Option<InstanceId>,
+    initial_texture_rid: Option<Rid>,
     recreate_at: Option<Instant>,
     shutdown_at: Option<Instant>,
     requests: Vec<PermissionRequest>,
@@ -169,6 +170,7 @@ impl Runner {
             reported: false,
             generation: 1,
             previous_id: None,
+            initial_texture_rid: None,
             recreate_at: None,
             shutdown_at: None,
             requests: Vec::new(),
@@ -436,6 +438,12 @@ impl Runner {
             }
         } else {
             browser.set("texture_size", &Vector2i::new(640, 360).to_variant());
+            let rid = browser.call("get_rid", &[]).try_to::<Rid>().ok();
+            self.check(
+                rid.is_some_and(|rid| rid.is_valid()),
+                "CefTexture2D must expose a valid RID immediately upon instantiation",
+            );
+            self.initial_texture_rid = rid;
         }
         for method in [
             "is_permission_pending",

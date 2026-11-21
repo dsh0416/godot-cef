@@ -48,6 +48,30 @@ impl SnapshotFormat {
     }
 }
 
+/// Godot 4.6's D3D12 format table maps `DATA_FORMAT_B8G8R8A8_SRGB` to
+/// `{ DXGI_FORMAT_B8G8R8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB }`.
+/// Binding the sRGB view of any `B8G8R8A8` RD texture (e.g. a 3D material's
+/// `albedo_texture`) fails `CreateShaderResourceView` and removes the D3D12
+/// device. On Windows D3D12, BGRA8 captures are published into an
+/// `R8G8B8A8_UNORM` display texture (shareable as `R8G8B8A8_SRGB`) via a GPU
+/// compute swizzle pass instead.
+pub(crate) fn needs_d3d12_bgra_display_workaround(format: SnapshotFormat) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        format == SnapshotFormat::Bgra8
+            && RenderingServer::singleton()
+                .get_current_rendering_driver_name()
+                .to_string()
+                .to_lowercase()
+                .contains("d3d12")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = format;
+        false
+    }
+}
+
 use cef::{AcceleratedPaintInfo, PaintElementType};
 use godot::classes::RenderingServer;
 use godot::global::godot_print;
