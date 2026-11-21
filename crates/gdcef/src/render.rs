@@ -15,6 +15,7 @@ pub(crate) fn create_rd_texture_rid(
     width: i32,
     height: i32,
     data_format: DataFormat,
+    allow_storage: bool,
 ) -> CefResult<Rid> {
     let width = width.max(1) as i64;
     let height = height.max(1) as i64;
@@ -35,6 +36,9 @@ pub(crate) fn create_rd_texture_rid(
         DataFormat::R8G8B8A8_SRGB => {
             format.add_shareable_format(DataFormat::R8G8B8A8_UNORM);
         }
+        DataFormat::R8G8B8A8_UNORM => {
+            format.add_shareable_format(DataFormat::R8G8B8A8_SRGB);
+        }
         _ => {}
     }
     format.set_width(width as u32);
@@ -44,12 +48,14 @@ pub(crate) fn create_rd_texture_rid(
     format.set_mipmaps(1);
     format.set_texture_type(RdTextureType::TYPE_2D);
     format.set_samples(TextureSamples::SAMPLES_1);
-    format.set_usage_bits(
-        TextureUsageBits::SAMPLING_BIT
-            | TextureUsageBits::CAN_UPDATE_BIT
-            | TextureUsageBits::CAN_COPY_TO_BIT
-            | TextureUsageBits::CAN_COPY_FROM_BIT,
-    );
+    let mut usage = TextureUsageBits::SAMPLING_BIT
+        | TextureUsageBits::CAN_UPDATE_BIT
+        | TextureUsageBits::CAN_COPY_TO_BIT
+        | TextureUsageBits::CAN_COPY_FROM_BIT;
+    if allow_storage {
+        usage |= TextureUsageBits::STORAGE_BIT;
+    }
+    format.set_usage_bits(usage);
 
     let rd_texture_rid = rd.texture_create(&format, &godot::classes::RdTextureView::new_gd());
 

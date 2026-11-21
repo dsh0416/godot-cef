@@ -12,7 +12,7 @@ const { values } = parseArgs({ options: {
   godot: { type: "string" }, addon: { type: "string" }, output: { type: "string" },
   driver: { type: "string", default: process.platform === "win32" ? "d3d12"
     : process.platform === "darwin" ? "metal" : "vulkan" },
-  class: { type: "string", default: "CefTexture,CefTexture2D" },
+  class: { type: "string" },
   mode: { type: "string", default: "software,accelerated" },
   "thread-model": { type: "string", default: "0,2" },
   "gpu-validation": { type: "boolean", default: false },
@@ -21,13 +21,15 @@ const { values } = parseArgs({ options: {
 if (!values.godot) throw new Error("Pass --godot <Godot executable>; use *_console.exe on Windows");
 const godot = resolve(values.godot);
 const addon = resolve(values.addon ?? join(root, "addons/godot_cef"));
-const classes = select(values.class, ["CefTexture", "CefTexture2D"], "class");
+const mesh3d = values.scenario === "mesh3d";
+const classes = select(values.class ?? (mesh3d ? "CefTexture2D" : "CefTexture,CefTexture2D"), ["CefTexture", "CefTexture2D"], "class");
 const modes = select(values.mode, ["software", "accelerated"], "mode");
 const models = select(values["thread-model"], ["0", "2"], "thread-model");
 const gpuValidationRequested = values["gpu-validation"];
-if (!["lifecycle", "pacing", "popup", "hidden"].includes(values.scenario)) throw new Error("--scenario must be lifecycle, pacing, popup, or hidden");
+if (!["lifecycle", "pacing", "popup", "hidden", "mesh3d"].includes(values.scenario)) throw new Error("--scenario must be lifecycle, pacing, popup, hidden, or mesh3d");
 const pacing = values.scenario === "pacing";
 const popup = values.scenario === "popup";
+if (mesh3d && classes.some(item => item !== "CefTexture2D")) throw new Error("--scenario mesh3d only supports --class CefTexture2D");
 if (!["d3d12", "vulkan", "metal"].includes(values.driver)) throw new Error("Unknown --driver");
 const runRoot = join(resolve(values.output ?? join(root, "target/rendering")), `${Date.now()}-${process.pid}`);
 const project = join(runRoot, "project");
@@ -93,6 +95,13 @@ if (popup) {
   await cp(join(fixture, "popup.gd"), join(project, "popup.gd"));
   const scene = await readFile(join(project, "main.tscn"), "utf8");
   await writeFile(join(project, "main.tscn"), scene.replace("res://main.gd", "res://popup.gd"));
+} else if (mesh3d) {
+  await cp(join(fixture, "mesh3d.gd"), join(project, "mesh3d.gd"));
+  const scene = await readFile(join(project, "main.tscn"), "utf8");
+  await writeFile(
+    join(project, "main.tscn"),
+    scene.replace('type="Node"', 'type="Node3D"').replace("res://main.gd", "res://mesh3d.gd"),
+  );
 }
 await mkdir(join(project, "fixture"));
 await cp(join(fixture, "page.html"), join(project, "fixture/page.html"));

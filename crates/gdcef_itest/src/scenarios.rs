@@ -146,6 +146,18 @@ impl Runner {
                 self.browser.as_ref().is_some_and(Gd::is_instance_valid),
                 "Resource must remain a valid Godot object after explicit shutdown",
             );
+            if self.class == "CefTexture2D"
+                && let Some(expected_rid) = self.initial_texture_rid
+            {
+                let current_rid = self
+                    .browser
+                    .as_mut()
+                    .and_then(|browser| browser.call("get_rid", &[]).try_to::<Rid>().ok());
+                self.check(
+                    current_rid == Some(expected_rid),
+                    "CefTexture2D public RID must remain unchanged after explicit shutdown",
+                );
+            }
             // Calling shutdown again while dropping also verifies its public idempotent cleanup path.
             if self.generation == 3 {
                 self.stop();
@@ -200,10 +212,17 @@ impl Runner {
                 if self.class == "CefTexture2D" {
                     browser.set("texture_size", &Vector2i::new(320, 180).to_variant());
                     let size = browser.get("texture_size").try_to::<Vector2i>();
+                    let current_rid = browser.call("get_rid", &[]).try_to::<Rid>().ok();
                     self.check(
                         size.is_ok_and(|size| size == Vector2i::new(320, 180)),
                         "Resource resize must update public dimensions",
                     );
+                    if let Some(expected_rid) = self.initial_texture_rid {
+                        self.check(
+                            current_rid == Some(expected_rid),
+                            "CefTexture2D public RID must stay stable across browser creation and resize",
+                        );
+                    }
                 } else {
                     browser.set("size", &Vector2::new(320.0, 180.0).to_variant());
                     let size = browser.get("size").try_to::<Vector2>();

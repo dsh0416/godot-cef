@@ -55,6 +55,7 @@ pub struct CefTexture2D {
     base: Base<Texture2D>,
     runtime: CefTextureRuntime,
     fallback_texture: Gd<ImageTexture>,
+    texture_proxy: Rid,
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     stable_texture_2d_rd: Option<Gd<godot::classes::Texture2Drd>>,
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -120,6 +121,8 @@ impl ITexture2D for CefTexture2D {
     fn init(base: Base<Texture2D>) -> Self {
         let texture_size = Vector2i::new(1024, 1024);
         let fallback_texture = Self::make_placeholder_texture(texture_size);
+        let texture_proxy =
+            RenderingServer::singleton().texture_proxy_create(fallback_texture.get_rid());
         let editor_hint = Engine::singleton().is_editor_hint();
         // Wait until construction and scene loading finish. Method callables only
         // keep the object ID, so neither this queued call nor the signal hooks
@@ -138,6 +141,7 @@ impl ITexture2D for CefTexture2D {
             // `shutdown()` flips this off for CefTexture's borrowed helper.
             runtime: CefTextureRuntime::new(!editor_hint),
             fallback_texture,
+            texture_proxy,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             stable_texture_2d_rd,
             #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -163,7 +167,8 @@ impl ITexture2D for CefTexture2D {
 
     fn on_notification(&mut self, what: ObjectNotification) {
         if what == ObjectNotification::PREDELETE {
-            self.cleanup_instance()
+            self.cleanup_instance();
+            self.free_texture_proxy();
         }
     }
 
@@ -180,23 +185,11 @@ impl ITexture2D for CefTexture2D {
     }
 
     fn get_rid(&self) -> Rid {
-        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-        if self
-            .runtime
-            .app()
-            .state
-            .as_ref()
-            .is_some_and(|state| matches!(state.render_mode, RenderMode::Accelerated { .. }))
-            && let Some(stable) = &self.stable_texture_2d_rd
-            && stable.get_texture_rd_rid().is_valid()
-        {
-            return self
-                .popup_compositor
-                .as_ref()
-                .map_or_else(|| stable.get_rid(), popup_compositor::PopupCompositor::rid);
+        if self.texture_proxy.is_valid() {
+            self.texture_proxy
+        } else {
+            self.fallback_texture.get_rid()
         }
-
-        self.fallback_texture.get_rid()
     }
 }
 
