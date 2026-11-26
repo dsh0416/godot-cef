@@ -7,7 +7,7 @@ Godot CEF supports two modes for handling browser audio:
 
 ## Enabling Audio Capture
 
-Audio capture is configured via **Project Settings** and applies to all `CefTexture` instances.
+Audio capture is configured via **Project Settings** and applies to browsers displayed by both `CefTexture` nodes and `CefTexture2D` resources.
 
 1. Go to **Project → Project Settings**
 2. Navigate to **godot_cef → audio**
@@ -55,6 +55,8 @@ func _process(_delta):
 ```
 
 ## API Reference
+
+Both `CefTexture` and `CefTexture2D` expose the following methods. Call them on the node or resource displaying the page whose audio you want to play.
 
 ### Methods
 
@@ -115,30 +117,35 @@ print("Buffered packets: ", buffer_size)
 
 ### 3D Spatial Audio
 
-You can use `AudioStreamPlayer3D` to spatialize browser audio in 3D space:
+To play sound from a browser displayed on a mesh, assign a `StandardMaterial3D` to surface override 0 and set its albedo texture to a `CefTexture2D`. Add an `AudioStreamPlayer3D` child named `AudioStreamPlayer3D` to the mesh and attach this script to the `MeshInstance3D`. It reads audio from the browser already displayed on the mesh.
 
 ```gdscript
-extends Node3D
+extends MeshInstance3D
 
-@onready var cef_texture: CefTexture = $Screen/CefTexture
 @onready var audio_player: AudioStreamPlayer3D = $AudioStreamPlayer3D
+var browser: CefTexture2D
 
-func _ready():
-    if cef_texture.is_audio_capture_enabled():
-        var audio_stream = cef_texture.create_audio_stream()
-        audio_player.stream = audio_stream
-        audio_player.play()
+func _ready() -> void:
+    var material := get_surface_override_material(0) as StandardMaterial3D
+    if material:
+        browser = material.albedo_texture as CefTexture2D
+    if browser == null or not browser.is_audio_capture_enabled():
+        set_process(false)
+        return
 
-func _process(_delta):
-    if cef_texture.is_audio_capture_enabled():
-        var playback = audio_player.get_stream_playback()
+    audio_player.stream = browser.create_audio_stream()
+    audio_player.play()
+
+func _process(_delta: float) -> void:
+    if audio_player.has_stream_playback():
+        var playback := audio_player.get_stream_playback() as AudioStreamGeneratorPlayback
         if playback:
-            cef_texture.push_audio_to_playback(playback)
+            browser.push_audio_to_playback(playback)
 ```
 
 ### Multiple Browsers
 
-Each `CefTexture` has its own audio buffer. You can route different browsers to different audio players:
+Each browser has its own audio buffer. You can route different browsers to different audio players:
 
 ```gdscript
 @onready var browser1: CefTexture = $Browser1
@@ -197,6 +204,10 @@ audio_player.bus = "BrowserAudio"  # Custom bus with effects
 2. Ensure you're calling `push_audio_to_playback()` every frame
 3. Check that `audio_player.play()` has been called
 4. Verify the AudioStreamPlayer volume is not zero
+
+### Only the first sound plays on a mesh
+
+On Windows, a short sound can reach the system output while CEF starts capture. For subsequent sounds, call `push_audio_to_playback()` every frame on the same `CefTexture2D` assigned to the material. See the [3D spatial audio example](#3d-spatial-audio) and [CEF's capture startup issue](https://github.com/chromiumembedded/cef/issues/3319).
 
 ### Audio Stuttering
 

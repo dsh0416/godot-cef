@@ -777,22 +777,7 @@ impl CefTexture {
     /// Only works when `godot_cef/audio/enable_audio_capture` is enabled.
     #[func]
     pub fn create_audio_stream(&self) -> Gd<godot::classes::AudioStreamGenerator> {
-        use godot::classes::AudioStreamGenerator;
-
-        let mut stream = AudioStreamGenerator::new_gd();
-
-        let sample_rate = self.with_app(|app| {
-            app.state
-                .as_ref()
-                .and_then(|s| s.audio.as_ref())
-                .and_then(|a| a.sample_rate.lock().ok().map(|sr| *sr))
-                .unwrap_or(48000.0)
-        });
-
-        stream.set_mix_rate(sample_rate);
-        stream.set_buffer_length(0.1);
-
-        stream
+        self.texture2d_helper.bind().create_audio_stream()
     }
 
     /// Pushes buffered audio data to the given playback. Call every frame.
@@ -800,78 +785,29 @@ impl CefTexture {
     #[func]
     pub fn push_audio_to_playback(
         &mut self,
-        mut playback: Gd<godot::classes::AudioStreamGeneratorPlayback>,
+        playback: Gd<godot::classes::AudioStreamGeneratorPlayback>,
     ) -> i32 {
-        let queue = self.with_app(|app| {
-            app.state
-                .as_ref()
-                .and_then(|s| s.audio.as_ref())
-                .map(|a| a.packet_queue.clone())
-        });
-        let Some(queue) = queue else {
-            return 0;
-        };
-
-        let mut total_frames = 0i32;
-
-        if let Ok(mut queue) = queue.lock() {
-            'outer: while let Some(mut packet) = queue.pop_front() {
-                let mut frame_index = 0;
-                let frame_count = packet.data.len() / 2;
-
-                while frame_index < frame_count {
-                    if playback.can_push_buffer(1) {
-                        let i = frame_index * 2;
-                        let frame = Vector2::new(packet.data[i], packet.data[i + 1]);
-                        playback.push_frame(frame);
-                        total_frames += 1;
-                        frame_index += 1;
-                    } else {
-                        // Playback buffer is full. Re-queue remaining data in this packet
-                        // at the front of the queue so it can be processed next frame.
-                        if frame_index < frame_count {
-                            let samples_consumed = frame_index * 2;
-                            packet.data.drain(..samples_consumed);
-                            queue.push_front(packet);
-                        }
-                        break 'outer;
-                    }
-                }
-            }
-        }
-
-        total_frames
+        self.texture2d_helper
+            .bind()
+            .push_audio_to_playback(playback)
     }
 
     /// Returns true if there is audio data available in the buffer.
     #[func]
     pub fn has_audio_data(&self) -> bool {
-        self.with_app(|app| {
-            app.state
-                .as_ref()
-                .and_then(|s| s.audio.as_ref())
-                .and_then(|a| a.packet_queue.lock().ok())
-                .is_some_and(|q| !q.is_empty())
-        })
+        self.texture2d_helper.bind().has_audio_data()
     }
 
     /// Returns the number of audio packets currently buffered.
     #[func]
     pub fn get_audio_buffer_size(&self) -> i32 {
-        self.with_app(|app| {
-            app.state
-                .as_ref()
-                .and_then(|s| s.audio.as_ref())
-                .and_then(|a| a.packet_queue.lock().ok())
-                .map(|q| q.len() as i32)
-                .unwrap_or(0)
-        })
+        self.texture2d_helper.bind().get_audio_buffer_size()
     }
 
     /// Returns true if audio capture mode is enabled in project settings.
     #[func]
     pub fn is_audio_capture_enabled(&self) -> bool {
-        crate::settings::is_audio_capture_enabled()
+        self.texture2d_helper.bind().is_audio_capture_enabled()
     }
 
     #[func]

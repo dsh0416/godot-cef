@@ -439,6 +439,75 @@ impl CefTexture2D {
             .unwrap_or(false)
     }
 
+    fn audio_state(&self) -> Option<&crate::browser::AudioState> {
+        self.runtime.app().state.as_ref()?.audio.as_ref()
+    }
+
+    /// Creates an AudioStreamGenerator configured for this browser's audio.
+    #[func]
+    pub fn create_audio_stream(&self) -> Gd<godot::classes::AudioStreamGenerator> {
+        let sample_rate = self
+            .audio_state()
+            .and_then(|audio| audio.sample_rate.lock().ok().map(|rate| *rate))
+            .unwrap_or_else(|| godot::classes::AudioServer::singleton().get_mix_rate());
+        let mut stream = godot::classes::AudioStreamGenerator::new_gd();
+        stream.set_mix_rate(sample_rate);
+        stream.set_buffer_length(0.1);
+        stream
+    }
+
+    /// Pushes buffered audio to the given playback and returns the number of frames pushed.
+    /// Call every frame while the player is running.
+    #[func]
+    pub fn push_audio_to_playback(
+        &self,
+        mut playback: Gd<godot::classes::AudioStreamGeneratorPlayback>,
+    ) -> i32 {
+        let Some(mut queue) = self
+            .audio_state()
+            .and_then(|audio| audio.packet_queue.lock().ok())
+        else {
+            return 0;
+        };
+
+        let mut total_frames = 0;
+        while let Some(mut packet) = queue.pop_front() {
+            for index in 0..packet.data.len() / 2 {
+                if !playback.can_push_buffer(1) {
+                    // Resume this packet on the next frame when the player has space.
+                    packet.data.drain(..index * 2);
+                    queue.push_front(packet);
+                    return total_frames;
+                }
+
+                let sample = index * 2;
+                playback.push_frame(Vector2::new(packet.data[sample], packet.data[sample + 1]));
+                total_frames += 1;
+            }
+        }
+        total_frames
+    }
+
+    /// Returns true if captured audio is waiting for playback.
+    #[func]
+    pub fn has_audio_data(&self) -> bool {
+        self.get_audio_buffer_size() > 0
+    }
+
+    /// Returns the number of captured audio packets currently buffered.
+    #[func]
+    pub fn get_audio_buffer_size(&self) -> i32 {
+        self.audio_state()
+            .and_then(|audio| audio.packet_queue.lock().ok())
+            .map_or(0, |queue| queue.len() as i32)
+    }
+
+    /// Returns true if audio capture is enabled in project settings.
+    #[func]
+    pub fn is_audio_capture_enabled(&self) -> bool {
+        crate::settings::is_audio_capture_enabled()
+    }
+
     #[func]
     pub fn send_ipc_message(&mut self, message: GString) {
         let Some(state) = self.runtime.app().state.as_ref() else {
