@@ -326,6 +326,11 @@ impl Runner {
             "send_ipc_message",
             "send_ipc_binary_message",
             "send_ipc_data",
+            "is_audio_capture_enabled",
+            "create_audio_stream",
+            "push_audio_to_playback",
+            "has_audio_data",
+            "get_audio_buffer_size",
         ] {
             self.check(
                 browser.has_method(method),

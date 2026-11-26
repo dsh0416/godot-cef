@@ -7,7 +7,7 @@ Godot CEF 支持两种处理浏览器音频的模式：
 
 ## 启用音频捕获
 
-音频捕获通过**项目设置**配置，并应用于所有 `CefTexture` 实例。
+音频捕获通过**项目设置**配置，适用于由 `CefTexture` 节点或 `CefTexture2D` 资源显示的所有浏览器。
 
 1. 转到 **项目 → 项目设置**
 2. 导航到 **godot_cef → audio**
@@ -55,6 +55,8 @@ func _process(_delta):
 ```
 
 ## API 参考
+
+`CefTexture` 和 `CefTexture2D` 均提供以下方法。要播放某个网页的音频，请在显示该网页的节点或资源上调用这些方法。
 
 ### 方法
 
@@ -115,30 +117,35 @@ print("Buffered packets: ", buffer_size)
 
 ### 3D 空间音频
 
-您可以使用 `AudioStreamPlayer3D` 在 3D 空间中空间化浏览器音频：
+要播放网格上网页的声音，请将第 0 个表面的覆盖材质设为 `StandardMaterial3D`，并将该材质的反照率纹理设为 `CefTexture2D`。在网格下添加名为 `AudioStreamPlayer3D` 的同类型子节点，并将以下脚本挂载到 `MeshInstance3D` 上。脚本会从网格当前显示的浏览器读取音频。
 
 ```gdscript
-extends Node3D
+extends MeshInstance3D
 
-@onready var cef_texture: CefTexture = $Screen/CefTexture
 @onready var audio_player: AudioStreamPlayer3D = $AudioStreamPlayer3D
+var browser: CefTexture2D
 
-func _ready():
-    if cef_texture.is_audio_capture_enabled():
-        var audio_stream = cef_texture.create_audio_stream()
-        audio_player.stream = audio_stream
-        audio_player.play()
+func _ready() -> void:
+    var material := get_surface_override_material(0) as StandardMaterial3D
+    if material:
+        browser = material.albedo_texture as CefTexture2D
+    if browser == null or not browser.is_audio_capture_enabled():
+        set_process(false)
+        return
 
-func _process(_delta):
-    if cef_texture.is_audio_capture_enabled():
-        var playback = audio_player.get_stream_playback()
+    audio_player.stream = browser.create_audio_stream()
+    audio_player.play()
+
+func _process(_delta: float) -> void:
+    if audio_player.has_stream_playback():
+        var playback := audio_player.get_stream_playback() as AudioStreamGeneratorPlayback
         if playback:
-            cef_texture.push_audio_to_playback(playback)
+            browser.push_audio_to_playback(playback)
 ```
 
 ### 多个浏览器
 
-每个 `CefTexture` 都有自己的音频缓冲区。您可以将不同的浏览器路由到不同的音频播放器：
+每个浏览器都有自己的音频缓冲区。您可以将不同的浏览器路由到不同的音频播放器：
 
 ```gdscript
 @onready var browser1: CefTexture = $Browser1
@@ -197,6 +204,10 @@ audio_player.bus = "BrowserAudio"  # Custom bus with effects
 2. 确保每帧都调用 `push_audio_to_playback()`
 3. 检查是否已调用 `audio_player.play()`
 4. 验证 AudioStreamPlayer 音量不为零
+
+### 网格上的浏览器只播放第一个音效
+
+在 Windows 上，CEF 启动音频捕获时，短音效可能会直接从系统音频设备播出。要播放后续音效，请在每一帧对材质所使用的同一个 `CefTexture2D` 调用 `push_audio_to_playback()`。参见 [3D 空间音频示例](#3d-空间音频)和 [CEF 关于捕获启动时机的问题记录](https://github.com/chromiumembedded/cef/issues/3319)。
 
 ### 音频卡顿
 
