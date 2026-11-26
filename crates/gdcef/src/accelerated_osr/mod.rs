@@ -124,6 +124,11 @@ use windows::get_godot_gpu_device_ids as native_gpu_device_ids;
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 pub fn get_godot_gpu_device_ids() -> Option<(u32, u32)> {
+    // The macOS query reads Godot's logical device as an MTLDevice. Under Vulkan
+    // (MoltenVK) it is a VkDevice, and messaging it crashes CEF initialization.
+    if cfg!(target_os = "macos") && RenderBackend::detect() != RenderBackend::Metal {
+        return None;
+    }
     crate::render::on_render_thread_sync(native_gpu_device_ids)
         .ok()
         .flatten()
