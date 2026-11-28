@@ -12,7 +12,7 @@ pnpm = "latest"
 # too small. Use the download-cef 3.0.1 source until an exporter includes the fix.
 # https://github.com/tauri-apps/cef-rs/pull/512
 export-cef-dir = { version = "rev:bacdb41c17f30f4eca4a6f747586fbf7f280ab90", crate = "export-cef-dir" }
-"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.2"
 
 [tools.godot]
 version = "4.6-stable"
